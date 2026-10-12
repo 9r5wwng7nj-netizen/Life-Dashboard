@@ -12,6 +12,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 | localStorage | `ld.settings` | Settings object `S` (theme, units, macro targets, translation, keys…) | ✅ (keys excluded) |
 | localStorage | `ld.data.<key>` | Fallback copy of collections when IndexedDB is unavailable | — |
 | IndexedDB store `bibles` | `sync.base` | The last snapshot this device and Google Drive agreed on; sync compares against it | ❌ (rebuilt by the next sync) |
+| localStorage | `ld.settings` → `tour`, `newsSeen` | Whether this device has been offered the tour (`new`/`done`) and the id of the newest update note it has shown | ✅ (with settings) |
 | localStorage | `ld.sync` | Sync state for this device: on/off, the one-hour Google access token, last sync time, last error | ❌ |
 | localStorage | `ld.timer`, `ld.focus`, `ld.rd`, `ld.il`, `ld.votd`, `ld.bibles`, `ld.berean`, `ld.vault`, `ld.seeded`, `ld.libv`, `ld.srcv` | Small per-device state and one-time migration flags | ❌ |
 
@@ -54,7 +55,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
   - `time`, `repeat {freq, n}`, `remind` (minutes, `am` or `pm1`), `reminded`
   - `area`, `project`, `person`, `waiting`, `waitSince`, `nudged`, `someday`, `est`, `pushed`
   - `subtasks [{id,text,done}]`, `series`, `nextMade`
-- `projects`, `ttemplates` (checklist templates: `items [{off, text}]`)
+- `projects`, `ttemplates` (the user's own checklist templates: `items [{off, text}]`, optional `lib` when copied from the built-in `TEMPLATE_LIBRARY`)
 - `tkit`: `{ weeks: { 'YYYY-MM-DD (Mon)': { big3[], notes, planned } }, focus[], seeded }`
 - `tblocks`: a `{ 'YYYY-MM-DD': [{ id, start 'HH:MM', mins, taskId?, label? }] }` map
 

@@ -3,6 +3,11 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Start-here tour for new users (a card on the dashboard, and under Help & what’s new in the menu), and a what’s-new message with slides after each update, driven by the `RELEASES` list.
+- Menu items show a count for what needs attention today (tasks due or overdue; Scripture reading and memory verses; no food logged or weigh-in; no journal entry; no dinner planned; the weekly family review). Daily checks look at today only and stay quiet until that part of the app has been used, with a dot on the menu button on phones. Counts live in one `NAV_COUNTS` registry with an entry for every menu item.
+- Tasks → Templates includes a built-in library of 25 templates that any user can use or copy into their own list. New installs no longer start with three ministry templates; existing template lists are unchanged.
+- Tasks stay in the Inbox until they have both a due date and an area or project. Someday and waiting-on tasks are unaffected.
+- Fields use 16px text on touch screens so iPhones no longer zoom in when one is tapped.
 - Generic wording for sharing: family exports are titled “Family Rule of Life”, or “<Family name> Family Rule of Life” when the new optional Family name setting is filled in. Placeholders no longer mention a personal vault or sermon series, and two local churches were removed from the default sources list for new installs (existing lists are unchanged).
 - Scripture memory practice: type the first letter of each word through three steps (Read, Recall, Master), with 90% needed to pass. Reviews are graded by typing; saying a verse aloud and grading yourself is still available. Practice earns XP, levels, a daily streak and badges, shown on the Memory tab and the dashboard. Adds one collection, `memkit`; existing memory verses are unchanged.
 - Sync safeguards: every sync first reloads what is saved on the device, so a second tab left open cannot sync an out-of-date view over newer data; and a sync that would remove more than 10 records pauses until it is confirmed.

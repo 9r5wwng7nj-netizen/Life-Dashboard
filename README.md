@@ -41,6 +41,7 @@ GitHub Actions runs `npm test` on every push (`.github/workflows/test.yml`).
 index.html               the application UI and JavaScript
 assets/app.css           compiled, local Tailwind styles
 assets/icons/            home-screen icons
+assets/whatsnew/         pictures for the what’s-new slides
 manifest.webmanifest     install details for the hosted copy
 sw.js                    offline app shell for the hosted copy
 src/app.css              Tailwind source used when styles change

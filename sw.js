@@ -16,7 +16,7 @@ const SCOPE = new URL('./', self.location).href, INDEX = SCOPE + 'index.html';
 // The app itself changes with every update, so these are fetched fresh when online.
 const FRESH = /\/(assets\/app\.css|manifest\.webmanifest)$/;
 // Pinned, versioned files never change under the same name.
-const PINNED = /\/(vendor|assets\/icons)\//;
+const PINNED = /\/(vendor|assets\/(icons|whatsnew))\//;
 const NETWORK_WAIT_MS = 3000;
 
 self.addEventListener('install', e => {
