@@ -2,6 +2,11 @@
 
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
+## Unreleased
+- Backup format v2 includes personal photo files as well as their metadata. API keys and re-downloadable reference libraries remain excluded.
+- Legacy v1 backups still import safely and preserve photos already stored in the destination browser.
+- “Erase all data” now clears records, photos, downloaded libraries, settings and API keys from the browser.
+
 ## 1.0.0 — moved to Git (2026-10-12)
 - The repo starts from the working `life-dashboard.html`, saved byte-for-byte as `index.html`. The app itself is unchanged.
 - Added agent briefs (`AGENTS.md`, `CLAUDE.md`), docs, a static check (`scripts/check.mjs`), Playwright smoke tests and CI.

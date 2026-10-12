@@ -7,7 +7,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 | Place | Key(s) | Contents | In JSON backup? |
 |---|---|---|---|
 | IndexedDB `life-dashboard` (v3), store `kv` | one entry per collection key below | All records | ✅ (`Settings & Sync → Export all data`) |
-| IndexedDB store `photos` | photo id → Blob | Progress photos (plain uid), journal `jp_…`, family memories & date nights `fm_…`, recipes `rp_…` | ❌ |
+| IndexedDB store `photos` | photo id → Blob | Progress photos (plain uid), journal `jp_…`, family memories & date nights `fm_…`, recipes `rp_…` | ✅ (backup v2+) |
 | IndexedDB store `bibles` | translation ids; `vault.docs`, `vault.handle`, `berean.tables`, `berean.topics`, `berean.lexicon` | Downloaded Bibles, Obsidian-vault index & folder handle, Berean tables, Strong's lexicon | ❌ (re-downloadable reference data) |
 | localStorage | `ld.settings` | Settings object `S` (theme, units, macro targets, translation, keys…) | ✅ (keys excluded) |
 | localStorage | `ld.data.<key>` | Fallback copy of collections when IndexedDB is unavailable | — |
@@ -23,7 +23,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 - `foods` (saved foods; `basis` is `100g` or `serving`, `base` holds the nutrients)
 - `meals` (saved meals)
 - `nutrition`: a `{ 'YYYY-MM-DD': { weight, entries[] } }` map
-- `nutPlan` (adaptive plan and check-ins), `measurements`, `photoMeta` (progress-photo index; left out of backups along with the photos), `mfImport`
+- `nutPlan` (adaptive plan and check-ins), `measurements`, `photoMeta` (progress-photo index), `mfImport`
 
 **Scripture**: `highlights`, `readingPlans`, `memory` (verses), `prayers`, `scripture` (study notes), `passageCache`, `ministries` (sources list)
 
