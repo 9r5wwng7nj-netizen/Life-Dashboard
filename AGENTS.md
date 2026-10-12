@@ -84,7 +84,8 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
 
 - **Phone + laptop** (resumed by Seth on 2026-10-12; his phone is an iPhone): host at an https URL as an installable offline PWA, and sync through a private Google Drive `appDataFolder`. Sync does not need to be real time.
   - Built: `manifest.webmanifest`, `assets/icons/`, `sw.js` (offline app shell) and safe-area padding. `index.html` registers the worker on https only; `?pwa` on localhost is for `tests/pwa.spec.js`. When a vendored file is renamed or added, update the `SHELL` list in `sw.js`.
-  - Not done yet: choosing and enabling the host (GitHub Pages is the leading option and needs Seth's go-ahead to make the repo public), then Drive sync using his `connection.church` Google account.
+  - Hosted on GitHub Pages at https://9r5wwng7nj-netizen.github.io/Life-Dashboard/ (repo made public by Seth on 2026-10-12). Pages publishes the `main` branch root after every push, so everything on `main` is public and live within a few minutes.
+  - Not done yet: Drive sync using his `connection.church` Google account.
   - On iPhone the installed home-screen app has its own storage, separate from Safari. Import the backup inside the installed app.
   - Keep `id` and `updated` on records to make merging possible.
   - Keep reference data (Bibles, lexicons) separate from personal data.

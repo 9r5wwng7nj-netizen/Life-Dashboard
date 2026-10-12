@@ -3,7 +3,8 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
-- Mobile phase started (Seth, 2026-10-12): the app has a web manifest, home-screen icons, safe-area padding and a service worker (`sw.js`) so a hosted https copy installs on a phone and reopens offline. The `file://` copy never registers the worker and behaves as before. No stored data changed. Hosting itself and sync are not set up yet.
+- Mobile phase started (Seth, 2026-10-12): the app has a web manifest, home-screen icons, safe-area padding and a service worker (`sw.js`) so a hosted https copy installs on a phone and reopens offline. The `file://` copy never registers the worker and behaves as before. No stored data changed.
+- The repository is public and GitHub Pages hosts the app at https://9r5wwng7nj-netizen.github.io/Life-Dashboard/. Sync is not set up yet.
 - Journal Focus is a named keyboard-contained dialog with an inert background, visible focus, Escape cleanup and return focus. Journal/family detail controls have meaningful names; task-board titles are keyboard-editable and completed tasks retain readable contrast.
 - Food lookups and Bible requests have bounded response/body waits and offline/unreachable/invalid-response recovery messages. Public-service checks and remaining manual steps are documented without claiming service availability or screen-reader certification.
 - Backups containing existing MacroFactor name|unit food identifiers can be restored; unsafe identifiers are still rejected and saved IDs are not rewritten.
