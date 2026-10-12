@@ -4,7 +4,7 @@ This file is the shared brief for **Claude Code** (via `CLAUDE.md`) and **OpenAI
 
 ## What this is
 
-A personal, offline-first dashboard for one person (Seth): Workouts, Nutrition, Scripture, Journal, Media Library, Marriage & Family, Recipes & Meals and Tasks. The application UI and roughly 6,000 lines of vanilla JavaScript remain in `index.html`; pinned runtime libraries and compiled Tailwind CSS live in `vendor/` and `assets/`. There is no framework or application server. All data lives in the user's browser (IndexedDB). The app is opened directly from disk (`file://`) in Chrome.
+A personal, offline-first dashboard built for one person (Seth) and shareable with others, who each get their own private copy at the hosted address: Workouts, Nutrition, Scripture, Journal, Media Library, Marriage & Family, Recipes & Meals and Tasks. The application UI and roughly 6,000 lines of vanilla JavaScript remain in `index.html`; pinned runtime libraries and compiled Tailwind CSS live in `vendor/` and `assets/`. There is no framework or application server. All data lives in the user's browser (IndexedDB). The app is opened directly from disk (`file://`) in Chrome.
 
 ## Golden rules
 
@@ -16,7 +16,8 @@ A personal, offline-first dashboard for one person (Seth): Workouts, Nutrition, 
 2. **Preserve the design.** Use the existing Tailwind utility patterns and components (`card`, `btn`, `btn-primary`, `chip`, `chip-on`, `stat`, `label`, `input`, `muted`). Every new UI needs `dark:` variants and must work at 390px wide.
 3. **Keep application code in `index.html`** unless the user explicitly asks for a refactor. Supporting build input, compiled CSS and vendored third-party libraries stay in their existing folders.
 4. **Run the checks before you finish:** `npm test`, or at least `npm run check`.
-5. **No secrets in the repo.** API keys (ESV, USDA, Anthropic) are entered in Settings, live in localStorage and are excluded from backups. Never hard-code them. Never commit backup JSON files; `.gitignore` already blocks them.
+5. **Keep the app generic.** Other people may use the hosted copy. No personal names, churches, sermon series or family details in titles, headings, placeholders, exports or seed data. Anything personal comes from Settings (for example `S.familyName`) or the user's own records.
+6. **No secrets in the repo.** API keys (ESV, USDA, Anthropic) are entered in Settings, live in localStorage and are excluded from backups. Never hard-code them. Never commit backup JSON files; `.gitignore` already blocks them.
 
 ## Run, check, test
 
