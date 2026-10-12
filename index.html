@@ -470,27 +470,44 @@ const mdFilename = (date, title) => `${date || ymd()} ${String(title || 'Note').
 const VIEWS = [
   { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard', render: () => renderDashboard() },
   { section: 'Health' },
-  { id: 'fitness', label: 'Workouts', icon: 'dumbbell', render: () => renderFitness(), badge: () => Store.get('activeWorkout') ? '<span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>' : '' },
+  { id: 'fitness', label: 'Workouts', icon: 'dumbbell', render: () => renderFitness() },
   { id: 'nutrition', label: 'Nutrition', icon: 'apple', render: () => renderNutrition() },
   { section: 'Faith' },
-  { id: 'scripture', label: 'Scripture', icon: 'book-open', render: () => renderScripture(), badge: () => { const r = readingDue() ? 1 : 0, v = memDue().length; return navCount(r + v, [r ? 'reading to do' : '', v ? `verse${v === 1 ? '' : 's'} to review` : ''].filter(Boolean).join(' and '), false); } },
+  { id: 'scripture', label: 'Scripture', icon: 'book-open', render: () => renderScripture() },
   { id: 'journal', label: 'Journal', icon: 'notebook-pen', render: () => renderJournal() },
   { id: 'media', label: 'Media Library', icon: 'podcast', render: () => renderMedia() },
   { section: 'Home' },
   { id: 'family', label: 'Marriage & Family', icon: 'heart', render: () => renderFamily() },
   { id: 'recipes', label: 'Recipes & Meals', icon: 'chef-hat', render: () => renderRecipes() },
-  { id: 'tasks', label: 'Tasks', icon: 'list-checks', render: () => renderTasks(), badge: () => { const t = ymd(), due = Store.get('tasks').filter(x => x.status !== 'done' && !x.someday && x.due && x.due <= t), late = due.some(x => x.due < t); return navCount(due.length, `task${due.length === 1 ? '' : 's'} due${late ? ', some overdue' : ''}`, late); } }
+  { id: 'tasks', label: 'Tasks', icon: 'list-checks', render: () => renderTasks() }
 ];
 let lastRendered = null, tickIv = null;
-// A count beside a menu item for what needs attention there today; red when something is overdue.
-const navCount = (n, what, late) => n ? `<span class="chip ${late ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200' : 'bg-brand-100 text-brand-800 dark:bg-brand-900/60 dark:text-brand-200'}" title="${n} ${what}">${n}<span class="sr-only"> ${what}</span></span>` : '';
+// What needs attention in each section today. Every menu item has an entry, so any of them can show a
+// count: return { n, what } (add late: true for red, or dot: true for a plain dot), or null for nothing.
+const NAV_COUNTS = {
+  dashboard: () => null,
+  fitness: () => Store.get('activeWorkout') ? { n: 1, what: 'workout in progress', dot: true } : null,
+  nutrition: () => null,
+  scripture: () => { const r = readingDue() ? 1 : 0, v = memDue().length; return { n: r + v, what: [r ? 'reading to do' : '', v ? `verse${v === 1 ? '' : 's'} to review` : ''].filter(Boolean).join(' and ') }; },
+  journal: () => null,
+  media: () => null,
+  // Only for people who use the weekly review; otherwise it would nag every week.
+  family: () => Store.get('freviews').length && !reviewThisWeek() ? { n: 1, what: 'weekly family review to do' } : null,
+  recipes: () => null,
+  tasks: () => { const t = ymd(), due = Store.get('tasks').filter(x => x.status !== 'done' && !x.someday && x.due && x.due <= t), late = due.some(x => x.due < t); return { n: due.length, what: `task${due.length === 1 ? '' : 's'} due${late ? ', some overdue' : ''}`, late }; }
+};
+function navCount(id) {
+  const c = NAV_COUNTS[id] && NAV_COUNTS[id](); if (!c || !c.n) return '';
+  if (c.dot) return `<span class="nav-count w-2 h-2 rounded-full bg-emerald-500 inline-block" title="${c.what}"></span><span class="sr-only"> ${c.what}</span>`;
+  return `<span class="nav-count chip ${c.late ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200' : 'bg-brand-100 text-brand-800 dark:bg-brand-900/60 dark:text-brand-200'}" title="${c.n} ${c.what}">${c.n}<span class="sr-only"> ${c.what}</span></span>`;
+}
 function renderNav() {
   $('#nav').innerHTML = VIEWS.map(v => v.section
     ? `<div class="nav-label px-3 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">${v.section}</div>`
-    : `<button class="nav-item w-full ${S.view === v.id ? 'nav-active' : ''}" aria-current="${S.view === v.id ? 'page' : 'false'}" data-action="go" data-view="${v.id}" title="${v.label}">${icon(v.icon, 'w-5 h-5 shrink-0')}<span class="nav-label truncate">${v.label}</span>${v.badge ? `<span class="nav-label ml-auto">${v.badge()}</span>` : ''}</button>`).join('');
+    : `<button class="nav-item w-full ${S.view === v.id ? 'nav-active' : ''}" aria-current="${S.view === v.id ? 'page' : 'false'}" data-action="go" data-view="${v.id}" title="${v.label}">${icon(v.icon, 'w-5 h-5 shrink-0')}<span class="nav-label truncate">${v.label}</span><span class="nav-label ml-auto">${navCount(v.id)}</span></button>`).join('');
   // On a phone the menu is closed, so the menu button carries a dot when anything inside has a count.
   $('#help-dot').classList.toggle('hidden', !helpWaiting());
-  const waiting = !!$('#nav .chip') || helpWaiting(), menu = $('[data-action="openSidebar"]');
+  const waiting = !!$('#nav .nav-count') || helpWaiting(), menu = $('[data-action="openSidebar"]');
   $('#menu-dot').classList.toggle('hidden', !waiting); menu.setAttribute('aria-label', waiting ? 'Open menu (items need attention)' : 'Open menu');
 }
 let _rendering = false;
@@ -6084,12 +6101,54 @@ const doneOn = t => t.completedAt ? ymd(new Date(t.completedAt)) : null;
 function doneStreak() { const days = new Set(TK().map(doneOn).filter(Boolean)); let d = ymd(), n = 0; if (!days.has(d)) d = addDays(d, -1); while (days.has(d)) { n++; d = addDays(d, -1); } return n; }
 
 // checklist templates (starters — edit to fit)
-const TEMPLATE_SEEDS = () => [
-  { id: uid(), name: 'College Night prep', area: 'ministry', items: [[-6, 'Confirm speaker and worship team'], [-5, 'Plan run of show'], [-4, 'Slides and announcements'], [-3, 'Promote: socials + group text'], [-2, 'Confirm volunteers and food'], [-1, 'Print materials, set up check-in'], [0, 'Arrive early for setup'], [1, 'Follow up with first-time guests'], [1, 'Team debrief']] },
-  { id: uid(), name: 'Sermon prep', area: 'ministry', items: [[-6, 'Read the passage in several translations'], [-5, 'Word study and context (Study tab)'], [-4, 'Big idea and outline'], [-3, 'Illustrations and application'], [-2, 'Write manuscript / notes'], [-1, 'Practice; send slides to tech'], [0, 'Preach'], [1, 'Review and capture feedback']] },
-  { id: uid(), name: 'Connect Group week', area: 'ministry', items: [[-5, 'Pick passage / discussion guide'], [-3, 'Send reminder to the group'], [-1, 'Prep questions and pray for each person'], [0, 'Lead group'], [1, 'Follow up on prayer requests']] }
-].map(t => ({ ...t, items: t.items.map(([off, text]) => ({ off, text })), created: new Date().toISOString() }));
-function ensureTaskSeeds() { const k = tkit(); if (!k.seeded) { k.seeded = 1; if (!Store.get('ttemplates').length) Store.set('ttemplates', TEMPLATE_SEEDS()); Store.save('tkit'); } }
+// Ready-made templates every user can add to their own list and then change. Days count from the
+// event date (day 0): negative is before, positive is after. [key, name, area, summary, [[day, task], …]]
+const TEMPLATE_LIBRARY = [
+  ['dinner', 'Host a dinner', 'home', 'Have people over without the last-minute scramble.', [[-7, 'Invite guests and ask about allergies'], [-5, 'Plan the menu'], [-3, 'Write the grocery list and shop'], [-1, 'Tidy the house and prep what you can ahead'], [0, 'Set the table, cook and enjoy'], [1, 'Send a thank-you for coming']]],
+  ['birthday', 'Child’s birthday party', 'home', 'From guest list to thank-you notes.', [[-28, 'Pick the date, place and guest list'], [-21, 'Send invitations'], [-14, 'Plan food, cake and activities'], [-7, 'Buy decorations, supplies and the gift'], [-3, 'Confirm numbers and order the cake'], [-1, 'Decorate and prepare party bags'], [0, 'Party day'], [2, 'Send thank-you notes']]],
+  ['trip', 'Family trip', 'home', 'Day 0 is the day you leave.', [[-42, 'Set the dates and the budget'], [-35, 'Book travel and a place to stay'], [-21, 'Plan the days: must-dos and rest days'], [-14, 'Arrange pet care, mail and someone to check the house'], [-7, 'Check tickets, documents and the car'], [-3, 'Do laundry and start packing'], [-1, 'Charge devices, download maps, pack snacks'], [0, 'Leave']]],
+  ['holiday', 'Holiday hosting', 'home', 'A big family meal with guests staying over.', [[-21, 'Confirm who is coming and where they will sleep'], [-14, 'Plan the menu and ask guests to bring a dish'], [-10, 'Order the main dish and anything hard to find'], [-7, 'Deep clean the guest spaces'], [-3, 'Do the big grocery shop'], [-2, 'Bake and prepare make-ahead dishes'], [-1, 'Set the table and thaw anything frozen'], [0, 'Cook, host and enjoy'], [1, 'Sort leftovers and send a thank-you text']]],
+  ['moving', 'Moving house', 'home', 'Six weeks out to settled in.', [[-42, 'Get quotes and book movers or a truck'], [-35, 'Declutter room by room'], [-28, 'Collect boxes and pack what you rarely use'], [-21, 'Give notice and schedule utilities at the new place'], [-14, 'Change your address: mail, bank, insurance'], [-7, 'Pack most rooms and label boxes by room'], [-2, 'Pack a first-night box and defrost the freezer'], [-1, 'Confirm the movers and clean'], [0, 'Moving day'], [3, 'Unpack the kitchen and bedrooms first'], [7, 'Meet a neighbor and update your license']]],
+  ['clean', 'Spring clean in a week', 'home', 'Day 0 is the day you start. One area a day.', [[0, 'Declutter: one bag to donate, one to toss'], [1, 'Kitchen: fridge, oven and cupboards'], [2, 'Bathrooms, top to bottom'], [3, 'Bedrooms: wash bedding and flip mattresses'], [4, 'Living areas: dust, windows, under the furniture'], [5, 'Garage, closets or the room you avoid'], [6, 'Drop off donations and enjoy the house']]],
+  ['school', 'Back to school', 'home', 'Day 0 is the first day of school.', [[-21, 'Check school dates, forms and supply lists'], [-14, 'Book checkups and haircuts'], [-10, 'Shop for supplies, clothes and shoes'], [-7, 'Shift bedtimes and mornings toward the school schedule'], [-3, 'Plan lunches and the first week of dinners'], [-1, 'Pack bags, lay out clothes, pray together'], [0, 'First day: take the photo'], [3, 'Ask how the week went and adjust routines']]],
+  ['baby', 'Prepare for a new baby', 'home', 'Day 0 is the due date.', [[-70, 'Settle your birth plan and tour the hospital'], [-56, 'Set up the nursery and the big gear'], [-42, 'Install the car seat'], [-35, 'Stock the freezer with meals'], [-28, 'Pack the hospital bag'], [-21, 'Arrange help for the first two weeks'], [-14, 'Wash baby clothes and bedding'], [-7, 'Finish handing off work'], [0, 'Due date'], [14, 'Send announcements and thank-yous']]],
+  ['date', 'Anniversary or special date', 'home', 'A little planning so the day feels thought about.', [[-21, 'Pick the date and ask what would mean the most'], [-14, 'Book the restaurant, tickets or a sitter'], [-7, 'Buy or make a gift and write a note'], [-1, 'Confirm bookings'], [0, 'Enjoy it, phones away'], [1, 'Write down a favorite moment']]],
+  ['appointment', 'Doctor or dentist visit', 'personal', 'Walk in prepared and follow through after.', [[-7, 'Confirm the appointment and insurance details'], [-3, 'Write down symptoms and questions'], [-1, 'Gather your medication list and paperwork'], [0, 'Go to the appointment'], [1, 'Fill prescriptions and book any follow-up']]],
+  ['interview', 'Job interview', 'personal', 'A week of preparation.', [[-7, 'Research the company and the role'], [-5, 'Prepare stories for common questions'], [-3, 'Practice out loud with someone'], [-2, 'Prepare questions to ask them'], [-1, 'Lay out clothes, print resumes, plan the route'], [0, 'Interview'], [1, 'Send a thank-you note']]],
+  ['taxes', 'File taxes', 'personal', 'Day 0 is the filing deadline.', [[-30, 'Gather income forms and statements'], [-21, 'Collect receipts for deductions and giving'], [-14, 'Choose software or book a preparer'], [-7, 'Enter everything and review it'], [-2, 'File the return'], [0, 'Confirm the return was accepted'], [1, 'Save a copy and note what to do differently next year']]],
+  ['money', 'Monthly money review', 'personal', 'Day 0 is the day you sit down with the numbers.', [[-1, 'Open this month’s statements'], [0, 'Compare spending with the budget'], [0, 'Pay or schedule bills and giving'], [0, 'Set next month’s budget'], [1, 'Move money to savings and debt']]],
+  ['race', 'Train for a 5K', 'personal', 'Eight weeks to race day.', [[-56, 'Pick a race and register'], [-55, 'Week 1: three easy runs'], [-42, 'Add one longer run each week'], [-28, 'Halfway: check progress and adjust the plan'], [-14, 'Practice once at race pace'], [-7, 'Ease off with shorter runs'], [-1, 'Rest, drink water, lay out your gear'], [0, 'Race day'], [1, 'Recover and pick the next goal']]],
+  ['year', 'Plan the year ahead', 'personal', 'Look back, set goals, and schedule the check-ins.', [[-7, 'Look back: wins, losses and lessons from last year'], [-5, 'Pray and write down what matters most this year'], [-3, 'Set three to five goals, each with a first step'], [-1, 'Put the key dates on the calendar'], [0, 'Share the plan with someone who will ask about it'], [30, 'One-month check-in'], [90, 'Quarterly review']]],
+  ['sermon', 'Sermon prep', 'ministry', 'A week from first reading to the pulpit.', [[-6, 'Read the passage in several translations'], [-5, 'Word study and context (Study tab)'], [-4, 'Big idea and outline'], [-3, 'Illustrations and application'], [-2, 'Write the manuscript or notes'], [-1, 'Practice; send slides to tech'], [0, 'Preach'], [1, 'Review and capture feedback']]],
+  ['group', 'Small group week', 'ministry', 'Lead well and follow up.', [[-5, 'Pick the passage or discussion guide'], [-3, 'Send a reminder to the group'], [-1, 'Prepare questions and pray for each person'], [0, 'Lead the group'], [1, 'Follow up on prayer requests']]],
+  ['students', 'Student or youth night', 'ministry', 'An event night, from booking to debrief.', [[-6, 'Confirm the speaker and worship team'], [-5, 'Plan the run of show'], [-4, 'Slides and announcements'], [-3, 'Promote: socials and group text'], [-2, 'Confirm volunteers and food'], [-1, 'Print materials and set up check-in'], [0, 'Arrive early for setup'], [1, 'Follow up with first-time guests'], [1, 'Team debrief']]],
+  ['retreat', 'Retreat or camp', 'ministry', 'Day 0 is the day you leave. Starts three months out.', [[-90, 'Set dates and budget, and book the venue'], [-60, 'Open registration and recruit leaders'], [-45, 'Plan the schedule and theme'], [-30, 'Arrange transport, food and permission forms'], [-14, 'Close registration; assign rooms and groups'], [-7, 'Send the packing list and final details'], [-2, 'Shop for and pack supplies'], [0, 'Leave for the retreat'], [5, 'Thank the leaders and gather stories'], [10, 'Debrief and file notes for next year']]],
+  ['baptism', 'Baptism Sunday', 'ministry', 'Care for each person, not only the service.', [[-28, 'Announce it and invite people to sign up'], [-21, 'Meet with each person to hear their story'], [-14, 'Help them write or record their testimony'], [-7, 'Confirm the order of service, towels, shirts and a photographer'], [-2, 'Fill and heat the baptistry; test the sound'], [0, 'Baptism Sunday'], [1, 'Send photos and a note to each person'], [14, 'Check in on next steps']]],
+  ['volunteer', 'Welcome a new volunteer', 'ministry', 'Day 0 is their first day serving.', [[-7, 'Send a welcome message and what to expect'], [-3, 'Complete forms and any background check'], [-1, 'Assign a buddy and share the schedule'], [0, 'First day: introduce them and stay close'], [1, 'Thank them and ask how it went'], [14, 'Two-week check-in'], [30, 'One-month check-in: fit and next step']]],
+  ['mission', 'Mission trip', 'ministry', 'Day 0 is departure. Starts four months out.', [[-120, 'Set the dates, team and budget'], [-90, 'Check passports and book flights'], [-75, 'Send support letters'], [-60, 'Team meeting 1: purpose and prayer'], [-45, 'Sort vaccinations and travel insurance'], [-30, 'Team meeting 2: culture and roles'], [-14, 'Send the packing list; collect final payments'], [-3, 'Commissioning and prayer'], [0, 'Depart'], [21, 'Debrief with the team'], [28, 'Share stories with supporters']]],
+  ['care', 'Care for someone in a hard season', 'ministry', 'Day 0 is today. Keeps you showing up after others move on.', [[0, 'Call or visit, and listen'], [1, 'Arrange a meal or practical help'], [3, 'Send a handwritten note'], [7, 'Check in after the first week'], [14, 'Ask what would help now'], [30, 'One-month check-in'], [90, 'Remember them when others have moved on']]],
+  ['retreatday', 'Personal retreat day', 'faith', 'A day set apart to be with God.', [[-14, 'Block the day and tell those who need to know'], [-7, 'Choose a quiet place'], [-3, 'Pick a passage and a few questions to bring'], [-1, 'Pack a Bible, journal, food and water'], [0, 'Retreat day: unhurried time with God'], [1, 'Write down what you heard and one next step'], [7, 'Reread your notes']]],
+  ['fast', 'Day of fasting and prayer', 'faith', 'Prepare, fast, and reflect.', [[-3, 'Decide the kind of fast and what you are praying for'], [-2, 'Tell someone and ask them to pray with you'], [-1, 'Eat lightly; plan times for Scripture and prayer'], [0, 'Fast and pray'], [1, 'Break the fast gently and journal']]]
+].map(([key, name, area, summary, items]) => ({ key, name, area, summary, items: items.map(([off, text]) => ({ off, text })) }));
+const libFind = key => TEMPLATE_LIBRARY.find(x => x.key === key);
+const libOwned = key => Store.get('ttemplates').find(x => x.lib === key || x.name === libFind(key)?.name);
+// Copies a library template into the user's own list (once), where it can be edited like any other.
+function libAdd(key) {
+  const L = libFind(key); if (!L) return null;
+  let tp = libOwned(key);
+  if (!tp) { tp = { id: uid(), lib: key, name: L.name, area: L.area, items: structuredClone(L.items), created: new Date().toISOString() }; Store.get('ttemplates').push(tp); Store.save('ttemplates'); }
+  return tp;
+}
+function tplLibrary() {
+  const span = L => { const first = L.items[0].off, last = L.items[L.items.length - 1].off, d = n => n >= 14 && n % 7 === 0 ? `${n / 7} weeks` : `${n} day${n === 1 ? '' : 's'}`; return first < 0 ? `starts ${d(-first)} before` : last > 0 ? `runs for ${d(last)}` : 'one day'; };
+  const off = n => n === 0 ? 'day of' : n < 0 ? `${-n}d before` : `${n}d after`;
+  const card = L => { const mine = libOwned(L.key); return `<div class="card flex flex-col"><div class="font-semibold">${esc(L.name)}</div><p class="text-sm muted mt-0.5">${esc(L.summary)}</p><p class="text-xs muted mt-1">${L.items.length} tasks · ${span(L)}</p>
+      <details class="mt-2 flex-1"><summary class="cursor-pointer text-xs font-medium text-brand-700 dark:text-brand-300">See the tasks</summary><ul class="text-xs mt-2 space-y-1">${L.items.map(i => `<li class="flex gap-2"><span class="muted w-20 shrink-0">${off(i.off)}</span><span>${esc(i.text)}</span></li>`).join('')}</ul></details>
+      <div class="flex items-center gap-1.5 mt-3"><button class="btn btn-sm btn-primary flex-1" data-action="libUse" data-key="${L.key}" aria-label="Use ${esc(L.name)}">${icon('play', 'w-3.5 h-3.5')} Use</button>${mine ? `<span class="chip">${icon('check', 'w-3 h-3')} In your templates</span>` : `<button class="btn btn-sm" data-action="libAdd" data-key="${L.key}" aria-label="Add ${esc(L.name)} to my templates">${icon('plus', 'w-3.5 h-3.5')} Add to mine</button>`}</div></div>`; };
+  return `<div class="mt-8"><h3 class="font-semibold">Template library</h3><p class="text-sm muted">Ready-made checklists for common events. Use one as it is, or add it to your templates and change it to suit you.</p>
+    ${AREAS.filter(([a]) => !ui.taskArea || a === ui.taskArea).map(([a, label]) => { const list = TEMPLATE_LIBRARY.filter(L => L.area === a); return list.length ? `<div class="label mt-5 mb-2 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full ${AREA_CLS[a]}"></span>${label}</div><div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${list.map(card).join('')}</div>` : ''; }).join('')}</div>`;
+}
+
 
 // ---------- Task views ----------
 const sortT = (a, b) => priRank(a) - priRank(b) || (a.due || '9999').localeCompare(b.due || '9999') || (a.time || '99').localeCompare(b.time || '99') || (a.created || '').localeCompare(b.created || '');
@@ -6105,7 +6164,6 @@ function taskRow(t, o = {}) {
     <div class="flex items-center gap-0.5 shrink-0">${o.today ? `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="today">Today</button>` : ''}${tOpen(t) ? `<button class="btn btn-ghost btn-sm px-1.5 ${isB3 ? 'text-amber-500' : 'opacity-50 hover:opacity-100'}" data-action="big3Toggle" data-id="${t.id}" title="${isB3 ? 'Remove from' : 'Add to'} this week’s Big 3" aria-label="Big 3">${icon('star', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="blkNew" data-task="${t.id}" title="Block time" aria-label="Block time">${icon('calendar-clock', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="ftStartA" data-id="${t.id}" title="Focus 25 min" aria-label="Focus">${icon('target', 'w-3.5 h-3.5')}</button>` : ''}</div></div>`;
 }
 function renderTasks() {
-  ensureTaskSeeds();
   const nInbox = TK().filter(isInbox).length, notif = 'Notification' in window && Notification.permission !== 'granted';
   const view = { today: tasksToday, inbox: tasksInbox, upcoming: tasksUpcoming, all: tasksAll, projects: tasksProjects, people: tasksPeople, someday: tasksSomeday, plan: tasksPlan, templates: tasksTemplates, stats: tasksStats }[ui.taskTab] || tasksToday;
   return `<form class="card mb-4" data-submit="taskAdd"><div class="flex gap-2"><input id="nl-in" name="title" class="input flex-1" placeholder="Add a task — try “Coffee with Jake fri at 9 ~Jake #ministry”" autocomplete="off" required data-input="nlPrev"><button class="btn btn-primary">${icon('plus')} Add</button></div>
@@ -6219,7 +6277,7 @@ function tasksTemplates() {
   const tps = Store.get('ttemplates').filter(x => !ui.taskArea || x.area === ui.taskArea), off = n => n === 0 ? 'day of' : n < 0 ? `${-n}d before` : `${n}d after`;
   return `<div class="flex items-center gap-2 mb-4"><p class="text-sm muted flex-1">Reusable checklists. Pick the event date and every task lands on the right day — as its own project if you like.</p><button class="btn btn-primary" data-action="tplNew">${icon('plus')} New template</button></div>
     ${tps.length ? `<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${tps.map(tp => `<div class="card flex flex-col"><div class="flex items-start gap-2"><div class="font-semibold flex-1">${esc(tp.name)}</div>${tp.area ? `<span class="chip text-[10px]"><span class="w-2 h-2 rounded-full ${AREA_CLS[tp.area]}"></span> ${areaLabel(tp.area)}</span>` : ''}</div><ul class="text-xs mt-2 space-y-1 flex-1">${tp.items.slice(0, 5).map(i => `<li class="flex gap-2"><span class="muted w-20 shrink-0">${off(+i.off || 0)}</span><span>${esc(i.text)}</span></li>`).join('')}${tp.items.length > 5 ? `<li class="muted">+${tp.items.length - 5} more</li>` : ''}</ul>
-      <div class="flex gap-1.5 mt-3"><button class="btn btn-sm btn-primary flex-1" data-action="tplUse" data-id="${tp.id}">${icon('play', 'w-3.5 h-3.5')} Use</button><button class="btn btn-sm" data-action="tplEdit" data-id="${tp.id}" aria-label="Edit">${icon('pencil', 'w-3.5 h-3.5')}</button><button class="btn btn-sm btn-ghost" data-action="tplDel" data-id="${tp.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div></div>`).join('')}</div>` : emptyState('layout-template', 'No templates', 'Create one for anything you do on repeat.', '')}`;
+      <div class="flex gap-1.5 mt-3"><button class="btn btn-sm btn-primary flex-1" data-action="tplUse" data-id="${tp.id}">${icon('play', 'w-3.5 h-3.5')} Use</button><button class="btn btn-sm" data-action="tplEdit" data-id="${tp.id}" aria-label="Edit">${icon('pencil', 'w-3.5 h-3.5')}</button><button class="btn btn-sm btn-ghost" data-action="tplDel" data-id="${tp.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div></div>`).join('')}</div>` : emptyState('layout-template', 'No templates of your own yet', 'Create one for anything you do on repeat, or start from the library below.', '')}${tplLibrary()}`;
 }
 function tplModal(tp) {
   ui.tplDraft = tp; const lines = (tp.items || []).map(i => `${(+i.off || 0) > 0 ? '+' : ''}${+i.off || 0} | ${i.text}`).join('\n');
@@ -6364,6 +6422,8 @@ const A_TASKS = {
   tplSave: f => { const v = fd(f), tp = ui.tplDraft, arr = Store.get('ttemplates'); if (!tp) return Modal.close(); tp.name = v.name.trim(); tp.area = v.area || null; tp.items = String(v.items || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => { const m = l.match(/^([+-]?\d+)\s*\|\s*(.+)$/); return m ? { off: +m[1], text: m[2].trim() } : { off: 0, text: l.replace(/^[-*•]\s*/, '') }; }); if (!arr.includes(tp)) arr.push(tp); Store.save('ttemplates'); Modal.close(); render(); },
   tplDel: el => { if (!confirm('Delete this template?')) return; Store.set('ttemplates', Store.get('ttemplates').filter(x => x.id !== el.dataset.id)); render(); },
   tplUse: el => { const tp = Store.get('ttemplates').find(x => x.id === el.dataset.id); if (tp) tplUseModal(tp); },
+  libAdd: el => { if (libAdd(el.dataset.key)) { toast('Added to your templates'); render(); } },
+  libUse: el => { const tp = libAdd(el.dataset.key); if (tp) { render(); tplUseModal(tp); } },
   tplApply: f => {
     const v = fd(f), tp = Store.get('ttemplates').find(x => x.id === v.id); if (!tp || !v.date) return; const today = ymd(); let pid = null;
     if (v.asProj === '1') { const p = { id: uid(), name: `${(v.pname || tp.name).trim()} · ${fmtDate(v.date, { month: 'short', day: 'numeric' })}`, area: tp.area || null, due: v.date, status: 'active', notes: `From the “${tp.name}” template`, created: new Date().toISOString() }; Store.get('projects').push(p); Store.save('projects'); pid = p.id; }
@@ -6448,15 +6508,17 @@ const A_HOME = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
-  { id: '2026-10-12', title: 'Memory practice, menu reminders and a stricter Inbox', slides: [
+  { id: '2026-10-12', title: 'Memory practice, task templates, menu reminders and a stricter Inbox', slides: [
     { title: 'Memorize Scripture by typing', img: '2026-10-memory-practice.png', alt: 'A verse with some words shown and others as blanks, above a box for typing first letters.',
       body: '<p>Scripture → Memory now has typing practice. Type the first letter of each word through three steps: Read, Recall and Master.</p>', go: ['scripture', 'scrTab', 'memory', 'Open Memory'] },
     { title: 'Levels, streaks and badges', img: '2026-10-memory-progress.png', alt: 'A progress card showing level 3, a 9-day streak and a row of badges.',
       body: '<p>Practice earns XP toward the next level. Keep a daily streak going and collect badges along the way.</p>' },
     { title: 'The menu shows what needs attention', img: '2026-10-menu-counts.png', alt: 'The menu with a number beside Scripture and beside Tasks.',
-      body: '<p>A number beside Tasks or Scripture means tasks are due, or there is reading or a memory verse to do today. On a phone, a red dot on the menu button says the same.</p>' },
+      body: '<p>A number beside a menu item means something there needs attention today: tasks due, reading or a memory verse to do, or the weekly family review. On a phone, a red dot on the menu button says the same.</p>' },
     { title: 'A stricter task Inbox', img: '2026-10-task-inbox.png', alt: 'Inbox tasks, each labelled with what it still needs: a due date, or an area or project.',
       body: '<p>A task now stays in the Inbox until it has both a due date and an area or project, so nothing is filed half-sorted.</p>', go: ['tasks', 'taskTab', 'inbox', 'Open the Inbox'] },
+    { title: 'A library of task templates', img: '2026-10-template-library.png', alt: 'Template cards such as Sermon prep and Small group week, each with Use and Add to mine buttons.',
+      body: '<p>Tasks → Templates now includes 25 ready-made checklists, from hosting a dinner to planning a retreat. Pick the event date and every task lands on the right day. Add one to your own templates to change it.</p>', go: ['tasks', 'taskTab', 'templates', 'Open Templates'] },
     { title: 'Smaller changes', body: '<ul class="list-disc pl-5 space-y-1"><li>Tapping a text box on an iPhone no longer zooms the screen.</li><li>New users get a start-here tour. You can open it any time from Help &amp; what’s new in the menu.</li><li>Updates like this one will be announced here from now on.</li></ul>' }
   ] }
 ];

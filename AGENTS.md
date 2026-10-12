@@ -56,6 +56,8 @@ The `<head>` holds the theme pre-paint script, compiled `assets/app.css`, and th
 | `FITNESS` | workout logger, programs, exercise library, stats, Hevy CSV import/export |
 | `NUTRITION` | food log, Open Food Facts / USDA search, barcode, adaptive plan and check-ins, MacroFactor import |
 | `SETTINGS & SYNC` | Settings modal, `exportAll()` backup, import (merge/replace) |
+| `ROUTER / SHELL` → `NAV_COUNTS` | One entry per menu item returning `{ n, what, late?, dot? }` or null. To give a section a count, fill in its entry; do not add nagging counts for things a user has never used. |
+| `HOME` → `TEMPLATE_LIBRARY` | Built-in task templates shared by every user. Copies a user adds live in their own `ttemplates` with a `lib` key. |
 | `HELP: start-here tour and what's new` | `RELEASES` (update notes shown to users), `TOUR`, `dashNotices()`, the slide `deck*` functions, `openHelp()`, `A_HELP` |
 | `DEVICE SYNC (Google Drive app folder)` | `DRIVE` config, `syncMerge()` three-way merge, Google sign-in redirect, Drive calls, the `Sync` object, `A_SYNC` |
 | `FAITH` | shared note helpers; `// --- Scripture`, `// --- Smart Search`, `// --- Berean study tools`, `// --- Journal`, `// --- Media library` |

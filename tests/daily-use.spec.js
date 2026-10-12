@@ -42,8 +42,10 @@ test('a task stays in the Inbox until it has a due date and an area or project',
 
 test('menu items show what needs attention today', async ({ page }) => {
   const errors = await open(page);
-  const chip = view => page.locator(`#nav [data-view="${view}"] .chip`);
-  await expect(page.locator('#nav .chip')).toHaveCount(0);
+  const chip = view => page.locator(`#nav [data-view="${view}"] .nav-count`);
+  await expect(page.locator('#nav .nav-count')).toHaveCount(0);
+  // Every menu item can carry a count, whether or not it has anything to count yet.
+  expect(await page.evaluate(() => VIEWS.filter(v => v.id).every(v => typeof NAV_COUNTS[v.id] === 'function'))).toBe(true);
   await expect(page.locator('#menu-dot')).toBeHidden();
 
   await page.evaluate(([a, b]) => { Store.set('tasks', [a, b]); render(); }, [task('today', { due: new Date().toLocaleDateString('en-CA') }), task('later', { due: '2099-01-01' })]);
@@ -60,6 +62,14 @@ test('menu items show what needs attention today', async ({ page }) => {
   await expect(chip('scripture')).toHaveText('2 reading to do and verse to review');
   await page.evaluate(() => { Store.get('readingPlans')[0].done[0] = ymd(); render(); });
   await expect(chip('scripture')).toHaveText('1 verse to review');
+
+  // A workout in progress shows a dot; the family review counts only for people who use it.
+  await expect(chip('family')).toHaveCount(0);
+  await page.evaluate(() => { Store.set('activeWorkout', { id: 'w', name: 'Workout', start: new Date().toISOString(), exercises: [] }); Store.get('freviews').push({ id: 'r', week: '2020-01-06' }); render(); });
+  await expect(page.locator('#nav [data-view="fitness"]')).toContainText('workout in progress');
+  await expect(chip('family')).toHaveText('1 weekly family review to do');
+  await page.evaluate(() => { NAV_COUNTS.journal = () => ({ n: 4, what: 'things to try' }); render(); });
+  await expect(chip('journal')).toHaveText('4 things to try');
 
   // On a phone the menu is closed, so its button carries the dot.
   await page.setViewportSize({ width: 390, height: 844 });
@@ -83,4 +93,39 @@ test('on a touch screen every field is large enough that the phone does not zoom
   }
   expect(small).toEqual([]);
   await context.close();
+});
+
+test('the template library can be used as it is or added and changed', async ({ page }) => {
+  const errors = await open(page);
+  const lib = await page.evaluate(() => TEMPLATE_LIBRARY);
+  expect(lib.length).toBeGreaterThanOrEqual(20);
+  expect(new Set(lib.map(l => l.key)).size).toBe(lib.length);
+  for (const l of lib) {
+    expect(['ministry', 'home', 'personal', 'faith'], l.name).toContain(l.area);
+    expect(l.items.length, l.name).toBeGreaterThanOrEqual(5);
+    expect(l.items.map(i => i.off), `${l.name} is in date order`).toEqual([...l.items.map(i => i.off)].sort((a, b) => a - b));
+    expect(l.items.every(i => Number.isInteger(i.off) && i.text.trim() && i.text.length <= 70), l.name).toBe(true);
+    expect(l.items.some(i => i.off === 0), `${l.name} has a day 0`).toBe(true);
+  }
+
+  await page.evaluate(() => { ui.taskTab = 'templates'; go('tasks'); });
+  await expect(page.locator('#view')).toContainText('Template library');
+  expect(await page.evaluate(() => Store.get('ttemplates').length)).toBe(0);
+
+  await page.click('[data-action="libAdd"][data-key="dinner"]');
+  expect(await page.evaluate(() => Store.get('ttemplates').map(t => [t.name, t.lib, t.items.length]))).toEqual([['Host a dinner', 'dinner', 6]]);
+  await expect(page.locator('[data-action="libAdd"][data-key="dinner"]')).toHaveCount(0);
+
+  // Using one adds it once, then dates every task from the event day; each lands with a date and an area.
+  await page.click('[data-action="libUse"][data-key="dinner"]');
+  await page.fill('#modal input[name="date"]', '2030-06-15');
+  await page.click('#modal button:has-text("Add tasks")');
+  const made = await page.evaluate(() => ({ templates: Store.get('ttemplates').length, tasks: TK().map(t => [t.title, t.due, t.area]), inbox: TK().filter(isInbox).length, projects: Store.get('projects').map(p => p.name) }));
+  expect(made.templates).toBe(1);
+  expect(made.tasks).toHaveLength(6);
+  expect(made.tasks[0]).toEqual(['Invite guests and ask about allergies', '2030-06-08', 'home']);
+  expect(made.tasks[5]).toEqual(['Send a thank-you for coming', '2030-06-16', 'home']);
+  expect(made.inbox).toBe(0);
+  expect(made.projects).toEqual(['Host a dinner · Jun 15']);
+  expect(errors, errors.join('\n')).toEqual([]);
 });
