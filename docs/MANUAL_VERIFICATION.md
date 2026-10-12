@@ -2,6 +2,8 @@
 
 Status: **not yet performed**. Automated accessibility/keyboard tests are useful but cannot establish what a screen reader actually announces.
 
+VoiceOver is deferred at Seth's request while away from his desktop. Keep it pending and continue other approved audit work; do not enable it or mark it passed.
+
 Use synthetic records in a test browser/origin. Do not import test data into the browser/profile containing personal records. Record the browser, operating system, date, actual spoken wording and any failed step. Do not mark a box complete based on automated tests alone.
 
 ## VoiceOver on Mac — guided check

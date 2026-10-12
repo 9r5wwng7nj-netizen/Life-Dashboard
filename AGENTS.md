@@ -30,13 +30,14 @@ npm test                    # check + Playwright smoke tests (every view/tab, re
 npm run probe:install       # once: install Chromium used by the pinned CLI probes
 npm run probe:populated     # synthetic records, common edits/searches/imports; requires npm start in another terminal
 npm run probe:performance   # large task fixtures, startup reads and photo lifecycle; also requires local server
+npm run probe:records       # workout/photo edits, reference parsers and storage recovery; also requires local server
 ```
 
 You can also just open `index.html` in Chrome; that is how the user runs it.
 
 **Storage is per origin.** `file://`, `http://localhost:8080` and any hosted URL each have their own separate IndexedDB. For testing, use a localhost server or a fresh profile; the user's real data lives under `file://`. The smoke tests use a fresh, empty browser profile every run.
 
-CLI probes use isolated contexts and accept localhost URLs only. Never point a probe at the user's regular Chrome profile or change it to reuse a personal browser session. CI runs both probes after npm test. See docs/QUALITY_ASSURANCE.md for coverage and remaining manual checks.
+CLI probes use isolated contexts and accept localhost URLs only. Never point a probe at the user's regular Chrome profile or change it to reuse a personal browser session. CI runs all three probes after npm test. See docs/QUALITY_ASSURANCE.md for coverage and remaining manual checks.
 
 ## Architecture (all in `index.html`)
 
@@ -66,6 +67,7 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
 - **Rendering:** views are functions that return HTML strings. `render()` rebuilds `#view` and then calls `afterRender` (photo hydration, icons). Escape every user string with `esc()`.
 - **Events:** never attach listeners to elements. Put `data-action="name"` (click), `data-change`, `data-input` or `data-submit` on the element and add `name: el => { … }` to a module's action table (`A_TASKS`, `A_RECIPES`, …). The table is merged into `A` in the `Object.assign(A, …)` line, and **later tables override earlier ones**. `npm run check` flags accidental collisions. Intentional overrides are allow-listed in `scripts/check.mjs`.
 - **Saving:** mutate `Store.get('key')` then call `Store.save('key')` (debounced write), or use `Store.set('key', value)`. Then call `render()`.
+  - Explicit flushes reject on failure. The write queue serializes flushes, retains failed keys and displays a persistent recovery warning. Background callers handle the rejection; do not clear dirty keys on failure. Reset waits for this queue before clearing storage. See docs/STORAGE_RECOVERY.md.
 - **UI state** that shouldn't persist goes on `ui` (defaults come from `Object.assign(ui, {...})` near each module). Persistent preferences go on `S` plus `saveSettings()`.
 - **Modals:** `Modal.open(modalShell(title, bodyHtml, footerHtml, submitActionName), { wide })`.
 - **Accessibility:** use associated labels or meaningful accessible names. Shared rendering links existing label/field pairs and restores focus; Modal manages its name, focus loop, inert background and return focus. Decorative icons are hidden from assistive technology, so icon-only buttons need their own name. See `docs/ACCESSIBILITY.md`.
