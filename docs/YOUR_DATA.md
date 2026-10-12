@@ -11,15 +11,18 @@ Everything you've entered lives in **Chrome's storage for the place the app is o
 
 ## Before you switch to the repo copy
 
-1. Open your current `life-dashboard.html`, then go to **Settings & Sync → Export all data (.json)**. Keep the `.json` somewhere safe, **outside** the repo folder.
+1. Open your current `life-dashboard.html`, then go to **Settings & Sync → Back up personal data + photos**. Keep the `.json` somewhere safe, **outside** the repo folder.
 2. Open the repo's `index.html` in the same Chrome profile. Your data should all be there.
 3. If it opens empty, go to **Settings & Sync → Import backup… → Replace everything** and pick the backup.
+
+## What a backup includes
+
+Version 2 backups include all personal records and the photo files stored by Life Dashboard. API keys are intentionally excluded. Legacy version 1 backups did not contain photos; importing one preserves photos already stored in the destination browser.
 
 ## What a backup does *not* include
 
 These live on the device. You redo them once on any new origin or device:
 
-- Photos: progress, journal, memories and date nights, recipes. They stay in the original browser storage.
 - Downloaded Bibles: Scripture → Library → download again.
 - Berean tables and topical index: import the files you downloaded again.
 - Strong's lexicon: it re-downloads when needed.
