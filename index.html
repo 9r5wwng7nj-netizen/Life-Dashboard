@@ -158,7 +158,7 @@ const SETTINGS_DEFAULT = {
   name: '', theme: 'system', unit: 'lbs', restSeconds: 90, timerSound: true,
   targets: { cal: 2400, p: 180, c: 240, f: 75 },
   translation: 'web', esvKey: '', collapsed: false, view: 'dashboard', lastExport: null,
-  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: ''
+  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: ''
 };
 let S = loadSettings();
 function loadSettings() {
@@ -2171,7 +2171,8 @@ function openSettings() {
   Modal.open(modalShell('Settings &amp; Sync', `
     <section class="space-y-3"><h4 class="font-semibold text-sm">General</h4>
       <div class="grid sm:grid-cols-2 gap-3"><div><label class="label">Your name (for greeting)</label><input name="name" class="input" value="${esc(S.name)}"></div>
-      <div><label class="label">Theme</label><select name="theme" class="input">${['system', 'light', 'dark'].map(t => `<option value="${t}" ${S.theme === t ? 'selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></div></div></section>
+      <div><label class="label">Theme</label><select name="theme" class="input">${['system', 'light', 'dark'].map(t => `<option value="${t}" ${S.theme === t ? 'selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></div>
+      <div><label class="label">Family name (optional)</label><input name="familyName" class="input" value="${esc(S.familyName || '')}" placeholder="e.g. Smith" autocomplete="off"></div><p class="text-xs muted self-end">Used in the titles of family exports, such as “Smith Family Rule of Life”.</p></div></section>
     <section class="space-y-3"><h4 class="font-semibold text-sm">Workouts</h4>
       <div class="grid sm:grid-cols-3 gap-3"><div><label class="label">Weight unit</label><select name="unit" class="input"><option value="lbs" ${S.unit === 'lbs' ? 'selected' : ''}>lbs</option><option value="kg" ${S.unit === 'kg' ? 'selected' : ''}>kg</option></select></div>
       <div><label class="label">Default rest</label><select name="restSeconds" class="input">${restOptions(S.restSeconds)}</select></div>
@@ -2403,8 +2404,6 @@ const DEFAULT_MINISTRIES = [
   { id: 'bema', name: 'BEMA Discipleship', url: 'https://www.bemadiscipleship.com' },
   { id: 'tgc', name: 'The Gospel Coalition', url: 'https://www.thegospelcoalition.org' },
   { id: 'lig', name: 'Ligonier Ministries', url: 'https://www.ligonier.org' },
-  { id: 'lake', name: 'Lakepoint Church', url: '' },
-  { id: 'e22', name: 'Church of Eleven22', url: 'https://www.coe22.com' },
   { id: 'gq', name: 'Got Questions', url: 'https://www.gotquestions.org' },
   { id: 'ccef', name: 'CCEF', url: 'https://www.ccef.org' }
 ];
@@ -3132,7 +3131,7 @@ function smartSourcesCard() {
       <p class="text-sm">${vm ? `<strong>${esc(vm.name)}</strong> · ${fmtNum(vm.count)} notes<br><span class="text-xs muted">Indexed ${fmtDate(vm.date.slice(0, 10))}</span>` : '<span class="muted">Not connected</span>'}</p>
       ${ui.vaultBusy ? `<p class="text-sm muted">${icon('loader-circle', 'w-3.5 h-3.5 animate-spin inline')} ${esc(ui.vaultBusy)}</p>` : `<div class="flex flex-wrap gap-2">${vm ? `<button class="btn btn-sm btn-primary" data-action="vaultRefresh">${icon('refresh-cw', 'w-3.5 h-3.5')} Refresh</button><button class="btn btn-sm" data-action="vaultConnect">Choose folder</button><button class="btn btn-sm btn-danger" data-action="vaultRemove">Remove</button>` : `<button class="btn btn-sm btn-primary" data-action="vaultConnect">${icon('folder-open', 'w-3.5 h-3.5')} Connect vault folder</button>`}</div>`}
       <input id="vault-input" type="file" class="hidden" webkitdirectory multiple data-change="vaultFiles">
-      <div><label class="label">Vault name (for “Open in Obsidian”)</label><input class="input text-sm" value="${esc(S.vaultName || '')}" placeholder="${esc(vm ? vm.name : 'Seth Second Brain 2')}" data-change="cfgSet" data-k="vaultName"></div>
+      <div><label class="label">Vault name (for “Open in Obsidian”)</label><input class="input text-sm" value="${esc(S.vaultName || '')}" placeholder="${esc(vm ? vm.name : 'e.g. My Vault')}" data-change="cfgSet" data-k="vaultName"></div>
       <div><label class="label">Skip folders (comma separated)</label><input class="input text-sm" value="${esc(S.vaultSkip || '')}" placeholder="e.g. Templates, Archive/Old" data-change="cfgSet" data-k="vaultSkip"></div>
       <p class="text-xs muted">${fsApi ? 'Pick your vault folder once — Refresh re-reads it with one click.' : 'This browser asks you to pick the folder again each time you refresh (Chrome and Edge remember it).'} Notes are indexed in this browser only — never uploaded, and not part of your JSON backup.</p></div>
     <div class="card space-y-2"><div class="font-semibold flex items-center gap-1.5">${icon('sparkles', 'w-4 h-4')} Miyo</div>
@@ -3616,7 +3615,7 @@ function scrNoteEditor(o) {
     <div class="grid sm:grid-cols-6 gap-3"><div class="sm:col-span-3"><label class="label">Title (optional)</label><input class="input" value="${esc(o.title || '')}" ${nf('scripture', o, 'title')} placeholder="${o.kind === 'teaching' ? 'e.g. The Bread of Life' : 'e.g. Abide in me'}"></div>
       <div class="sm:col-span-2"><label class="label">Scripture</label><input class="input" value="${esc(o.ref)}" ${nf('scripture', o, 'ref')} placeholder="John 15:1-11"></div><div><label class="label">Date</label><input type="date" class="input" value="${o.date}" ${nf('scripture', o, 'date')}></div></div>
     <div class="grid sm:grid-cols-3 gap-3"><div><label class="label">Type</label><select class="input" ${nf('scripture', o, 'kind')}><option value="soap" ${o.kind !== 'teaching' ? 'selected' : ''}>S.O.A.P. devotional</option><option value="teaching" ${o.kind === 'teaching' ? 'selected' : ''}>Teaching / sermon prep</option></select></div>
-      <div><label class="label">Series (optional)</label><input class="input" list="series-list" value="${esc(o.series || '')}" ${nf('scripture', o, 'series')} placeholder="e.g. CONVINCED — John"><datalist id="series-list">${series.map(s => `<option value="${esc(s)}">`).join('')}</datalist></div>
+      <div><label class="label">Series (optional)</label><input class="input" list="series-list" value="${esc(o.series || '')}" ${nf('scripture', o, 'series')} placeholder="e.g. Gospel of John"><datalist id="series-list">${series.map(s => `<option value="${esc(s)}">`).join('')}</datalist></div>
       <div><label class="label">Tags</label><input class="input" value="${esc((o.tags || []).join(', '))}" ${nf('scripture', o, 'tags')} placeholder="abide, prayer"></div></div>
     ${o.passage ? `<details class="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3"><summary class="cursor-pointer text-sm font-medium">Passage text ${o.translation ? `(${esc(o.translation)})` : ''}</summary><div class="text-sm mt-2 whitespace-pre-wrap leading-relaxed font-serif">${esc(o.passage)}</div></details>` : ''}
     <div><label class="label">Notes (Markdown)</label><textarea class="input font-mono text-[13px] leading-relaxed" rows="16" ${nf('scripture', o, 'body')} autofocus>${esc(o.body)}</textarea></div>`,
@@ -4740,7 +4739,7 @@ const A_MEDIA = {
   },
   mCollAdd: el => { const o = mFind(el.dataset.id), v = el.value; el.value = ''; if (!o || !v) return; if (v === '__new') { ui.collFor = o.id; return A_MEDIA.mCollNew(); } (o.colls = o.colls || []).push(v); (o.ord = o.ord || {})[v] = Date.now(); mCommit(o); mRefresh(o); },
   mCollRemove: el => { const o = mFind(el.dataset.id); if (!o) return; o.colls = (o.colls || []).filter(c => c !== el.dataset.c); mCommit(o); if (ui.medOpen) mRefresh(o); else render(); },
-  mCollNew: () => Modal.open(modalShell('New collection', `<div><label class="label">Name</label><input name="name" class="input" required autofocus placeholder="e.g. CONVINCED — John series, Grief resources"></div><div><label class="label">Type</label><select name="type" class="input">${Object.entries(MCOLL_TYPES).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select></div><div><label class="label">Description (optional)</label><input name="desc" class="input"></div>`, `<button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn btn-primary">Create</button>`, 'mCollCreate')),
+  mCollNew: () => Modal.open(modalShell('New collection', `<div><label class="label">Name</label><input name="name" class="input" required autofocus placeholder="e.g. Gospel of John series, Grief resources"></div><div><label class="label">Type</label><select name="type" class="input">${Object.entries(MCOLL_TYPES).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select></div><div><label class="label">Description (optional)</label><input name="desc" class="input"></div>`, `<button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn btn-primary">Create</button>`, 'mCollCreate')),
   mCollCreate: f => {
     const v = fd(f), c = { id: uid(), name: v.name.trim(), type: v.type, desc: v.desc.trim(), created: new Date().toISOString(), updated: new Date().toISOString() }; if (!c.name) return; Store.get('mcolls').push(c); Store.save('mcolls'); Modal.close();
     const o = ui.collFor && mFind(ui.collFor); ui.collFor = null; if (o) { (o.colls = o.colls || []).push(c.id); (o.ord = o.ord || {})[c.id] = Date.now(); mCommit(o); return render(); }
@@ -4914,7 +4913,7 @@ function frEditor(r) {
 }
 function frMarkdown(r) {
   const goals = Store.get('goals'), prev = addDays(r.week, -7);
-  return obsidianMd({ title: `Monday Family Review — ${r.week}`, date: r.week, type: 'family-review', tags: ['family', 'monday-review', 'rule-of-life'], props: { week: r.week }, body: `Part of [[Conner Family Rule of Life]]\n\n## Look back\n### Wins & gifts from God\n${r.wins || ''}\n\n### Hard moments\n${r.hard || ''}\n\n### Rhythms last week\n${goals.map(g => { const k = periodKey(prev, g.cadence); return `- [${g.log.some(d => periodKey(d, g.cadence) === k) ? 'x' : ' '}] ${g.text}`; }).join('\n')}\n\n## Look ahead\n${r.ahead || ''}\n\n**Next date night:** ${(fkit().nextDate || {}).date || '—'} ${(fkit().nextDate || {}).title || ''}\n\n**One adjustment:** ${r.adjust || ''}\n\n## Pray together\n### For each other\n${r.praySpouse || ''}\n\n### For our family\n${r.prayFamily || ''}\n` });
+  return obsidianMd({ title: `Monday Family Review — ${r.week}`, date: r.week, type: 'family-review', tags: ['family', 'monday-review', 'rule-of-life'], props: { week: r.week }, body: `Part of [[${ruleTitle()}]]\n\n## Look back\n### Wins & gifts from God\n${r.wins || ''}\n\n### Hard moments\n${r.hard || ''}\n\n### Rhythms last week\n${goals.map(g => { const k = periodKey(prev, g.cadence); return `- [${g.log.some(d => periodKey(d, g.cadence) === k) ? 'x' : ' '}] ${g.text}`; }).join('\n')}\n\n## Look ahead\n${r.ahead || ''}\n\n**Next date night:** ${(fkit().nextDate || {}).date || '—'} ${(fkit().nextDate || {}).title || ''}\n\n**One adjustment:** ${r.adjust || ''}\n\n## Pray together\n### For each other\n${r.praySpouse || ''}\n\n### For our family\n${r.prayFamily || ''}\n` });
 }
 function famReview() {
   const open = ui.frId && Store.get('freviews').find(r => r.id === ui.frId); if (open) return frEditor(open);
@@ -5004,7 +5003,8 @@ function renderFamily() {
   return tabs('famTab', [['overview', 'This week', 'sparkles'], ['checkin', 'Check-ins', 'message-circle-heart'], ['review', 'Monday review', 'calendar-check'], ['people', 'Family', 'users'], ['dates', 'Date nights', 'wine'], ['memories', 'Memories', 'images'], ['rule', 'Rule of Life', 'scroll-text'], ['milestones', 'Milestones', 'calendar-heart']])
     + ({ overview: famOverview, checkin: famCheckins, review: famReview, people: famPeople, dates: famDates, memories: famMemories, rule: famRule, milestones: famMilestones, goals: famRule }[ui.famTab] || famOverview)();
 }
-function ruleMarkdown() { const k = fkit(), goals = Store.get('goals'), bs = Store.get('boundaries'); return obsidianMd({ title: 'Conner Family Rule of Life', date: ymd(), type: 'rule-of-life', tags: ['family', 'rule-of-life'], body: `## Covenant\n${k.covenant || ''}\n\n## Communication principles\n${k.principles || ''}\n\n## Restoration plan\n${k.restoration || ''}\n\n## Rhythms\n${goals.map(g => `- **${g.text}** (${g.cadence})`).join('\n')}\n\n## Boundaries\n${bs.map(b => `- When ${b.behavior} happens, we feel ${b.feel}. If that happens, we will ${b.response}.`).join('\n')}\n` }); }
+const ruleTitle = () => `${S.familyName ? S.familyName + ' ' : ''}Family Rule of Life`;
+function ruleMarkdown() { const k = fkit(), goals = Store.get('goals'), bs = Store.get('boundaries'); return obsidianMd({ title: ruleTitle(), date: ymd(), type: 'rule-of-life', tags: ['family', 'rule-of-life'], body: `## Covenant\n${k.covenant || ''}\n\n## Communication principles\n${k.principles || ''}\n\n## Restoration plan\n${k.restoration || ''}\n\n## Rhythms\n${goals.map(g => `- **${g.text}** (${g.cadence})`).join('\n')}\n\n## Boundaries\n${bs.map(b => `- When ${b.behavior} happens, we feel ${b.feel}. If that happens, we will ${b.response}.`).join('\n')}\n` }); }
 let memPhotoFiles = [];
 const A_FAMILY = {
   frStart: () => { let r = reviewThisWeek(); if (!r) { r = { id: uid(), week: weekKey(), created: new Date().toISOString() }; Store.get('freviews').push(r); Store.save('freviews'); } ui.frId = r.id; ui.famTab = 'review'; if (S.view !== 'family') go('family'); else render(); },
@@ -6433,7 +6433,7 @@ const A_HOME = {
 // edits and deletions from either device survive. Photos, API keys and downloaded libraries stay
 // on the device. Sign-in is a plain redirect, so no Google script is loaded.
 const DRIVE = { clientId: '868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.googleusercontent.com', scope: 'https://www.googleapis.com/auth/drive.appdata', file: 'life-dashboard-sync.json', api: 'https://www.googleapis.com', auth: 'https://accounts.google.com/o/oauth2/v2/auth' };
-const SYNC_SETTINGS = ['name', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
+const SYNC_SETTINGS = ['name', 'familyName', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
 const SYNC_SKIP = ['photoMeta'];
 const SYNC_BASE = 'sync.base';
 // A sync that would remove more than this many records (outside the lists that are routinely
@@ -6718,7 +6718,7 @@ const A = {
 
   saveSettings: f => {
     const v = fd(f);
-    Object.assign(S, { name: v.name.trim(), theme: v.theme, unit: v.unit, restSeconds: +v.restSeconds, bwFallback: num(v.bwFallback) ? (v.unit === 'lbs' ? num(v.bwFallback) * LB : num(v.bwFallback)) : null, timerSound: v.timerSound === '1', translation: v.translation, esvKey: v.esvKey.trim(), fdcKey: (v.fdcKey || '').trim(), targets: { cal: num(v.t_cal) || 2000, p: num(v.t_p) || 0, c: num(v.t_c) || 0, f: num(v.t_f) || 0 } });
+    Object.assign(S, { name: v.name.trim(), familyName: (v.familyName || '').trim(), theme: v.theme, unit: v.unit, restSeconds: +v.restSeconds, bwFallback: num(v.bwFallback) ? (v.unit === 'lbs' ? num(v.bwFallback) * LB : num(v.bwFallback)) : null, timerSound: v.timerSound === '1', translation: v.translation, esvKey: v.esvKey.trim(), fdcKey: (v.fdcKey || '').trim(), targets: { cal: num(v.t_cal) || 2000, p: num(v.t_p) || 0, c: num(v.t_c) || 0, f: num(v.t_f) || 0 } });
     saveSettings(); applyTheme(); Modal.close(); toast('Settings saved'); render();
   }
 };

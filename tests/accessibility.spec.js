@@ -63,7 +63,7 @@ test('visible labels focus their fields and repeated dialog rendering retains in
   await page.getByText('Your name (for greeting)', { exact: true }).click();
   const input = page.getByRole('textbox', { name: 'Your name (for greeting)' });
   await expect(input).toBeFocused();
-  await input.fill('Seth');
+  await input.fill('Sam');
   await page.evaluate(() => openSettings());
   await expect(page.getByRole('textbox', { name: 'Your name (for greeting)' })).toBeFocused();
 });

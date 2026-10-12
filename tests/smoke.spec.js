@@ -119,3 +119,17 @@ test('runtime libraries are local and work with the network blocked', async ({ p
   expect(externalCode).toEqual([]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('family exports are generic until a family name is set in Settings', async ({ page }) => {
+  const errors = await prepare(page);
+  const review = { id: 'r1', week: '2026-10-12' };
+  expect(await page.evaluate(r => [ruleTitle(), frMarkdown(r).includes('[[Family Rule of Life]]')], review)).toEqual(['Family Rule of Life', true]);
+  await page.locator('[data-action="openSettings"]').click();
+  await page.getByRole('textbox', { name: 'Family name (optional)' }).fill('Smith');
+  await page.getByRole('button', { name: 'Save settings' }).click();
+  const [rule, weekly] = await page.evaluate(r => [ruleMarkdown(), frMarkdown(r)], review);
+  expect(rule).toContain('Smith Family Rule of Life');
+  expect(weekly).toContain('[[Smith Family Rule of Life]]');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ld.settings')).familyName)).toBe('Smith');
+  expect(errors, errors.join('\n')).toEqual([]);
+});
