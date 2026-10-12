@@ -94,6 +94,22 @@ const num = v => { if (v === '' || v == null) return null; const n = parseFloat(
 const round = (n, d = 1) => n == null ? null : Math.round(n * 10 ** d) / 10 ** d;
 const fmtNum = (n, d = 0) => (n == null || isNaN(n)) ? '–' : Number(round(n, d)).toLocaleString(undefined, { maximumFractionDigits: d });
 const sum = arr => arr.reduce((a, b) => a + (+b || 0), 0);
+async function fetchServiceJSON(url, options = {}, timeout = 12000) {
+  if (navigator.onLine === false) throw new Error('You are offline. Use saved data or manual entry, then try again when connected.');
+  const controller = new AbortController(), cancel = () => controller.abort(); let expired = false;
+  if (options.signal?.aborted) cancel(); else options.signal?.addEventListener('abort', cancel, { once: true });
+  const timer = setTimeout(() => { expired = true; cancel(); }, timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const data = response.ok ? await response.json() : null;
+    return { response, data };
+  } catch (e) {
+    if (expired) throw new Error('The service took too long to respond. Try again or use saved data/manual entry.');
+    if (e instanceof TypeError) throw new Error('The service could not be reached. Try again or use saved data/manual entry.');
+    if (e instanceof SyntaxError) throw new Error('The service returned an unreadable response. Try again later.');
+    throw e;
+  } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel); }
+}
 function groupBy(items, keyOf) { // Derived per call: preserve order/identity without stale persistent indexes.
   const groups = new Map();
   for (const item of items) { const key = keyOf(item); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(item); }
@@ -285,12 +301,20 @@ function focusableElements(root) {
 }
 function syncSidebarAccessibility() {
   const sidebar = $('#sidebar'), small = !matchMedia('(min-width: 768px)').matches, open = sidebar.classList.contains('open');
-  sidebar.inert = small && !open;
-  sidebar.setAttribute('aria-hidden', String(small && !open));
+  const hidden = (small && !open) || !!$('#j-focus');
+  sidebar.inert = hidden;
+  sidebar.setAttribute('aria-hidden', String(hidden));
   $('[data-action="openSidebar"]').setAttribute('aria-expanded', String(small && open));
 }
 function modalBackground(inert) {
   for (const el of $$('#app-shell, #timer, #mini-player, .skip-link')) el.inert = inert;
+}
+function trapDialogTab(e, dialog) {
+  if (e.key !== 'Tab') return;
+  const controls = focusableElements(dialog), first = controls[0], last = controls[controls.length - 1], active = document.activeElement;
+  if (!first) { e.preventDefault(); dialog.focus(); }
+  else if (e.shiftKey && (active === first || !controls.includes(active))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (active === last || !controls.includes(active))) { e.preventDefault(); first.focus(); }
 }
 function toast(msg, type = 'ok') {
   const el = document.createElement('div');
@@ -320,6 +344,7 @@ const Modal = {
     if (!this.isOpen()) return;
     const m = $('#modal'), origin = this.origin, c = this.onClose;
     m.classList.add('hidden'); m.innerHTML = ''; this.onClose = null; this.origin = null; modalBackground(false);
+    JournalFocus.sync();
     Photos.prune();
     if (c) c();
     if (!this.isOpen() && !restoreFocus(origin)) $('#view-title').focus({ preventScroll: true });
@@ -327,11 +352,7 @@ const Modal = {
   keydown(e) {
     if (!this.isOpen()) return;
     if (e.key === 'Escape') { e.preventDefault(); this.close(); return; }
-    if (e.key !== 'Tab') return;
-    const dialog = $('#modal [role="dialog"]'), controls = focusableElements(dialog), first = controls[0], last = controls[controls.length - 1], active = document.activeElement;
-    if (!first) { e.preventDefault(); dialog.focus(); }
-    else if (e.shiftKey && (active === first || !controls.includes(active))) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && (active === last || !controls.includes(active))) { e.preventDefault(); first.focus(); }
+    trapDialogTab(e, $('#modal [role="dialog"]'));
   }
 };
 function modalShell(title, body, footer = '', formAction = '') {
@@ -470,7 +491,7 @@ function renderNow() {
   try { html = v.render(); } catch (e) { console.error(e); html = `<div class="card text-rose-600">Something went wrong rendering this view: ${esc(e.message)}</div>`; }
   main.innerHTML = `<div class="max-w-6xl mx-auto p-4 md:p-6 pb-28">${html}</div>`;
   main.scrollTop = keep; lastRendered = v.id;
-  renderNav(); refreshIcons(); afterRender();
+  renderNav(); refreshIcons(); afterRender(focused);
   if (previousView === v.id && !Modal.isOpen()) restoreFocus(focused);
 }
 function rerender() { // re-render while keeping focus/caret in the active field
@@ -478,7 +499,8 @@ function rerender() { // re-render while keeping focus/caret in the active field
   render();
   if (id) { const n = document.getElementById(id); if (n) { n.focus(); try { if (pos != null) n.setSelectionRange(pos, pos); } catch (e) {} } }
 }
-function afterRender() {
+function afterRender(focused) {
+  JournalFocus.sync(focused);
   clearInterval(tickIv);
   const aw = Store.get('activeWorkout');
   if (aw && $('#elapsed')) { const upd = () => { const e = $('#elapsed'); if (e) e.textContent = fmtClock((Date.now() - new Date(aw.start)) / 1000); }; upd(); tickIv = setInterval(upd, 1000); }
@@ -1476,20 +1498,20 @@ function fdcToFood(f) {
   const desc = String(f.description || 'Food'); return { id: 'fdc:' + f.fdcId, name: desc.charAt(0) + desc.slice(1).toLowerCase(), brand: 'USDA', source: 'usda', basis: '100g', servingLabel: '', servingG: null, extra, base: roundBase(base) };
 }
 async function searchOFF(q) {
-  const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=20&sort_by=unique_scans_n&fields=code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity`);
+  const { response: r, data: j } = await fetchServiceJSON(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=20&sort_by=unique_scans_n&fields=code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity`);
   if (!r.ok) throw new Error('Open Food Facts error ' + r.status);
-  const j = await r.json(); return (j.products || []).map(offToFood).filter(Boolean).slice(0, 15);
+  return (j.products || []).map(offToFood).filter(Boolean).slice(0, 15);
 }
 async function searchUSDA(q) {
-  const r = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(S.fdcKey || 'DEMO_KEY')}&query=${encodeURIComponent(q)}&dataType=Foundation,SR%20Legacy&pageSize=12`);
+  const { response: r, data: j } = await fetchServiceJSON(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(S.fdcKey || 'DEMO_KEY')}&query=${encodeURIComponent(q)}&dataType=Foundation,SR%20Legacy&pageSize=12`);
   if (r.status === 429) throw new Error('USDA search limit reached for now — add your free USDA key in Settings for higher limits.');
   if (!r.ok) throw new Error('USDA error ' + r.status);
-  const j = await r.json(); return (j.foods || []).map(fdcToFood);
+  return (j.foods || []).map(fdcToFood);
 }
 async function lookupBarcodeOnline(code) {
-  const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity`);
+  const { response: r, data: j } = await fetchServiceJSON(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity`);
   if (r.status === 404) return null; if (!r.ok) throw new Error('Open Food Facts error ' + r.status);
-  const j = await r.json(); return j.status === 1 && j.product ? offToFood({ code, ...j.product }) : null;
+  return j.status === 1 && j.product ? offToFood({ code, ...j.product }) : null;
 }
 function saveFoodUse(f, qty, unitLabel) {
   const foods = Store.get('foods'), i = foods.findIndex(x => x.id === f.id);
@@ -2465,8 +2487,8 @@ async function loadBible(tr) {
   const d = await BibleDb.get(tr); if (d) BibleMem[tr] = d; return d || null;
 }
 async function downloadBible(tr) {
-  const r = await fetch(BIBLE_URL(BIBLES[tr].file)); if (!r.ok) throw new Error('Download failed (' + r.status + ')');
-  const j = await r.json(), books = (j.books || []).map(b => b.chapters.map(ch => { const a = []; ch.verses.forEach(v => { a[v.verse - 1] = String(v.text).replace(/\s+/g, ' ').trim(); }); return a; }));
+  const { response: r, data: j } = await fetchServiceJSON(BIBLE_URL(BIBLES[tr].file), {}, 30000); if (!r.ok) throw new Error('Download failed (' + r.status + ')');
+  const books = (j.books || []).map(b => b.chapters.map(ch => { const a = []; ch.verses.forEach(v => { a[v.verse - 1] = String(v.text).replace(/\s+/g, ' ').trim(); }); return a; }));
   if (books.length !== 66) throw new Error('Unexpected file format');
   await BibleDb.put(tr, books); BibleMem[tr] = books;
   const m = bibleMeta(); m[tr] = { date: ymd(), verses: books.reduce((n, b) => n + b.reduce((x, c) => x + c.filter(Boolean).length, 0), 0) }; setBibleMeta(m);
@@ -2480,14 +2502,14 @@ async function getChapter(tr, b, c) {
     if (pc[pk]) out = pc[pk].verses;
     else if (B.esv) { // not stored, per ESV API terms
       if (!S.esvKey) throw new Error('Add your free ESV API key in Settings (api.esv.org) to read the ESV.');
-      const r = await fetch(`https://api.esv.org/v3/passage/text/?q=${encodeURIComponent(name)}&include-headings=false&include-footnotes=false&include-passage-references=false&include-short-copyright=false&include-verse-numbers=true&include-first-verse-numbers=true`, { headers: { Authorization: 'Token ' + S.esvKey } });
+      const { response: r, data: j } = await fetchServiceJSON(`https://api.esv.org/v3/passage/text/?q=${encodeURIComponent(name)}&include-headings=false&include-footnotes=false&include-passage-references=false&include-short-copyright=false&include-verse-numbers=true&include-first-verse-numbers=true`, { headers: { Authorization: 'Token ' + S.esvKey } });
       if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'The ESV key was rejected — check it in Settings.' : 'ESV error ' + r.status);
-      const txt = ((await r.json()).passages || []).join(' '); out = [];
+      const txt = (j.passages || []).join(' '); out = [];
       txt.split(/\[(\d+)\]/).forEach((seg, i, arr) => { if (i % 2 === 1) out.push({ v: +seg, t: String(arr[i + 1] || '').replace(/\s+/g, ' ').trim() }); });
     } else if (B.online) {
-      const r = await fetch(`https://bible-api.com/${encodeURIComponent(name)}?translation=${B.online}`);
+      const { response: r, data: j } = await fetchServiceJSON(`https://bible-api.com/${encodeURIComponent(name)}?translation=${B.online}`);
       if (!r.ok) throw new Error(r.status === 404 ? 'Chapter not found.' : 'Bible service error ' + r.status);
-      out = ((await r.json()).verses || []).filter(x => x.chapter === c).map(x => ({ v: x.verse, t: String(x.text).replace(/\s+/g, ' ').trim() }));
+      out = (j.verses || []).filter(x => x.chapter === c).map(x => ({ v: x.verse, t: String(x.text).replace(/\s+/g, ' ').trim() }));
       pc[pk] = { verses: out, fetched: Date.now() }; Store.save('passageCache');
     } else throw new Error(`${B.short} is an offline Bible — download it once on the Library tab (about 8 MB) to read it.`);
   }
@@ -3790,7 +3812,7 @@ function journalEditor(j) {
   const refs = findRefs(j.body), prs = Store.get('prayers'), linked = (j.prayers || []).map(id => prs.find(p => p.id === id)).filter(Boolean), avail = prs.filter(p => !p.answered && !(j.prayers || []).includes(p.id));
   return `<div class="card">
     <div class="flex flex-wrap items-center gap-2 mb-3"><input id="j-date" type="date" class="input w-auto" value="${j.date}" ${nf('journal', j, 'date')}>
-      <select id="j-type" class="input w-auto" ${nf('journal', j, 'type')}>${Object.entries(JTYPES).map(([k, [l]]) => `<option value="${k}" ${j.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select id="j-type" class="input w-auto" aria-label="Journal entry type" ${nf('journal', j, 'type')}>${Object.entries(JTYPES).map(([k, [l]]) => `<option value="${k}" ${j.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <div class="flex gap-1 ml-auto p-1 rounded-lg bg-slate-100 dark:bg-slate-800"><button class="tab ${!ui.jPreview ? 'tab-active' : ''}" data-action="jPreview" data-v="0">Write</button><button class="tab ${ui.jPreview ? 'tab-active' : ''}" data-action="jPreview" data-v="1">Preview</button></div></div>
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3 text-xs muted"><div class="flex items-center gap-1.5">Mood ${jRating(j, 'mood', MOODS)}</div><div class="flex items-center gap-1.5">Energy ${jRating(j, 'energy', ENERGY)}</div>
       <div class="flex gap-1 ml-auto"><button type="button" class="btn btn-sm ${JDict.on ? 'btn-primary' : ''}" data-action="jDictate" title="Dictate with your voice">${icon('mic', 'w-3.5 h-3.5')} <span class="jd-label">${JDict.on ? 'Listening…' : 'Dictate'}</span></button><button type="button" class="btn btn-sm" data-action="jFocus" data-id="${j.id}" title="Distraction-free writing">${icon('maximize-2', 'w-3.5 h-3.5')} Focus</button></div></div>
@@ -3806,13 +3828,30 @@ function journalEditor(j) {
     <div class="flex flex-wrap items-center gap-2 mt-3"><button type="button" class="btn btn-sm btn-ghost" data-action="jTplSaveOpen" data-id="${j.id}" title="Save this entry’s layout as a template">${icon('copy-plus', 'w-3.5 h-3.5')} Save as template</button>${noteFooter('journal', j, 'journalClose', 'Close')}</div></div>`;
 }
 function focusOverlay(j) {
-  return `<div class="fixed inset-0 z-[60] bg-[#fbfaf7] dark:bg-slate-950 flex flex-col" id="j-focus">
+  return `<div class="fixed inset-0 z-[60] bg-[#fbfaf7] dark:bg-slate-950 flex flex-col" id="j-focus" role="dialog" aria-modal="true" aria-label="Journal focus mode" tabindex="-1">
     <div class="flex flex-wrap items-center gap-2 px-4 sm:px-8 py-3 text-sm muted"><span class="truncate max-w-[40%]">${esc(j.title || fmtDate(j.date, { weekday: 'long', month: 'long', day: 'numeric' }))}</span><span class="flex-1"></span>
       <span id="jf-wc" class="tabular-nums">${fmtNum(wordCount(j.body))} words</span>
       <select class="input w-auto py-1 text-sm" data-change="jTimer" aria-label="Writing timer"><option value="0">No timer</option>${[5, 10, 15, 20, 30].map(n => `<option value="${n}" ${ui.jTimer && ui.jTimer.min === n ? 'selected' : ''}>${n} min</option>`).join('')}</select><span id="jf-timer" class="tabular-nums w-12 text-right">${ui.jTimer ? jTimerText() : ''}</span>
       <button type="button" class="btn btn-sm ${JDict.on ? 'btn-primary' : ''}" data-action="jDictate">${icon('mic', 'w-3.5 h-3.5')} <span class="jd-label">${JDict.on ? 'Listening…' : 'Dictate'}</span></button><button type="button" class="btn btn-sm" data-action="jFocusExit">${icon('minimize-2', 'w-3.5 h-3.5')} Done</button></div>
-    <div class="flex-1 overflow-y-auto"><div class="max-w-2xl mx-auto px-4 pb-16"><textarea id="jf-body" class="w-full min-h-[75vh] bg-transparent border-0 outline-none resize-none font-serif text-[19px] leading-9 text-slate-800 dark:text-slate-100 placeholder:text-slate-400" placeholder="Just write…" ${nf('journal', j, 'body')}>${esc(j.body)}</textarea></div></div></div>`;
+    <div class="flex-1 overflow-y-auto"><div class="max-w-2xl mx-auto px-4 pb-16"><textarea id="jf-body" aria-label="Journal entry text" class="w-full min-h-[75vh] bg-transparent border-0 resize-none font-serif text-[19px] leading-9 text-slate-800 dark:text-slate-100 placeholder:text-slate-400" placeholder="Just write…" ${nf('journal', j, 'body')}>${esc(j.body)}</textarea></div></div></div>`;
 }
+const JournalFocus = {
+  active: false, origin: null,
+  sync(focused) {
+    const dialog = $('#j-focus'), opening = !!dialog && !this.active, closing = !dialog && this.active;
+    if (opening) this.origin = focused || focusSnapshot();
+    this.active = !!dialog;
+    for (const el of $$('#app-shell header, #j-workspace, #timer, #mini-player, .skip-link')) el.inert = !!dialog || Modal.isOpen();
+    syncSidebarAccessibility();
+    if (opening) $('#jf-body').focus({ preventScroll: true });
+    if (closing) { if (!restoreFocus(this.origin)) $('#view-title').focus({ preventScroll: true }); this.origin = null; }
+  },
+  keydown(e) {
+    const dialog = $('#j-focus'); if (!dialog) return;
+    if (e.key === 'Escape') { e.preventDefault(); A.jFocusExit(); }
+    else trapDialogTab(e, dialog);
+  }
+};
 // Left panel: list, calendar, insights
 function jList(all) {
   const q = ui.jSearch.toLowerCase(), list = all.filter(j => (ui.jType === 'all' || j.type === ui.jType) && (!ui.jDay || j.date === ui.jDay) && (!q || [j.title, j.body, (j.tags || []).join(' ')].join(' ').toLowerCase().includes(q)));
@@ -3875,7 +3914,7 @@ function promptCard() {
 function renderJournal() {
   const all = Store.get('journal').slice().sort((a, b) => (b.date + (b.created || '')).localeCompare(a.date + (a.created || '')));
   const cur = findNote('journal', ui.jId), streak = journalStreak(), focus = ui.jFocus && findNote('journal', ui.jFocus);
-  return `<div class="flex flex-wrap items-center gap-2 mb-4">
+  return `<div id="j-workspace"><div class="flex flex-wrap items-center gap-2 mb-4">
     <button class="btn btn-primary" data-action="journalNew" data-type="journal">${icon('pen-line')} New entry</button>
     <button class="btn" data-action="jTemplates">${icon('layout-template')} Templates</button>
     <button class="btn" data-action="gratitudeOpen">${icon('sparkles')} Gratitude</button>
@@ -3888,7 +3927,7 @@ function renderJournal() {
     <div class="card p-3 h-fit"><div class="flex gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800 mb-3">${[['list', 'List', 'list'], ['cal', 'Calendar', 'calendar-days'], ['insights', 'Insights', 'line-chart']].map(([k, l, ic]) => `<button class="tab flex-1 ${ui.jView === k ? 'tab-active' : ''}" data-action="jView" data-v="${k}">${icon(ic, 'w-3.5 h-3.5 inline -mt-0.5')} ${l}</button>`).join('')}</div>
       ${({ list: jList, cal: jCalendar, insights: jInsights }[ui.jView] || jList)(all)}</div>
     <div class="lg:col-span-2">${cur ? journalEditor(cur) : emptyState('notebook-pen', 'Pick an entry or start a new one', 'Entries save automatically as you type. Try a template, rate your mood, dictate with your voice, or switch to Focus mode for distraction-free writing.', `<button class="btn btn-primary" data-action="journalNew" data-type="journal">${icon('pen-line')} New entry</button> <button class="btn" data-action="jTemplates">${icon('layout-template')} Templates</button>`)}</div>
-  </div>${focus ? focusOverlay(focus) : ''}`;
+  </div></div>${focus ? focusOverlay(focus) : ''}`;
 }
 // Live word count + Scripture chips while typing
 document.addEventListener('input', e => {
@@ -3896,7 +3935,6 @@ document.addEventListener('input', e => {
   const wc = `${fmtNum(wordCount(t.value))} words`; const a = $('#j-wc'), b = $('#jf-wc'); if (a) a.textContent = wc; if (b) b.textContent = wc;
   const r = $('#j-refs'); if (r) { clearTimeout(r._t); r._t = setTimeout(() => { const f = findRefs(t.value); r.innerHTML = f.length ? ` · ${f.slice(0, 8).map(x => `<button type="button" class="chip text-[11px] hover:border-brand-400" data-action="refOpen" data-ref="${esc(x.lab)}">${esc(x.lab)}</button>`).join('')}` : ''; }, 400); }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && ui.jFocus && !Modal.isOpen()) { ui.jFocus = null; render(); } });
 // Voice dictation (Chrome / Edge Web Speech API)
 const JDict = { on: false, rec: null };
 function jDictUi() { $$('[data-action="jDictate"]').forEach(b => { b.classList.toggle('btn-primary', JDict.on); const l = b.querySelector('.jd-label'); if (l) l.textContent = JDict.on ? 'Listening…' : 'Dictate'; }); }
@@ -4793,18 +4831,18 @@ function fpDetail(p) {
   const gifts = Store.get('gifts').filter(g => g.personId === p.id).sort((a, b) => ['idea', 'bought', 'given'].indexOf(a.status) - ['idea', 'bought', 'given'].indexOf(b.status)), fld = (f, l, ph, type = 'text') => `<div><label class="label">${l}</label><input type="${type}" class="input text-sm" value="${esc(p[f] || '')}" data-input="fpField" data-id="${p.id}" data-f="${f}" placeholder="${esc(ph)}"></div>`;
   const ta = (f, l, ph) => `<div><label class="label">${l}</label><textarea class="input text-sm" rows="3" data-input="fpField" data-id="${p.id}" data-f="${f}" placeholder="${esc(ph)}">${esc(p[f] || '')}</textarea></div>`;
   const kid = p.role === 'child', growth = (p.growth || []).slice().sort((a, b) => b.date.localeCompare(a.date)), memories = Store.get('memories').filter(m => (m.people || []).includes(p.id)).slice(-4).reverse();
-  return `<div class="flex items-center gap-2 mb-3"><button class="btn btn-sm" data-action="fpBack">${icon('arrow-left', 'w-3.5 h-3.5')} Family</button><span class="flex-1"></span><button class="btn btn-sm btn-danger" data-action="fpDel" data-id="${p.id}">${icon('trash-2', 'w-3.5 h-3.5')}</button></div>
+  return `<div class="flex items-center gap-2 mb-3"><button class="btn btn-sm" data-action="fpBack">${icon('arrow-left', 'w-3.5 h-3.5')} Family</button><span class="flex-1"></span><button class="btn btn-sm btn-danger" data-action="fpDel" data-id="${p.id}" aria-label="Remove family member">${icon('trash-2', 'w-3.5 h-3.5')}</button></div>
   <div class="grid lg:grid-cols-3 gap-4"><div class="lg:col-span-2 space-y-4"><div class="card space-y-3"><div class="flex items-center gap-3">${fpAvatar(p, 'w-14 h-14 text-xl')}<input class="input text-lg font-semibold" value="${esc(p.name)}" data-input="fpField" data-id="${p.id}" data-f="name" aria-label="Name"></div>
       <div class="grid sm:grid-cols-3 gap-2"><div><label class="label">Relationship</label><select class="input text-sm" data-change="fpSet" data-id="${p.id}" data-f="role">${Object.entries(FROLE).map(([k, l]) => `<option value="${k}" ${p.role === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Birthday</label><input type="date" class="input text-sm" value="${p.birthday || ''}" data-change="fpSet" data-id="${p.id}" data-f="birthday"></div>${fld('phone', 'Phone', '')}</div>
       <div><div class="label">Love language (tap in order)</div><div class="flex flex-wrap gap-1">${Object.entries(LOVE_LANGS).map(([k, l]) => { const i = (p.loveLang || []).indexOf(k); return `<button class="chip text-[11px] ${i === 0 ? 'chip-on' : i > 0 ? 'bg-brand-100 text-brand-800 dark:bg-brand-900/50 dark:text-brand-200' : ''}" data-action="fpLove" data-id="${p.id}" data-v="${k}">${i >= 0 ? `${i + 1}. ` : ''}${l}</button>`; }).join('')}</div></div>
       <div class="grid sm:grid-cols-2 gap-3">${ta('favorites', 'Favorites', 'Coffee order, snacks, restaurants, colors, hobbies…')}${ta('sizes', 'Sizes', 'Shirt, pants, shoes, ring…')}</div>${ta('notes', 'Notes', 'Things to remember…')}</div>
     ${kid ? `<div class="card">${cardHead('ruler', 'Growth')}<form class="flex flex-wrap gap-2 mb-3" data-submit="fpGrowth" data-id="${p.id}"><input type="date" name="date" class="input w-auto" value="${ymd()}"><input name="h" class="input w-28" placeholder="Height (${S.unit === 'lbs' ? 'in' : 'cm'})" inputmode="decimal"><input name="w" class="input w-28" placeholder="Weight (${S.unit})" inputmode="decimal"><button class="btn btn-sm btn-primary">${icon('plus', 'w-3.5 h-3.5')} Add</button></form>
       ${growth.length ? `<table class="w-full text-sm"><thead><tr class="text-xs muted text-left"><th class="py-1">Date</th><th>Age</th><th>Height</th><th>Weight</th><th></th></tr></thead><tbody>${growth.map(g => `<tr class="border-t border-slate-100 dark:border-slate-800"><td class="py-1.5">${fmtDate(g.date)}</td><td>${p.birthday ? `${fmtNum(daysBetween(p.birthday, g.date) / 365.25, 1)}` : ''}</td><td>${g.h ? cmIn(g.h) : '–'}</td><td>${g.w ? wFmt(g.w) : '–'}</td><td><button class="btn btn-ghost btn-sm" data-action="fpGrowthDel" data-id="${p.id}" data-g="${g.id}" aria-label="Delete">${icon('x', 'w-3 h-3')}</button></td></tr>`).join('')}</tbody></table>` : '<p class="text-sm muted">No measurements yet.</p>'}</div>
-    <div class="card">${cardHead('smile', 'Firsts & funny quotes')}<form class="flex flex-wrap gap-2 mb-3" data-submit="fpQuote" data-id="${p.id}"><select name="kind" class="input w-auto"><option value="quote">Said</option><option value="first">First</option></select><input name="text" class="input flex-1 min-w-[12rem]" placeholder="“Daddy, God made the moon for night lights”" required><input type="date" name="date" class="input w-auto" value="${ymd()}"><button class="btn btn-sm btn-primary">${icon('plus', 'w-3.5 h-3.5')}</button></form>
+    <div class="card">${cardHead('smile', 'Firsts & funny quotes')}<form class="flex flex-wrap gap-2 mb-3" data-submit="fpQuote" data-id="${p.id}"><select name="kind" class="input w-auto"><option value="quote">Said</option><option value="first">First</option></select><input name="text" class="input flex-1 min-w-[12rem]" placeholder="“Daddy, God made the moon for night lights”" required><input type="date" name="date" class="input w-auto" value="${ymd()}"><button class="btn btn-sm btn-primary" aria-label="Add quote or first">${icon('plus', 'w-3.5 h-3.5')}</button></form>
       <div class="space-y-1.5">${(p.quotes || []).slice().sort((a, b) => b.date.localeCompare(a.date)).map(q => `<div class="flex gap-2 text-sm"><span class="chip text-[10px] shrink-0">${q.kind === 'first' ? '⭐ First' : '💬'}</span><span class="flex-1">${q.kind === 'quote' ? `“${esc(q.text)}”` : esc(q.text)}</span><span class="text-xs muted shrink-0">${fmtDate(q.date, { month: 'short', day: 'numeric', year: 'numeric' })}${p.birthday ? ` · age ${ageOn(p.birthday, q.date)}` : ''}</span><button class="btn btn-ghost btn-sm" data-action="fpQuoteDel" data-id="${p.id}" data-q="${q.id}" aria-label="Delete">${icon('x', 'w-3 h-3')}</button></div>`).join('') || '<p class="text-sm muted">Capture the little things before they’re forgotten.</p>'}</div></div>` : ''}</div>
     <div class="space-y-4"><div class="card">${cardHead('hand-heart', 'Praying for')}<textarea class="input text-sm" rows="3" data-input="fpField" data-id="${p.id}" data-f="prayer" placeholder="What you’re asking God for them right now">${esc(p.prayer || '')}</textarea>
       <div class="flex gap-2 mt-2"><button class="btn btn-sm ${(p.prayed || []).includes(ymd()) ? 'chip-on' : ''}" data-action="fpPrayed" data-id="${p.id}">🙏 Prayed today</button><button class="btn btn-sm" data-action="fpToPrayer" data-id="${p.id}">${icon('list-plus', 'w-3.5 h-3.5')} Add to prayer list</button></div><p class="text-xs muted mt-2">Prayed ${(p.prayed || []).length} time${(p.prayed || []).length === 1 ? '' : 's'}</p></div>
-    <div class="card">${cardHead('gift', 'Gift ideas')}<form class="space-y-2 mb-3" data-submit="giftAdd" data-id="${p.id}"><input name="idea" class="input text-sm" placeholder="Idea — capture it the moment you hear it" required autocomplete="off"><div class="flex gap-2"><input name="occasion" class="input text-sm" placeholder="Occasion" list="gift-occ"><input name="price" class="input text-sm w-24" placeholder="$" inputmode="decimal"><button class="btn btn-sm btn-primary shrink-0">${icon('plus', 'w-3.5 h-3.5')}</button></div><datalist id="gift-occ"><option>Birthday</option><option>Christmas</option><option>Anniversary</option><option>Valentine’s</option><option>Mother’s Day</option><option>Just because</option></datalist></form>
+    <div class="card">${cardHead('gift', 'Gift ideas')}<form class="space-y-2 mb-3" data-submit="giftAdd" data-id="${p.id}"><input name="idea" class="input text-sm" placeholder="Idea — capture it the moment you hear it" required autocomplete="off"><div class="flex gap-2"><input name="occasion" class="input text-sm" placeholder="Occasion" list="gift-occ"><input name="price" class="input text-sm w-24" placeholder="$" inputmode="decimal"><button class="btn btn-sm btn-primary shrink-0" aria-label="Add gift idea">${icon('plus', 'w-3.5 h-3.5')}</button></div><datalist id="gift-occ"><option>Birthday</option><option>Christmas</option><option>Anniversary</option><option>Valentine’s</option><option>Mother’s Day</option><option>Just because</option></datalist></form>
       <div class="space-y-1.5">${gifts.map(g => `<div class="flex items-center gap-2 text-sm"><button class="chip text-[10px] w-16 justify-center ${g.status === 'idea' ? '' : g.status === 'bought' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200'}" data-action="giftStatus" data-id="${g.id}" title="Tap to change">${{ idea: 'Idea', bought: 'Bought', given: 'Given' }[g.status]}</button><span class="flex-1 ${g.status === 'given' ? 'muted line-through' : ''}">${esc(g.idea)}${g.occasion ? ` <span class="text-xs muted">· ${esc(g.occasion)}</span>` : ''}</span>${g.price ? `<span class="text-xs tabular-nums">$${fmtNum(g.price)}</span>` : ''}<button class="btn btn-ghost btn-sm" data-action="giftDel" data-id="${g.id}" aria-label="Delete">${icon('x', 'w-3 h-3')}</button></div>`).join('') || '<p class="text-sm muted">No ideas yet.</p>'}</div>
       ${gifts.some(g => g.status !== 'given' && g.price) ? `<p class="text-xs muted mt-2">Planned: $${fmtNum(sum(gifts.filter(g => g.status !== 'given').map(g => +g.price || 0)))}</p>` : ''}</div>
     ${memories.length ? `<div class="card">${cardHead('images', 'Memories')}${memories.map(m => `<div class="text-sm py-1.5 border-t border-slate-100 dark:border-slate-800 first:border-t-0"><span class="text-xs muted">${fmtDate(m.date)}</span> ${esc(m.text)}</div>`).join('')}</div>` : ''}</div></div>`;
@@ -5722,9 +5760,9 @@ function dueChip(t) {
 const taskRowMini = t => `<label class="flex items-center gap-2 text-sm py-1 cursor-pointer"><input type="checkbox" class="accent-brand-600 w-4 h-4" data-change="taskToggle" data-id="${t.id}"><span class="w-1.5 h-1.5 rounded-full ${PRI[t.priority || 'med'][1]}"></span><span class="flex-1 truncate">${esc(t.title)}</span>${dueChip(t)}</label>`;
 function taskCard(t) {
   const done = t.status === 'done', idx = STATUSES.findIndex(s => s[0] === t.status);
-  return `<div class="card p-3 cursor-pointer hover:border-brand-400 ${done ? 'opacity-70' : ''}" draggable="true" data-drag-task="${t.id}" data-action="taskEdit" data-id="${t.id}">
+  return `<div class="card p-3 cursor-pointer hover:border-brand-400" draggable="true" data-drag-task="${t.id}" data-action="taskEdit" data-id="${t.id}">
     <div class="flex items-start gap-2"><input type="checkbox" class="mt-0.5 w-4 h-4 accent-brand-600 shrink-0" data-change="taskToggle" data-id="${t.id}" ${done ? 'checked' : ''} aria-label="Complete">
-      <div class="flex-1 min-w-0"><div class="text-sm font-medium break-words ${done ? 'line-through muted' : ''}">${esc(t.title)}</div>${t.notes ? `<div class="text-xs muted line-clamp-2 mt-0.5">${esc(t.notes)}</div>` : ''}
+      <div class="flex-1 min-w-0"><button class="text-left text-sm font-medium break-words hover:underline ${done ? 'line-through muted' : ''}" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button>${t.notes ? `<div class="text-xs muted line-clamp-2 mt-0.5">${esc(t.notes)}</div>` : ''}
         <div class="flex flex-wrap items-center gap-1 mt-2"><span class="w-2 h-2 rounded-full ${PRI[t.priority || 'med'][1]}" title="${PRI[t.priority || 'med'][0]} priority"></span>${taskMeta(t)}${(t.tags || []).map(tagChip).join('')}</div></div>
       <div class="flex flex-col -mr-1"><button class="btn btn-ghost btn-sm px-1" data-action="taskMove" data-id="${t.id}" data-d="-1" ${idx === 0 ? 'disabled' : ''} title="Move left">${icon('chevron-left', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1" data-action="taskMove" data-id="${t.id}" data-d="1" ${idx === 2 ? 'disabled' : ''} title="Move right">${icon('chevron-right', 'w-3.5 h-3.5')}</button></div></div></div>`;
 }
@@ -5924,7 +5962,7 @@ function taskMeta(t, { noDue } = {}) {
 }
 function taskRow(t, o = {}) {
   const done = !tOpen(t), isB3 = big3().includes(t);
-  return `<div class="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5 ${done ? 'opacity-60' : ''}" ${o.drag ? `draggable="true" data-drag-task="${t.id}"` : ''}><input type="checkbox" class="mt-0.5 w-4 h-4 accent-brand-600 shrink-0" data-change="taskToggle" data-id="${t.id}" ${done ? 'checked' : ''} aria-label="Complete">
+  return `<div class="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5" ${o.drag ? `draggable="true" data-drag-task="${t.id}"` : ''}><input type="checkbox" class="mt-0.5 w-4 h-4 accent-brand-600 shrink-0" data-change="taskToggle" data-id="${t.id}" ${done ? 'checked' : ''} aria-label="Complete">
     <div class="flex-1 min-w-0"><button class="text-left text-sm font-medium break-words hover:underline ${done ? 'line-through' : ''}" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><div class="flex flex-wrap items-center gap-1 mt-1 empty:hidden"><span class="w-1.5 h-1.5 rounded-full ${PRI[t.priority || 'med'][1]}" title="${PRI[t.priority || 'med'][0]} priority"></span>${taskMeta(t, o)}</div>${o.extra || ''}</div>
     <div class="flex items-center gap-0.5 shrink-0">${o.today ? `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="today">Today</button>` : ''}${tOpen(t) ? `<button class="btn btn-ghost btn-sm px-1.5 ${isB3 ? 'text-amber-500' : 'opacity-50 hover:opacity-100'}" data-action="big3Toggle" data-id="${t.id}" title="${isB3 ? 'Remove from' : 'Add to'} this week’s Big 3" aria-label="Big 3">${icon('star', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="blkNew" data-task="${t.id}" title="Block time" aria-label="Block time">${icon('calendar-clock', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="ftStartA" data-id="${t.id}" title="Focus 25 min" aria-label="Focus">${icon('target', 'w-3.5 h-3.5')}</button>` : ''}</div></div>`;
 }
@@ -6331,6 +6369,7 @@ document.addEventListener('change', e => { const el = e.target.closest('[data-ch
 document.addEventListener('submit', e => { const f = e.target.closest('[data-submit]'); if (!f) return; e.preventDefault(); const fn = A[f.dataset.submit]; if (fn) fn(f, e); });
 document.addEventListener('keydown', e => {
   if (Modal.isOpen()) { Modal.keydown(e); if (e.defaultPrevented) return; }
+  else if ($('#j-focus')) { JournalFocus.keydown(e); if (e.defaultPrevented) return; }
   if (e.key === 'Escape' && $('#sidebar').classList.contains('open')) { e.preventDefault(); closeSidebar(); }
   const el = e.target.closest('[role="button"][data-action]');
   if (el && e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }

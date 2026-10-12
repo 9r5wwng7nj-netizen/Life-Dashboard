@@ -90,6 +90,49 @@ async function imports() {
   assert(TK().length === before + 1, 'Recurring completion created duplicates'); Store.save('tasks'); await Store.flushDirty();
   return { hevyWorkouts: parsed.workouts.length, macroFactorReimport: true, manualNutritionPreserved: true, backupMergeReplace: true, recurringTask: true };
 }
+async function detailAccessibility() {
+  const previousTheme = S.theme, failures = []; let screens = 0;
+  const scan = async (label, show) => {
+    Modal.close(); ui.jFocus = null; show(); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const result = await axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] } });
+    screens++; for (const violation of result.violations) failures.push({ label, rule: violation.id, nodes: violation.nodes.map(n => n.html).slice(0, 4) });
+  };
+  for (const theme of ['light', 'dark']) {
+    S.theme = theme; applyTheme();
+    await scan(theme + '/task-board', () => { ui.taskTab = 'all'; ui.taskView = 'board'; go('tasks'); });
+    if (!$('button[data-action="taskEdit"][data-id="fixture-task-0"]')) throw new Error('Task board has no keyboard-edit control');
+    await scan(theme + '/journal-editor', () => { ui.jId = 'fixture-journal-0'; go('journal'); });
+    await scan(theme + '/journal-focus', () => { ui.jFocus = 'fixture-journal-0'; render(); });
+    if (!$('#j-workspace').inert || !$('#sidebar').inert) throw new Error('Journal Focus background is not inert');
+    ui.jFocus = null; render();
+    await scan(theme + '/family-detail', () => { ui.fpId = 'fixture-person-1'; ui.famTab = 'people'; go('family'); });
+    await scan(theme + '/family-rating', () => { ui.fpId = null; ui.famTab = 'checkin'; go('family'); $$('input[name="rating"]')[3].checked = true; });
+    await scan(theme + '/book-detail', () => { ui.medOpen = 'fixture-media-1'; go('media'); });
+    await scan(theme + '/study-editor', () => { A.scrNoteOpen({ dataset: { id: 'fixture-note-0' } }); });
+  }
+  Modal.close(); ui.medOpen = null; S.theme = previousTheme; applyTheme();
+  if (failures.length) throw new Error('Detail accessibility failures: ' + JSON.stringify(failures));
+  return { lightDarkDetailScreens: screens, keyboardTaskEdit: true, journalFocusBackground: true };
+}
+async function serviceRecovery() {
+  const original = window.fetch, checks = [];
+  const expectError = async (name, action, text) => { let message = ''; try { await action(); } catch (e) { message = e.message; } if (!message.includes(text)) throw new Error(name + ' recovery failed: ' + message); checks.push(name); };
+  try {
+    window.fetch = (_url, opts) => new Promise((_, reject) => opts.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
+    await expectError('timeout', () => fetchServiceJSON('https://example.invalid', {}, 20), 'too long');
+    window.fetch = async (_url, opts) => ({ ok: true, json: () => new Promise((_, reject) => opts.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))) });
+    await expectError('body-timeout', () => fetchServiceJSON('https://example.invalid', {}, 20), 'too long');
+    window.fetch = async () => { throw new TypeError('Failed to fetch'); };
+    await expectError('unreachable', () => searchOFF('synthetic query'), 'could not be reached');
+    window.fetch = async () => new Response('not JSON', { status: 200 });
+    await expectError('invalid-response', () => fetchServiceJSON('https://example.invalid'), 'unreadable');
+    window.fetch = async () => new Response('', { status: 429 });
+    await expectError('USDA-limit', () => searchUSDA('synthetic query'), 'limit reached');
+    window.fetch = async () => new Response('', { status: 503 });
+    await expectError('OFF-server-error', () => searchOFF('synthetic query'), '503');
+    return { recoveryChecks: checks };
+  } finally { window.fetch = original; }
+}
 
 try {
   run(['open', appURL, '--config', 'scripts/probe-browser.json']);
@@ -100,12 +143,17 @@ try {
     const result = JSON.parse(output.replace(/^### Result\s*/, ''));
     if (result.failures.length || result.consoleErrors.length) throw new Error('Populated views failed: ' + JSON.stringify(result));
   }
+  run(['resize', '1200', '953']);
+  run(['run-code', 'async page => { await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" }); }']);
+  console.log('Detail accessibility', run(['eval', detailAccessibility.toString()]));
+  console.log('Service recovery', run(['eval', serviceRecovery.toString()]));
+  run(['run-code', 'async page => { await page.context().setOffline(true); const message = await page.evaluate(async () => { try { await searchOFF("synthetic query"); return ""; } catch (e) { return e.message; } }); await page.context().setOffline(false); if (!message.includes("offline")) throw new Error("Offline recovery failed"); }']);
   console.log('Imports', run(['eval', imports.toString()]));
   run(['snapshot']);
   console.log('Edits', run(['run-code', `async page => {
     await page.setViewportSize({ width: 1200, height: 953 });
     await page.evaluate(() => { ui.taskTab = 'all'; ui.taskView = 'list'; ui.taskArea = null; go('tasks'); });
-    await page.locator('[data-action="taskEdit"][data-id="fixture-task-0"]').click();
+    await page.locator('button[data-action="taskEdit"][data-id="fixture-task-0"]').click();
     await page.locator('#modal input[name=title]').fill('Synthetic task edited');
     await page.locator('#modal form').evaluate(f => f.requestSubmit());
     await page.evaluate(() => { if (tFind('fixture-task-0').title !== 'Synthetic task edited' || tFind('fixture-task-0').subtasks.length !== 1) throw new Error('Task edit lost fields'); ui.jView = 'list'; ui.jSearch = ''; go('journal'); });
@@ -113,6 +161,15 @@ try {
     await page.waitForFunction(() => $$('#view [data-jlist]').length === 1);
     await page.locator('[data-action="journalOpen"][data-id="fixture-journal-0"]').click();
     await page.locator('#j-body').fill('Synthetic autosaved journal edit');
+    await page.locator('[data-action="jFocus"]').click();
+    await page.waitForFunction(() => !!$('#j-focus') && document.activeElement.id === 'jf-body');
+    await page.evaluate(() => focusableElements($('#j-focus'))[0].focus());
+    await page.keyboard.press('Shift+Tab');
+    await page.evaluate(() => { const list = focusableElements($('#j-focus')); if (document.activeElement !== list[list.length - 1]) throw new Error('Journal Focus does not wrap Shift+Tab'); if (getComputedStyle($('#jf-body')).outlineStyle === 'none') throw new Error('Journal Focus lacks a visible keyboard focus indicator'); });
+    await page.keyboard.press('Tab');
+    await page.evaluate(() => { if (document.activeElement !== focusableElements($('#j-focus'))[0]) throw new Error('Journal Focus does not wrap Tab'); });
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => { if ($('#j-focus') || $('#j-workspace').inert || $('#app-shell header').inert || document.activeElement.dataset.action !== 'jFocus') throw new Error('Journal Focus did not restore background/focus'); });
     await page.evaluate(() => { if (Store.get('journal')[0].body !== 'Synthetic autosaved journal edit') throw new Error('Journal autosave failed'); ui.recTab = 'box'; go('recipes'); });
     await page.locator('[data-action="recView"][data-id="fixture-recipe-0"]').click();
     await page.locator('[data-action="recEdit"][data-id="fixture-recipe-0"]').click();

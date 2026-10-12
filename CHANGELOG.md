@@ -3,6 +3,8 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Journal Focus is a named keyboard-contained dialog with an inert background, visible focus, Escape cleanup and return focus. Journal/family detail controls have meaningful names; task-board titles are keyboard-editable and completed tasks retain readable contrast.
+- Food lookups and Bible requests have bounded response/body waits and offline/unreachable/invalid-response recovery messages. Public-service checks and remaining manual steps are documented without claiming service availability or screen-reader certification.
 - Backups containing existing MacroFactor name|unit food identifiers can be restored; unsafe identifiers are still rejected and saved IDs are not rewritten.
 - CI now exercises populated views, common editing/search workflows, recurring tasks, imports/backup roundtrips and performance probes in isolated Chromium contexts.
 - Startup reads the 51 saved collections in a single transaction and stops safely if that read is interrupted.

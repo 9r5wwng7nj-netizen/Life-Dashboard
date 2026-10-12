@@ -14,6 +14,8 @@ Verified:
 - MacroFactor parsed-sheet reimport is idempotent and preserves locally entered nutrition entries and existing weights when overwrite is disabled. Spreadsheet loading is separately checked by the smoke suite.
 - Full populated backup merge/repeated merge and replace preserve collection counts and photos.
 - Completing a recurring task twice creates one successor, not duplicates.
+- Fourteen light/dark populated detail states pass accessibility scans. Journal Focus keyboard wrapping, visible focus, background isolation, Escape cleanup and return focus are verified; task-board titles have native edit buttons.
+- Simulated slow headers/body, network/CORS failure, invalid JSON, USDA rate limits, Open Food Facts HTTP errors and offline mode produce recoverable errors without live credentials.
 
 This pass found a real compatibility defect: generated MacroFactor food IDs use mf:name|unit, but backup validation previously rejected the separator. The shared validator now accepts this exact existing format without changing stored IDs or allowing arbitrary pipe-containing identifiers, quotes or markup.
 
@@ -32,7 +34,7 @@ Local synchronous populated renders were roughly 30–70 ms for the slowest scre
 ## Outstanding checks
 
 1. **Manual assistive technology:** VoiceOver/TalkBack reading order, announcements, dialog navigation, embedded media, and detailed WCAG 2.2 target-size review. Automated axe/keyboard checks are not certification.
-2. **Live optional services:** authenticated Scripture/food lookup, podcast availability/playback, remote article metadata, notifications and dictation. Network access is blocked during deterministic probes. A passing probe does not verify these services or their credentials.
+2. **Live optional services:** public Bible, podcast discovery, video metadata, barcode and USDA demo checks were separately performed on 2026-10-12; see docs/LIVE_SERVICES.md. Authenticated Scripture/food keys, actual playback, generic article metadata, notifications and dictation remain unverified. Network access is blocked during deterministic probes; a passing probe does not guarantee live availability.
 3. **Reference libraries and additional workflows:** downloaded full Bibles/Berean tables, workout-editor flows, photo uploads/resizing, very large media libraries, and more cross-record links. Not every collection is populated and not every action is activated.
 4. **Additional browsers and failures:** Safari/Firefox, more browser-storage failures, interrupted imports, and file-origin populated interactions. The standard smoke suite checks file-origin startup/navigation/persistence, while CLI populated probes run on localhost.
 5. **Mobile foundation:** hosting, offline PWA and private sync remain deferred by Seth's request. Phone-width regression checks preserve existing layout; they do not enable cross-device use.
