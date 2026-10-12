@@ -10,7 +10,7 @@ Your data stays in your browser. There's no account or application server. Runti
 
 ## Use it
 
-Open `index.html` in Chrome. That's it.
+Open `index.html` in Chrome, or use the hosted copy at <https://9r5wwng7nj-netizen.github.io/Life-Dashboard/>, which can be installed on a phone and opens offline. GitHub Pages publishes the `main` branch there after every push.
 
 > **Your existing data:** it lives in the browser, not in this repo. Before you switch to the copy of `index.html` in this repo, read [docs/YOUR_DATA.md](docs/YOUR_DATA.md). Opening it from a different place, or from a web address instead of a file, can show an empty app until you import a backup.
 
@@ -58,4 +58,4 @@ CHANGELOG.md             what was built, phase by phase
 
 ## Privacy
 
-Never commit backup files (`life-dashboard-backup-*.json`). They contain your journal, prayers and family notes, and `.gitignore` already blocks them. API keys you enter in Settings stay in the browser and are never written to this repo. Keep the GitHub repository **private**.
+Never commit backup files (`life-dashboard-backup-*.json`). They contain your journal, prayers and family notes, and `.gitignore` already blocks them. API keys you enter in Settings stay in the browser and are never written to this repo. This repository and the hosted copy are **public**, so anything committed here is visible to everyone; your records are not, because they stay in each browser.

@@ -6,7 +6,7 @@ Everything you've entered lives in **Chrome's storage for the place the app is o
 |---|---|---|
 | Double-clicking an `index.html` / `life-dashboard.html` on your computer, in the same Chrome profile | `file://` | **Yes.** Chrome shares one storage area for local files, so a copy in a new folder normally sees the same data. |
 | `npm start` → `http://localhost:8080` | `http://localhost:8080` | No. It starts empty. |
-| A hosted address (GitHub Pages, your own domain) | that address | No. It starts empty. |
+| The hosted address (GitHub Pages) | that address | No. It starts empty. |
 | A different browser, Chrome profile or computer | — | No |
 
 ## Before you switch to the repo copy
@@ -39,9 +39,9 @@ These live on the device. You redo them once on any new origin or device:
 
 ## Phone + laptop (in progress)
 
-The plan is to host the app at an https address as an installable PWA and sync through a private Google Drive folder. The app can already be installed and opened offline once it is hosted; hosting and sync are not set up yet.
+The plan is to host the app at an https address as an installable PWA and sync through a private Google Drive folder. The app is hosted at <https://9r5wwng7nj-netizen.github.io/Life-Dashboard/> and can be installed and opened offline; sync is not set up yet.
 
-When the hosted address exists:
+To start using the hosted address:
 
 1. On the laptop, export a backup from the copy you use today, open the hosted address in Chrome and import the backup there. Use the hosted address from then on.
 2. On the iPhone, open the address in Safari, tap **Share → Add to Home Screen**, then open the app from the home-screen icon and import the same backup **inside that installed app**. The installed app keeps its own data, separate from Safari.
