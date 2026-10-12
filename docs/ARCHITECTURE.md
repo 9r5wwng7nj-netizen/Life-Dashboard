@@ -19,7 +19,7 @@
 
 1. **CORE UTILITIES**: DOM helpers, date math (local `YYYY-MM-DD`, Monday weeks), formatting, `icon()`, `download()`, `copyText()`.
 2. **SETTINGS**: `SETTINGS_DEFAULT`, `S`, `saveSettings()`.
-3. **STORAGE**: `COLLECTIONS` and `Store` (IndexedDB `kv` store, localStorage fallback, debounced `save()`, flush on `pagehide`/`visibilitychange`).
+3. **STORAGE**: `COLLECTIONS` and `Store` (IndexedDB `kv` store, localStorage fallback, debounced `save()`, flush on `pagehide`/`visibilitychange`). `readMany()` loads the collections in one readonly transaction. A failed transaction stops initialization rather than treating unread records as missing defaults.
 4. **UI PRIMITIVES**: `toast`, `Modal`, `modalShell`, `tabs`, `cardHead`, `emptyState`, `ui` state.
 5. **ROUTER / SHELL**: `VIEWS`, `renderNav`, `render`/`renderNow` (with a re-entrancy guard), `rerender` (keeps focus), `afterRender` (hydrate photos, icons, media player), `go(view)`.
 6. **REST TIMER**: floating timer `Timer` (persists in `ld.timer`), `beep`, `notify`.
@@ -52,6 +52,8 @@ user clicks [data-action="x"]  →  A.x(el, event)  →  mutate Store.get(key) /
 ```
 
 Modules render with template strings. `esc()` every user value. Keep handlers small and put logic in plain functions so it can be tested.
+
+`groupBy()` builds short-lived ordered maps for Projects/People views. It does not clone records or persist an index, so edits and imports cannot leave stale cached task groups. Photo URLs are similarly presentation-only: pending reads are deduplicated, and `Photos.prune()` releases URLs not referenced by current photo elements. Saved blobs remain in IndexedDB. See `docs/PERFORMANCE.md` for measurements and remaining work.
 
 ## Adding a feature (checklist)
 

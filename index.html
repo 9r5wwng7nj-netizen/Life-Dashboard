@@ -94,6 +94,11 @@ const num = v => { if (v === '' || v == null) return null; const n = parseFloat(
 const round = (n, d = 1) => n == null ? null : Math.round(n * 10 ** d) / 10 ** d;
 const fmtNum = (n, d = 0) => (n == null || isNaN(n)) ? '–' : Number(round(n, d)).toLocaleString(undefined, { maximumFractionDigits: d });
 const sum = arr => arr.reduce((a, b) => a + (+b || 0), 0);
+function groupBy(items, keyOf) { // Derived per call: preserve order/identity without stale persistent indexes.
+  const groups = new Map();
+  for (const item of items) { const key = keyOf(item); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(item); }
+  return groups;
+}
 const startOfWeek = (s = ymd()) => { const d = parseYmd(s); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return ymd(d); }; // Monday
 const fmtDur = sec => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60); return h ? `${h}h ${m}m` : `${m}m`; };
 const fmtClock = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return h ? `${h}:${pad(m)}:${pad(x)}` : `${m}:${pad(x)}`; };
@@ -164,10 +169,20 @@ const Store = {
         r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
       });
     } catch (e) { console.warn('IndexedDB unavailable — falling back to localStorage', e); this.db = null; }
-    for (const k of Object.keys(COLLECTIONS)) {
-      const v = await this.read(k);
+    const keys = Object.keys(COLLECTIONS), values = await this.readMany(keys);
+    for (const [i, k] of keys.entries()) {
+      const v = values[i];
       this.data[k] = v === undefined ? structuredClone(COLLECTIONS[k]) : v;
     }
+  },
+  readMany(keys) {
+    if (!this.db) return Promise.all(keys.map(k => this.read(k)));
+    return new Promise((res, rej) => {
+      const tx = this.db.transaction('kv', 'readonly'), store = tx.objectStore('kv'), values = new Array(keys.length);
+      keys.forEach((k, i) => { const q = store.get(k); q.onsuccess = () => { values[i] = q.result; }; });
+      tx.oncomplete = () => res(values);
+      tx.onerror = tx.onabort = () => rej(tx.error || new Error('Reading saved data was interrupted'));
+    });
   },
   read(k) {
     if (!this.db) { try { const s = localStorage.getItem('ld.data.' + k); return Promise.resolve(s == null ? undefined : JSON.parse(s)); } catch (e) { return Promise.resolve(undefined); } }
@@ -298,12 +313,14 @@ const Modal = {
     if (heading) { heading.id = 'modal-title'; heading.tabIndex = -1; dialog.setAttribute('aria-labelledby', heading.id); } else dialog.setAttribute('aria-label', 'Life Dashboard dialog');
     modalBackground(true);
     if (!restoreFocus(focused, m)) ($('[autofocus]', dialog) || heading || dialog).focus();
+    hydratePhotos();
   },
   isOpen() { return !$('#modal').classList.contains('hidden'); },
   close() {
     if (!this.isOpen()) return;
     const m = $('#modal'), origin = this.origin, c = this.onClose;
     m.classList.add('hidden'); m.innerHTML = ''; this.onClose = null; this.origin = null; modalBackground(false);
+    Photos.prune();
     if (c) c();
     if (!this.isOpen() && !restoreFocus(origin)) $('#view-title').focus({ preventScroll: true });
   },
@@ -325,7 +342,7 @@ function modalShell(title, body, footer = '', formAction = '') {
   return formAction ? `<form data-submit="${formAction}">${inner}</form>` : inner;
 }
 function tabs(key, items) {
-  return `<div role="group" aria-label="View sections" class="flex gap-1 p-1 rounded-xl bg-slate-200/60 dark:bg-slate-900 overflow-x-auto scroll-thin mb-5 w-full sm:w-fit">${items.map(([id, label, ic]) =>
+  return `<div role="group" aria-label="View sections" class="flex gap-1 p-1 rounded-xl bg-slate-200/60 dark:bg-slate-900 overflow-x-auto scroll-thin mb-5 w-full sm:w-fit max-w-full">${items.map(([id, label, ic]) =>
     `<button class="tab ${ui[key] === id ? 'tab-active' : ''}" aria-pressed="${ui[key] === id}" data-action="setTab" data-key="${key}" data-val="${id}">${ic ? icon(ic, 'w-4 h-4 inline -mt-0.5 mr-1') : ''}${label}</button>`).join('')}</div>`;
 }
 function cardHead(ic, title, right = '') {
@@ -466,7 +483,7 @@ function afterRender() {
   const aw = Store.get('activeWorkout');
   if (aw && $('#elapsed')) { const upd = () => { const e = $('#elapsed'); if (e) e.textContent = fmtClock((Date.now() - new Date(aw.start)) / 1000); }; upd(); tickIv = setInterval(upd, 1000); }
   if (ui.after) { const f = ui.after; ui.after = null; setTimeout(f, 0); }
-  if ($('img[data-photo]')) hydratePhotos();
+  hydratePhotos();
   mpAttach(); if ($('#m-yt')) ytListen();
 }
 function go(view) { S.view = view; saveSettings(); closeSidebar(); lastRendered = null; render(); if (!Modal.isOpen()) $('#view-title').focus({ preventScroll: true }); }
@@ -1510,15 +1527,38 @@ const mDisp = (k, v) => v == null ? '' : String(round(k === 'bf' ? v : (S.unit =
 const mFrom = (k, v) => v == null ? null : (k === 'bf' ? v : (S.unit === 'lbs' ? v * 2.54 : v));
 const mUnit = k => k === 'bf' ? '%' : lenUnit();
 const Photos = {
-  urls: new Map(),
+  urls: new Map(), pending: new Map(),
   ok() { return !!(Store.db && Store.db.objectStoreNames.contains('photos')); },
   tx(mode) { return Store.db.transaction('photos', mode).objectStore('photos'); },
   put(id, blob) { return new Promise((res, rej) => { const t = Store.db.transaction('photos', 'readwrite'); t.objectStore('photos').put(blob, id); t.oncomplete = res; t.onerror = () => rej(t.error); }); },
   get(id) { return new Promise(res => { const q = this.tx('readonly').get(id); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); },
-  del(id) { return new Promise(res => { const t = Store.db.transaction('photos', 'readwrite'); t.objectStore('photos').delete(id); t.oncomplete = res; t.onerror = res; const u = this.urls.get(id); if (u) { URL.revokeObjectURL(u); this.urls.delete(id); } }); },
-  async url(id) { if (this.urls.has(id)) return this.urls.get(id); const b = await this.get(id); if (!b) return null; const u = URL.createObjectURL(b); this.urls.set(id, u); return u; }
+  del(id) { this.pending.delete(id); return new Promise(res => { const t = Store.db.transaction('photos', 'readwrite'); t.objectStore('photos').delete(id); t.oncomplete = res; t.onerror = res; const u = this.urls.get(id); if (u) { URL.revokeObjectURL(u); this.urls.delete(id); } }); },
+  async url(id) {
+    if (this.urls.has(id)) return this.urls.get(id);
+    if (this.pending.has(id)) return this.pending.get(id);
+    const request = this.get(id).then(b => {
+      if (!b || this.pending.get(id) !== request) return null; // Removed/replaced while the read was pending.
+      const u = URL.createObjectURL(b); this.urls.set(id, u); return u;
+    }).finally(() => { if (this.pending.get(id) === request) this.pending.delete(id); });
+    this.pending.set(id, request); return request;
+  },
+  prune() {
+    const visible = new Set($$('img[data-photo]').map(img => img.dataset.photo));
+    for (const [id, url] of this.urls) if (!visible.has(id)) { URL.revokeObjectURL(url); this.urls.delete(id); }
+    for (const id of this.pending.keys()) if (!visible.has(id)) this.pending.delete(id);
+  },
+  clearURLs() { this.pending.clear(); this.urls.forEach(u => URL.revokeObjectURL(u)); this.urls.clear(); }
 };
-async function hydratePhotos() { if (!Photos.ok()) return; for (const img of $$('img[data-photo]')) { if (img.dataset.loaded) continue; const u = await Photos.url(img.dataset.photo); if (u) { img.src = u; img.dataset.loaded = '1'; } } }
+async function hydratePhotos() {
+  if (!Photos.ok()) return;
+  Photos.prune();
+  await Promise.all($$('img[data-photo]').filter(img => !img.dataset.loaded).map(async img => {
+    const id = img.dataset.photo;
+    try { const u = await Photos.url(id); if (u && img.isConnected && img.dataset.photo === id) { img.src = u; img.dataset.loaded = '1'; } }
+    catch (e) { console.warn('Could not load photo', e); }
+  }));
+  Photos.prune();
+}
 async function resizeImage(file, max = 1400) {
   const bmp = await createImageBitmap(file), s = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
   c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
@@ -2150,7 +2190,7 @@ async function restoreBackupPhotos(items, mode) {
   }
   if (mode === 'replace') await idbClear('photos');
   for (const [id, blob] of decoded) await Photos.put(id, blob);
-  Photos.urls.forEach(u => URL.revokeObjectURL(u)); Photos.urls.clear();
+  Photos.clearURLs();
   return decoded.length;
 }
 const BACKUP_LIMIT = 256 * 1024 * 1024;
@@ -2279,7 +2319,7 @@ async function commitBackupImport(plan) {
     throw e;
   }
   Store.data = plan.data; S = plan.settings;
-  Photos.urls.forEach(u => URL.revokeObjectURL(u)); Photos.urls.clear();
+  Photos.clearURLs();
   applyTheme(); applyCollapse();
 }
 async function buildBackupPayload() {
@@ -2299,7 +2339,7 @@ async function resetAllData() {
   clearTimeout(Store.t); Store.dirty.clear();
   await Promise.all(['kv', 'photos', 'bibles'].map(idbClear));
   Object.keys(localStorage).filter(k => k.startsWith('ld.')).forEach(k => localStorage.removeItem(k));
-  Photos.urls.forEach(u => URL.revokeObjectURL(u)); Photos.urls.clear();
+  Photos.clearURLs();
   Object.keys(BibleMem).forEach(k => delete BibleMem[k]); Object.keys(chapCache).forEach(k => delete chapCache[k]);
   S = structuredClone(SETTINGS_DEFAULT);
   Store.data = Object.fromEntries(Object.entries(COLLECTIONS).map(([k, v]) => [k, structuredClone(v)]));
@@ -5942,7 +5982,8 @@ function tasksUpcoming() {
 function tasksProjects() {
   const op = ui.projOpen && projFind(ui.projOpen); if (op) return projDetail(op);
   const ps = Store.get('projects').filter(p => !ui.taskArea || p.area === ui.taskArea), act = ps.filter(p => p.status !== 'done'), done = ps.filter(p => p.status === 'done');
-  const card = p => { const ts = TK().filter(x => x.project === p.id), dn = ts.filter(x => !tOpen(x)).length, nx = ts.filter(tOpen).sort(sortT)[0], pct = ts.length ? Math.round(dn / ts.length * 100) : 0; return `<button class="card text-left hover:border-brand-400 flex flex-col gap-2" data-action="projOpen" data-id="${p.id}"><div class="flex items-start gap-2"><span class="font-semibold flex-1">${esc(p.name)}</span>${p.status === 'paused' ? '<span class="chip text-[10px]">Paused</span>' : ''}${p.due ? `<span class="chip text-[10px] ${p.status !== 'done' && p.due < ymd() ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200' : ''}">${fmtDate(p.due, { month: 'short', day: 'numeric' })}</span>` : ''}</div>
+  const byProject = groupBy(TK(), x => x.project);
+  const card = p => { const ts = byProject.get(p.id) || [], dn = ts.filter(x => !tOpen(x)).length, nx = ts.filter(tOpen).sort(sortT)[0], pct = ts.length ? Math.round(dn / ts.length * 100) : 0; return `<button class="card text-left hover:border-brand-400 flex flex-col gap-2" data-action="projOpen" data-id="${p.id}"><div class="flex items-start gap-2"><span class="font-semibold flex-1">${esc(p.name)}</span>${p.status === 'paused' ? '<span class="chip text-[10px]">Paused</span>' : ''}${p.due ? `<span class="chip text-[10px] ${p.status !== 'done' && p.due < ymd() ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200' : ''}">${fmtDate(p.due, { month: 'short', day: 'numeric' })}</span>` : ''}</div>
       <div class="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"><div class="h-full bg-brand-600" style="width:${pct}%"></div></div><div class="text-xs muted">${dn}/${ts.length} done${nx ? ` · next: ${esc(nx.title)}` : ts.length ? ' · all done ✓' : ''}</div></button>`; };
   const groups = [...AREAS.map(([k, l, ic]) => [l, ic, act.filter(p => p.area === k)]), ['No area', 'folder', act.filter(p => !p.area)]].filter(g => g[2].length);
   return `<form class="card mb-4 grid grid-cols-2 sm:grid-cols-6 gap-2" data-submit="projNew"><input name="name" class="input col-span-2 sm:col-span-3" placeholder="New project — e.g. Spring retreat" required autocomplete="off"><select name="area" class="input">${AREAS.map(([k, l]) => `<option value="${k}" ${ui.taskArea === k ? 'selected' : ''}>${l}</option>`).join('')}<option value="">No area</option></select><input type="date" name="due" class="input" aria-label="Due"><button class="btn btn-primary">${icon('folder-plus')} Add</button></form>
@@ -5964,7 +6005,8 @@ function projDetail(p) {
 // People & follow-ups
 function tasksPeople() {
   const all = TK().filter(x => x.person && inArea(x)), names = [...new Map(all.map(x => [x.person.toLowerCase(), x.person])).values()], t = ymd();
-  const rows = names.map(n => { const ts = all.filter(x => x.person.toLowerCase() === n.toLowerCase()), open = ts.filter(tOpen).sort(sortT), last = ts.filter(x => !tOpen(x)).map(doneOn).sort().pop() || null, waiting = open.filter(x => x.waiting), due = open.filter(x => x.due && x.due <= t).length; return { n, open, last, waiting, due }; }).filter(r => r.open.length || r.last).sort((a, b) => (b.due - a.due) || (b.waiting.length - a.waiting.length) || (a.last || '0').localeCompare(b.last || '0'));
+  const byPerson = groupBy(all, x => x.person.toLowerCase());
+  const rows = names.map(n => { const ts = byPerson.get(n.toLowerCase()), open = ts.filter(tOpen).sort(sortT), last = ts.filter(x => !tOpen(x)).map(doneOn).sort().pop() || null, waiting = open.filter(x => x.waiting), due = open.filter(x => x.due && x.due <= t).length; return { n, open, last, waiting, due }; }).filter(r => r.open.length || r.last).sort((a, b) => (b.due - a.due) || (b.waiting.length - a.waiting.length) || (a.last || '0').localeCompare(b.last || '0'));
   const wall = all.filter(x => tOpen(x) && x.waiting).sort((a, b) => (a.waitSince || '').localeCompare(b.waitSince || ''));
   return `<form class="card mb-4 grid grid-cols-2 sm:grid-cols-6 gap-2 items-center" data-submit="pplAdd"><input name="person" class="input" placeholder="Person" list="ppl-list" required autocomplete="off"><input name="title" class="input col-span-2 sm:col-span-3" placeholder="Follow up about… (dates work: fri, next week)" required autocomplete="off"><label class="flex items-center gap-2 text-sm"><input type="checkbox" name="waiting" value="1" class="accent-brand-600"> Waiting on them</label><button class="btn btn-primary">${icon('plus')} Add</button><datalist id="ppl-list">${knownPeople().map(n => `<option value="${esc(n)}">`).join('')}</datalist></form>
     ${wall.length ? `<div class="card mb-4">${cardHead('hourglass', `Waiting on · ${wall.length}`)}<div class="space-y-2">${wall.map(x => taskRow(x, { extra: `<div class="flex gap-1.5 mt-2"><button class="btn btn-sm" data-action="pplNudge" data-id="${x.id}">${icon('send', 'w-3.5 h-3.5')} Nudge${x.nudged ? ` (last ${fmtDate(x.nudged, { month: 'short', day: 'numeric' })})` : ''}</button><button class="btn btn-sm" data-action="pplGotIt" data-id="${x.id}">${icon('check', 'w-3.5 h-3.5')} Got it</button></div>` })).join('')}</div></div>` : ''}
@@ -6310,7 +6352,11 @@ async function init() {
   render(); Timer.restore();
   try { if (navigator.storage && navigator.storage.persisted && !(await navigator.storage.persisted())) navigator.storage.persist(); } catch (e) {}
 }
-init();
+init().catch(e => {
+  console.error('Could not initialize saved data', e);
+  $('#view').innerHTML = '<div class="card m-6"><h2 class="font-semibold">Could not read saved data</h2><p class="muted mt-2">Your saved data has not been reset. Reload to try again. If this continues, keep this browser profile and seek help before resetting or importing anything.</p></div>';
+  toast('Could not read saved data. Reload to try again.', 'error');
+});
 </script>
 </body>
 </html>
