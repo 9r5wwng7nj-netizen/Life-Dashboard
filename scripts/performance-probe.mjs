@@ -3,13 +3,14 @@
 import { spawnSync } from 'node:child_process';
 
 const cli = process.env.PLAYWRIGHT_CLI || 'npx';
-const prefix = process.env.PLAYWRIGHT_CLI ? [] : ['--yes', '--package', '@playwright/cli', 'playwright-cli'];
+const prefix = process.env.PLAYWRIGHT_CLI ? [] : ['--no-install', 'playwright-cli'];
 const session = '-s=life-dashboard-performance';
 const appURL = process.env.APP_URL || 'http://127.0.0.1:8080/index.html';
 if (!['localhost', '127.0.0.1'].includes(new URL(appURL).hostname)) throw new Error('The probe must use an isolated localhost app.');
 function run(args) {
   const r = spawnSync(cli, [...prefix, session, ...args], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
   if (r.status !== 0) throw new Error(r.error?.message || r.stderr || r.stdout);
+  if (r.stdout.includes('### Error')) throw new Error(r.stdout);
   return r.stdout;
 }
 
@@ -91,7 +92,7 @@ async function probe() {
 }
 
 try {
-  run(['open', appURL]);
+  run(['open', appURL, '--config', 'scripts/probe-browser.json']);
   run(['resize', '1200', '953']);
   run(['run-code', 'async page => { const origin = new URL(page.url()).origin; await page.route("**/*", r => /^(data|blob):/.test(r.request().url()) || new URL(r.request().url()).origin === origin ? r.continue() : r.abort()); await page.reload(); await page.waitForFunction(() => typeof Store !== "undefined" && Array.isArray(Store.data.tasks)); }']);
   console.log(run(['eval', probe.toString()]).split('### Ran Playwright code')[0].trim());

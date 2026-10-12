@@ -27,11 +27,16 @@ npm start                   # serves http://localhost:8080 (see the storage note
 npm run check               # static check: syntax, duplicate functions, action-name collisions
 npx playwright install chromium   # once
 npm test                    # check + Playwright smoke tests (every view/tab, reload persistence, phone width)
+npm run probe:install       # once: install Chromium used by the pinned CLI probes
+npm run probe:populated     # synthetic records, common edits/searches/imports; requires npm start in another terminal
+npm run probe:performance   # large task fixtures, startup reads and photo lifecycle; also requires local server
 ```
 
 You can also just open `index.html` in Chrome; that is how the user runs it.
 
 **Storage is per origin.** `file://`, `http://localhost:8080` and any hosted URL each have their own separate IndexedDB. For testing, use a localhost server or a fresh profile; the user's real data lives under `file://`. The smoke tests use a fresh, empty browser profile every run.
+
+CLI probes use isolated contexts and accept localhost URLs only. Never point a probe at the user's regular Chrome profile or change it to reuse a personal browser session. CI runs both probes after npm test. See docs/QUALITY_ASSURANCE.md for coverage and remaining manual checks.
 
 ## Architecture (all in `index.html`)
 

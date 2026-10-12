@@ -20,15 +20,15 @@ The generated HTML hashes matched exactly before and after for both views. These
 
 ## Repeatable verification
 
-Start the local server with `npm start`, then in a second terminal run `npm run probe:performance`. For a different local port, set `APP_URL` (for example, `APP_URL=http://127.0.0.1:8099/index.html npm run probe:performance`).
+Install development dependencies with `npm ci` and the probe browser with `npm run probe:install`. Start the local server with `npm start`, then in a second terminal run `npm run probe:performance`. For a different local port, set `APP_URL` (for example, `APP_URL=http://127.0.0.1:8099/index.html npm run probe:performance`).
 
-The probe uses a separate Playwright CLI browser profile, blocks non-local network requests after setup, temporarily places synthetic tasks/projects in memory, restores them afterward and removes its one temporary photo. It never accesses the user's regular Chrome profile. The CLI is invoked through npx by default; `PLAYWRIGHT_CLI` can point to an existing executable/wrapper.
+The probe uses an isolated Playwright CLI browser context, blocks non-local network requests after setup, temporarily places synthetic tasks/projects in memory, restores them afterward and removes its one temporary photo. It never accesses the user's regular Chrome profile. The pinned development CLI is invoked through npx without downloading a replacement; `PLAYWRIGHT_CLI` can point to an existing executable/wrapper. Both probes use scripts/probe-browser.json and installed test Chromium.
 
-Besides timings, it verifies grouping identity/order, large-fixture group counts, one startup read transaction, missing-key and localStorage fallback behavior, abort rejection, concurrent photo deduplication, shared gallery/dialog hydration, URL cleanup and pending-load invalidation. Timings are diagnostic, not brittle pass/fail thresholds. `npm test` still runs the 21 smoke/security/accessibility regressions; the performance probe is separate and is not currently part of CI.
+Besides timings, it verifies grouping identity/order, large-fixture group counts, one startup read transaction, missing-key and localStorage fallback behavior, abort rejection, concurrent photo deduplication, shared gallery/dialog hydration, URL cleanup and pending-load invalidation. Timings are diagnostic, not brittle pass/fail thresholds. `npm test` runs the 21 smoke/security/accessibility regressions; CI additionally runs the performance and populated-data probes. See docs/QUALITY_ASSURANCE.md for populated coverage and limitations.
 
 ## Remaining work, in priority order
 
-1. **Populated-data interaction checks:** exercise search, saving, imports and multi-year statistics with realistic synthetic records across all modules. Current improvements target three verified hotspots, not every possible bottleneck.
+1. **Additional populated-data interaction checks:** baseline coverage now checks all nine views/sections, common edits/searches/imports and multi-year records. Extend it to workout editing, offline Bible/reference imports, additional linked records and failure/recovery paths. It does not test every possible workflow.
 2. **Bound very large lists:** several task/project details, People lists and other historical screens still generate every matching row. Profile full render/layout before deciding on accessible pagination or lazy rendering; do not silently hide records.
 3. **Strengthen action checks:** the current static action checker is line-based and tracks collisions but does not resolve every dynamic action reference. Add parser-based coverage if future changes expose a need.
 4. **Explicit modular refactor:** keep UI code in index.html under the current repository rule. Splitting modules or introducing a framework needs Seth's explicit approval and migration tests; it is not necessary for these fixes.
