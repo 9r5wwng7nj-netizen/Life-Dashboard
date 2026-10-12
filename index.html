@@ -182,7 +182,7 @@ const COLLECTIONS = {
   nutrition: {}, meals: [],
   journal: [], scripture: [], media: [], ministries: null, passageCache: {}, jkit: { prompts: [], templates: [] }, mcolls: [], quotes: [], mkit: { goals: {} },
   checkins: [], dateIdeas: [], milestones: [], goals: [], fpeople: [], gifts: [], fkit: {}, boundaries: [], repairs: [], loveLog: [], freviews: [], memories: [], dateLog: [],
-  recipes: [], mealPlan: {}, grocery: [], tasks: [], pantry: [], freezer: [], hosting: [], gkit: {}, projects: [], ttemplates: [], tkit: {}, tblocks: {}
+  recipes: [], mealPlan: {}, grocery: [], tasks: [], pantry: [], freezer: [], hosting: [], gkit: {}, projects: [], ttemplates: [], tkit: {}, tblocks: {}, memkit: { days: {} }
 };
 const Store = {
   db: null, data: {}, dirty: new Set(), t: null,
@@ -3625,15 +3625,17 @@ function scrNoteEditor(o) {
 function newScriptureNote(kind, ref, passage = '', tr = '') { const o = { id: uid(), date: ymd(), created: new Date().toISOString(), kind, title: '', ref: ref || '', translation: tr, passage, body: NOTE_TEMPLATES[kind] || '', tags: kind === 'teaching' ? ['teaching'] : ['devotional'], series: '' }; return o; }
 function scrMemory() {
   const ms = Store.get('memory').slice().sort((a, b) => a.due.localeCompare(b.due)), due = memDue(), mastered = ms.filter(m => m.box >= 5).length;
-  return `<div class="grid grid-cols-3 gap-3 mb-4"><div class="stat"><div class="text-xs muted">Due today</div><div class="text-2xl font-bold">${due.length}</div></div><div class="stat"><div class="text-xs muted">Verses</div><div class="text-2xl font-bold">${ms.length}</div></div><div class="stat"><div class="text-xs muted">Mastered</div><div class="text-2xl font-bold">${mastered}</div></div></div>
-  <div class="flex flex-wrap gap-2 mb-4"><button class="btn btn-primary" data-action="memReview" ${due.length ? '' : 'disabled'}>${icon('brain')} Review ${due.length} due</button><button class="btn" data-action="memReview" data-all="1" ${ms.length ? '' : 'disabled'}>Practice all</button></div>
+  const mode = memMode();
+  return `${memProgressCard()}<div class="grid grid-cols-3 gap-3 mb-4"><div class="stat"><div class="text-xs muted">Due today</div><div class="text-2xl font-bold">${due.length}</div></div><div class="stat"><div class="text-xs muted">Verses</div><div class="text-2xl font-bold">${ms.length}</div></div><div class="stat"><div class="text-xs muted">Mastered</div><div class="text-2xl font-bold">${mastered}</div></div></div>
+  <div class="flex flex-wrap gap-2 mb-4"><button class="btn btn-primary" data-action="memReview" ${due.length ? '' : 'disabled'}>${icon('brain')} Review ${due.length} due</button><button class="btn" data-action="memReview" data-all="1" ${ms.length ? '' : 'disabled'}>Practice all</button>
+    <div role="group" aria-label="How to practice" class="flex items-center gap-1 ml-auto">${[['type', 'Type it', 'keyboard'], ['say', 'Say it aloud', 'mic']].map(([id, label, ic]) => `<button class="chip ${mode === id ? 'chip-on' : ''}" aria-pressed="${mode === id}" data-action="memMode" data-mode="${id}">${icon(ic, 'w-3 h-3')} ${label}</button>`).join('')}</div></div>
   <div class="grid lg:grid-cols-5 gap-4"><form class="card lg:col-span-2 h-fit" data-submit="memAdd">${cardHead('plus', 'Add a verse')}
     <div class="flex gap-2 mb-2"><input name="ref" id="mem-ref" class="input" placeholder="e.g. Philippians 4:6-7" required><button type="button" class="btn shrink-0" data-action="memFill">${icon('download', 'w-3.5 h-3.5')} Get text</button></div>
     <textarea name="text" id="mem-text" class="input font-serif" rows="5" placeholder="Verse text (fills automatically with “Get text”, or type/paste it)" required></textarea>
     <p class="text-xs muted mt-1">Uses your reading translation (${BIBLES[rdTr()].short}). Tip: in the reader, select verses and tap Memorize.</p><button class="btn btn-primary mt-3">${icon('plus')} Add</button></form>
     <div class="lg:col-span-3 space-y-2">${ms.map(m => `<div class="card p-3"><div class="flex items-start gap-2"><div class="flex-1 min-w-0"><div class="font-semibold text-sm">${esc(m.ref)} <span class="muted font-normal text-xs">${esc(m.tr || '')}</span></div><div class="text-sm font-serif muted line-clamp-2">${esc(m.text)}</div>
       <div class="flex items-center gap-2 mt-1.5"><div class="flex gap-0.5">${[1, 2, 3, 4, 5].map(i => `<span class="w-4 h-1.5 rounded-full ${i <= m.box ? 'bg-brand-500' : 'bg-slate-200 dark:bg-slate-700'}"></span>`).join('')}</div><span class="text-[11px] muted">${m.due <= ymd() ? 'due now' : `next ${fmtDate(m.due, { month: 'short', day: 'numeric' })}`}</span></div></div>
-      <button class="btn btn-ghost btn-sm" data-action="memDel" data-id="${m.id}" aria-label="Remove">${icon('x', 'w-3.5 h-3.5')}</button></div></div>`).join('') || '<p class="text-sm muted">Add a verse to start. Each review spaces it further apart when you know it, and brings it back sooner when you don’t.</p>'}</div></div>`;
+      <button class="btn btn-sm" data-action="memPractice" data-id="${m.id}" aria-label="Practice ${esc(m.ref)}">${icon('keyboard', 'w-3.5 h-3.5')} Practice</button><button class="btn btn-ghost btn-sm" data-action="memDel" data-id="${m.id}" aria-label="Remove">${icon('x', 'w-3.5 h-3.5')}</button></div></div>`).join('') || '<p class="text-sm muted">Add a verse to start. A new verse is learned in three steps: read it, recall it with half the words hidden, then master it with every word hidden. Each review after that spaces it further apart when you know it, and brings it back sooner when you don’t.</p>'}</div></div>`;
 }
 function memReviewDraw() {
   const Q = ui.memQ; if (!Q) return; const m = Store.get('memory').find(x => x.id === Q.ids[Q.i]);
@@ -3642,6 +3644,105 @@ function memReviewDraw() {
   Modal.open(modalShell(`Review · ${Q.i + 1} of ${Q.ids.length}`, `<div class="text-center py-2"><div class="text-2xl font-bold mb-4">${esc(m.ref)}</div><div class="font-serif text-lg leading-8 min-h-[6rem] ${Q.show === 1 ? 'tracking-wide' : ''}">${shown}</div></div>`,
     Q.show < 2 ? `${Q.show === 0 ? `<button type="button" class="btn mr-auto" data-action="memShow" data-v="1">First letters</button>` : '<span class="mr-auto"></span>'}<button type="button" class="btn btn-primary" data-action="memShow" data-v="2">Show verse</button>`
       : `<button type="button" class="btn btn-danger mr-auto" data-action="memGrade" data-ok="0">Missed it</button><button type="button" class="btn btn-primary" data-action="memGrade" data-ok="1">${icon('check')} Got it</button>`), { onClose: () => { const done = ui.memQ ? ui.memQ.done : 0; ui.memQ = null; if (done) toast(`Reviewed ${done} verse${done === 1 ? '' : 's'}`); render(); } });
+}
+// --- Scripture: memory practice (type the first letter of each word) and progress ---
+// Progress is kept per day in memkit.days, so two devices merge cleanly; XP, level and streak are worked out from it.
+const MEM_STAGES = [['Read', 'Every word is shown. Type the first letter of each word.'], ['Recall', 'Every other word is hidden. Type the first letter of each word.'], ['Master', 'Every word is hidden. Type the first letter of each word.']];
+const MEM_PASS = 0.9, MEM_XP = { read: 5, recall: 10, master: 20, perfect: 10, missed: 5, said: 10, saidMissed: 2 };
+const MEM_BADGES = [
+  ['sprout', 'First verse', s => s.verses >= 1], ['flame', '7-day streak', s => s.best >= 7], ['flame', '30-day streak', s => s.best >= 30], ['target', '10 perfect recalls', s => s.perfect >= 10],
+  ['repeat', '100 reviews', s => s.reviews >= 100], ['award', '5 verses mastered', s => s.mastered >= 5], ['trophy', '25 verses mastered', s => s.mastered >= 25]
+];
+const memFind = id => Store.get('memory').find(m => m.id === id);
+const memMode = () => Store.get('memkit').mode === 'say' ? 'say' : 'type';
+function memStats() {
+  const days = Store.get('memkit').days || {}, keys = Object.keys(days).sort(), total = f => sum(keys.map(k => days[k][f])), xp = total('xp'), ms = Store.get('memory');
+  let best = 0, run = 0, prev = null;
+  for (const k of keys) { run = prev && daysBetween(prev, k) === 1 ? run + 1 : 1; best = Math.max(best, run); prev = k; }
+  const level = Math.floor(Math.sqrt(xp / 50)) + 1, floor = 50 * (level - 1) ** 2;
+  return { xp, level, into: xp - floor, span: 50 * level ** 2 - floor, streak: prev && daysBetween(prev, ymd()) <= 1 ? run : 0, best, today: days[ymd()] || { xp: 0, n: 0 },
+    reviews: total('n'), perfect: total('perfect'), verses: ms.length, mastered: ms.filter(m => m.box >= 5).length };
+}
+function memEarn(xp, { review = false, perfect = false } = {}) {
+  const kit = Store.get('memkit'); kit.days = kit.days || {};
+  const d = kit.days[ymd()] = kit.days[ymd()] || { xp: 0, n: 0, perfect: 0 };
+  d.xp += xp; if (review) d.n++; if (perfect) d.perfect = (d.perfect || 0) + 1;
+  Store.save('memkit');
+}
+function memSchedule(m, ok) {
+  m.reviews = (m.reviews || 0) + 1; m.last = ymd();
+  if (ok) { m.box = Math.min(5, m.box + 1); m.due = addDays(ymd(), BOX_DAYS[m.box]); } else { m.box = 1; m.lapses = (m.lapses || 0) + 1; m.due = addDays(ymd(), 1); }
+  Store.save('memory');
+}
+function memProgressCard() {
+  const s = memStats(), pct = Math.round(100 * s.into / s.span);
+  return `<div class="card mb-4"><div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+      <div class="flex-1 min-w-[12rem]"><div class="flex items-baseline justify-between gap-2"><div class="font-semibold">Level ${s.level}</div><div class="text-xs muted">${fmtNum(s.xp)} XP · ${fmtNum(s.span - s.into)} to level ${s.level + 1}</div></div>
+        <div class="h-2 rounded-full bg-slate-200 dark:bg-slate-700 mt-1.5 overflow-hidden" role="progressbar" aria-label="Progress to the next level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="h-full bg-brand-500 rounded-full" style="width:${pct}%"></div></div></div>
+      <div class="text-sm"><span class="font-semibold">${s.streak ? `🔥 ${s.streak}-day streak` : 'No streak yet'}</span>${s.best ? `<span class="muted text-xs"> · best ${s.best}</span>` : ''}</div>
+      <div class="text-sm muted">${s.today.n ? `${fmtNum(s.today.xp)} XP today` : s.streak ? 'Practice today to keep your streak' : 'Practice a verse to start one'}</div></div>
+    <div class="flex flex-wrap gap-1.5 mt-3">${MEM_BADGES.map(([ic, label, got]) => `<span class="chip ${got(s) ? 'chip-on' : ''}">${icon(got(s) ? ic : 'lock', 'w-3 h-3')} ${label}<span class="sr-only">${got(s) ? ' (earned)' : ' (not yet earned)'}</span></span>`).join('')}</div></div>`;
+}
+// Words to type: stage 0 shows them all faintly, stage 1 hides every other one, stage 2 hides them all.
+function memWords(text, stage, flip) {
+  let n = flip;
+  return String(text).trim().split(/\s+/).map(w => { const key = (w.match(/[\p{L}\p{N}]/u) || [''])[0].toLowerCase(); return { w, key, hide: !!key && (stage === 2 || (stage === 1 && n++ % 2 === 1)), state: key ? '' : 'ok' }; });
+}
+function memWordHtml(x, i, cur) {
+  const here = i === cur ? ' bg-brand-100 dark:bg-brand-900/60 rounded' : '';
+  if (!x.state && x.hide) return `<span data-w="${i}" class="inline-block align-baseline border-b-2 border-slate-400 dark:border-slate-500${here}" style="width:${Math.max(2, Math.min(9, x.w.length))}ch" aria-hidden="true">&nbsp;</span>`;
+  return `<span data-w="${i}" class="${x.state === 'miss' ? 'text-rose-700 dark:text-rose-400 font-semibold' : x.state ? '' : 'text-slate-500 dark:text-slate-400'}${here}">${esc(x.w)}</span>`;
+}
+function memStart(ids, practice, learn = false) {
+  ids = ids.filter(id => /[\p{L}\p{N}]/u.test(memFind(id)?.text || '')); if (!ids.length) return;
+  ui.memT = { ids, i: 0, practice, learn, xp: 0, right: 0, total: 0, passed: 0, graded: new Set(), flip: 0, before: memStats() };
+  memLoad();
+}
+function memLoad() { const T = ui.memT, m = memFind(T.ids[T.i]); T.stage = T.from = T.learn || !m.reviews ? 0 : 2; memStage(); }
+function memStage() {
+  const T = ui.memT, m = memFind(T.ids[T.i]);
+  T.words = memWords(m.text, T.stage, T.flip++); T.pos = T.words.findIndex(x => x.key); T.miss = 0; T.done = false;
+  if (!$('#mem-in')) Modal.open(modalShell('Memory practice', `<div id="mem-head"></div><div id="mem-words" class="font-serif text-lg leading-9 min-h-[7rem]"></div><div id="mem-note" class="text-sm min-h-[2.5rem]" role="status"></div>
+    <input id="mem-in" class="input" data-input="memType" autofocus autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="next" aria-label="Type the first letter of each word" placeholder="Type first letters here">`,
+    `<button type="button" class="btn mr-auto" data-action="memHint">${icon('lightbulb')} Hint</button><button type="button" class="btn" data-action="memRestart">${icon('rotate-ccw')} Restart</button><button class="btn btn-primary" id="mem-next" disabled>Next</button>`, 'memNext'), { onClose: () => { ui.memT = null; render(); } });
+  $('#mem-head').innerHTML = `<div class="flex items-baseline justify-between gap-2"><div class="text-xl font-bold">${esc(m.ref)} <span class="muted text-xs font-normal">${esc(m.tr || '')}</span></div><div class="text-xs muted shrink-0">${T.i + 1} of ${T.ids.length}</div></div>
+    <div class="flex flex-wrap gap-1.5 mt-2">${MEM_STAGES.map(([name], k) => k < T.from ? '' : `<span class="chip ${k === T.stage ? 'chip-on' : ''}">${k < T.stage ? '✓ ' : ''}${name}</span>`).join('')}</div><p class="text-xs muted mt-2">${MEM_STAGES[T.stage][1]}</p>`;
+  $('#mem-words').innerHTML = T.words.map((x, i) => memWordHtml(x, i, T.pos)).join(' ');
+  $('#mem-note').textContent = ''; $('#mem-next').disabled = true; $('#mem-next').textContent = 'Next';
+  const input = $('#mem-in'); input.value = ''; input.focus();
+}
+function memStep(ok) {
+  const T = ui.memT, from = T.pos, x = T.words[from]; if (!x || T.done) return;
+  x.state = ok ? 'ok' : 'miss'; if (!ok) T.miss++;
+  do { T.pos++; } while (T.words[T.pos] && !T.words[T.pos].key);
+  for (let i = from; i <= T.pos && i < T.words.length; i++) { const el = $(`#mem-words [data-w="${i}"]`); if (el) el.outerHTML = memWordHtml(T.words[i], i, T.pos); }
+  if (T.pos >= T.words.length) memStageDone();
+}
+function memStageDone() {
+  const T = ui.memT, m = memFind(T.ids[T.i]), n = T.words.filter(x => x.key).length, pct = Math.round(100 * (n - T.miss) / n), ok = (n - T.miss) / n >= MEM_PASS, last = T.stage === 2, more = T.i + 1 < T.ids.length;
+  T.done = true; T.right += n - T.miss; T.total += n;
+  let xp = 0, note;
+  if (!last) {
+    xp = ok ? (T.stage === 0 ? MEM_XP.read : MEM_XP.recall) : 0; T.next = ok ? T.stage + 1 : T.stage;
+    note = ok ? `${pct}% · +${xp} XP. Now with ${T.stage === 0 ? 'every other word' : 'every word'} hidden.` : `${pct}%. You need ${Math.round(MEM_PASS * 100)}% to move on, so try this step again.`;
+  } else {
+    const first = !T.graded.has(m.id); T.graded.add(m.id);
+    xp = ok ? MEM_XP.master + (T.miss ? 0 : MEM_XP.perfect) : first ? MEM_XP.missed : 0;
+    if (first && !T.practice) memSchedule(m, ok);
+    if (first && ok) T.passed++;
+    note = ok ? `${T.miss ? pct + '%' : 'Perfect'} · +${xp} XP.${T.practice ? '' : ` Next review ${fmtDate(m.due, { month: 'short', day: 'numeric' })}.`}` : `${pct}%. You need ${Math.round(MEM_PASS * 100)}% to pass.${T.practice ? '' : ' It will come back tomorrow.'} Restart to try again.`;
+  }
+  if (xp) { T.xp += xp; memEarn(xp, { review: last, perfect: last && ok && !T.miss }); } else if (last) memEarn(0, { review: true });
+  $('#mem-note').textContent = note;
+  const next = $('#mem-next'); next.disabled = false; next.textContent = !last ? (ok ? `Next: ${MEM_STAGES[T.next][0]}` : 'Try again') : more ? 'Next verse' : 'Finish';
+}
+function memSummary() {
+  const T = ui.memT, a = T.before, b = memStats(), earned = MEM_BADGES.filter(([, , got]) => got(b) && !got(a)).map(([, label]) => label);
+  Modal.open(modalShell('Practice complete', `<div class="text-center space-y-3"><div class="text-4xl font-bold">+${fmtNum(T.xp)} XP</div>
+      <div class="grid grid-cols-3 gap-2"><div class="stat"><div class="text-xs muted">Verses</div><div class="text-xl font-bold">${T.ids.length}</div></div><div class="stat"><div class="text-xs muted">Accuracy</div><div class="text-xl font-bold">${T.total ? Math.round(100 * T.right / T.total) : 0}%</div></div><div class="stat"><div class="text-xs muted">Streak</div><div class="text-xl font-bold">${b.streak} day${b.streak === 1 ? '' : 's'}</div></div></div>
+      ${b.level > a.level ? `<p class="font-semibold">🎉 You reached level ${b.level}</p>` : `<p class="text-sm muted">Level ${b.level} · ${fmtNum(b.span - b.into)} XP to level ${b.level + 1}</p>`}
+      ${earned.length ? `<p class="text-sm font-semibold">New badge${earned.length === 1 ? '' : 's'}: ${earned.map(esc).join(', ')}</p>` : ''}</div>`,
+    `<button type="button" class="btn btn-primary" data-action="closeModal" autofocus>Done</button>`), { onClose: () => { ui.memT = null; render(); } });
 }
 function scrPrayer() {
   const ps = Store.get('prayers'), act = ps.filter(p => !p.answered), ans = ps.filter(p => p.answered).sort((a, b) => b.answered.date.localeCompare(a.answered.date)), today = prayToday(), prayedToday = act.filter(p => p.lastPrayed === ymd()).length;
@@ -3671,7 +3772,8 @@ function dashScripture() {
   h += `<div class="text-sm mb-2"><div class="text-xs muted">Verse of the day</div>${v.text ? `<span class="font-serif">“${esc(v.text.length > 200 ? v.text.slice(0, 200) + '…' : v.text)}”</span> ` : ''}<button class="text-brand-600 dark:text-brand-400 underline" data-action="refOpen" data-ref="${esc(v.ref)}">${esc(v.ref)}</button></div>`;
   const due = memDue().length, pr = prayToday().length;
   h += `<form class="flex gap-1.5 mb-2" data-submit="askQuick"><input name="q" class="input py-1.5 text-sm" placeholder="Ask Scripture a question…" autocomplete="off" aria-label="Ask Scripture a question"><button class="btn btn-sm shrink-0" aria-label="Ask">${icon('sparkles', 'w-3.5 h-3.5')}</button></form>`;
-  if (due || pr) h += `<div class="flex flex-wrap gap-1.5 mb-2">${due ? `<button class="chip" data-action="goScr" data-tab="memory">🧠 ${due} verse${due === 1 ? '' : 's'} to review</button>` : ''}${pr ? `<button class="chip" data-action="goScr" data-tab="prayer">🙏 ${pr} to pray for</button>` : ''}</div>`;
+  const streak = memStats().streak;
+  if (due || pr || streak) h += `<div class="flex flex-wrap gap-1.5 mb-2">${due ? `<button class="chip" data-action="goScr" data-tab="memory">🧠 ${due} verse${due === 1 ? '' : 's'} to review</button>` : ''}${streak ? `<button class="chip" data-action="goScr" data-tab="memory">🔥 ${streak}-day memory streak</button>` : ''}${pr ? `<button class="chip" data-action="goScr" data-tab="prayer">🙏 ${pr} to pray for</button>` : ''}</div>`;
   return h;
 }
 
@@ -3752,11 +3854,23 @@ const A_SCR = {
   memFill: async () => { const r = parseRef($('#mem-ref').value); if (!r || !r.v1) return toast('Enter a verse reference like “Romans 8:28”', 'error'); try { $('#mem-text').value = await passageTextFor(r, rdTr()); $('#mem-ref').value = refLabel(r); } catch (e) { toast(e.message, 'error'); } },
   memAdd: f => { const v = fd(f), r = parseRef(v.ref); Store.get('memory').push({ id: uid(), ref: r ? refLabel(r) : v.ref.trim(), text: v.text.trim(), tr: BIBLES[rdTr()].short, added: ymd(), box: 1, due: ymd(), reviews: 0, lapses: 0 }); Store.save('memory'); toast('Verse added'); render(); },
   memDel: el => { if (!confirm('Remove this memory verse?')) return; Store.set('memory', Store.get('memory').filter(m => m.id !== el.dataset.id)); render(); },
-  memReview: el => { const ids = (el.dataset.all ? Store.get('memory') : memDue()).map(m => m.id).sort(() => Math.random() - 0.5); if (!ids.length) return; ui.memQ = { ids, i: 0, show: 0, done: 0, practice: !!el.dataset.all }; memReviewDraw(); },
+  memReview: el => { const ids = (el.dataset.all ? Store.get('memory') : memDue()).map(m => m.id).sort(() => Math.random() - 0.5); if (!ids.length) return; if (memMode() === 'type') return memStart(ids, !!el.dataset.all); ui.memQ = { ids, i: 0, show: 0, done: 0, practice: !!el.dataset.all }; memReviewDraw(); },
   memShow: el => { ui.memQ.show = +el.dataset.v; memReviewDraw(); },
+  memMode: el => { Store.get('memkit').mode = el.dataset.mode; Store.save('memkit'); render(); },
+  // A verse that is due counts as its review; otherwise it is extra practice and its schedule is left alone.
+  memPractice: el => { const m = memFind(el.dataset.id); if (m) memStart([m.id], m.due > ymd(), true); },
+  memType: el => { const T = ui.memT; if (T && !T.done) for (const ch of el.value.toLowerCase()) { if (/[\p{L}\p{N}]/u.test(ch)) memStep(ch === T.words[T.pos]?.key); if (T.done) break; } el.value = ''; },
+  memHint: () => { if (ui.memT) memStep(false); $('#mem-in')?.focus(); },
+  memRestart: () => { if (ui.memT) memStage(); },
+  memNext: () => {
+    const T = ui.memT; if (!T || !T.done) return;
+    if (T.stage < 2) { T.stage = T.next; return memStage(); }
+    T.i++; if (T.i < T.ids.length) memLoad(); else memSummary();
+  },
   memGrade: el => {
     const Q = ui.memQ, m = Store.get('memory').find(x => x.id === Q.ids[Q.i]), ok = el.dataset.ok === '1';
-    if (m && !Q.practice) { m.reviews++; m.last = ymd(); if (ok) { m.box = Math.min(5, m.box + 1); m.due = addDays(ymd(), BOX_DAYS[m.box]); } else { m.box = 1; m.lapses++; m.due = addDays(ymd(), 1); } Store.save('memory'); }
+    if (m && !Q.practice) memSchedule(m, ok);
+    if (m) memEarn(ok ? MEM_XP.said : MEM_XP.saidMissed, { review: true });
     if (!ok && Q.ids.filter(x => x === Q.ids[Q.i]).length < 2) Q.ids.push(Q.ids[Q.i]);
     Q.done++; Q.i++; Q.show = 0; if (Q.i >= Q.ids.length) Modal.close(); else memReviewDraw();
   },

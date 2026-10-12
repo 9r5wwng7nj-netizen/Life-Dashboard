@@ -3,6 +3,7 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Scripture memory practice: type the first letter of each word through three steps (Read, Recall, Master), with 90% needed to pass. Reviews are graded by typing; saying a verse aloud and grading yourself is still available. Practice earns XP, levels, a daily streak and badges, shown on the Memory tab and the dashboard. Adds one collection, `memkit`; existing memory verses are unchanged.
 - Sync safeguards: every sync first reloads what is saved on the device, so a second tab left open cannot sync an out-of-date view over newer data; and a sync that would remove more than 10 records pauses until it is confirmed.
 - Device sync through a private Google Drive app folder: three-way merge of records and basic settings, a header sync button and controls in Settings & Sync. Each device turns it on in Settings & Sync. Photos, API keys and downloaded libraries do not sync yet. No stored data changed; sync adds one localStorage key (`ld.sync`) and one device-local entry (`sync.base`).
 - Mobile phase started (Seth, 2026-10-12): the app has a web manifest, home-screen icons, safe-area padding and a service worker (`sw.js`) so a hosted https copy installs on a phone and reopens offline. The `file://` copy never registers the worker and behaves as before. No stored data changed.

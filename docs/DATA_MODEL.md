@@ -27,7 +27,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 - `nutrition`: a `{ 'YYYY-MM-DD': { weight, entries[] } }` map
 - `nutPlan` (adaptive plan and check-ins), `measurements`, `photoMeta` (progress-photo index), `mfImport`
 
-**Scripture**: `highlights`, `readingPlans`, `memory` (verses), `prayers`, `scripture` (study notes), `passageCache`, `ministries` (sources list)
+**Scripture**: `highlights`, `readingPlans`, `memory` (verses: `{ id, ref, text, tr, added, box 1–5, due, reviews, lapses, last }`), `memkit` (`{ days: { 'YYYY-MM-DD': { xp, n, perfect } }, mode? }`; XP, level, streak and badges are worked out from `days`, never stored), `prayers`, `scripture` (study notes), `passageCache`, `ministries` (sources list)
 
 **Journal**: `journal` (entries with type, mood, energy, photos `jp_…`, prayer links), `jkit` (`{ prompts, templates }`)
 

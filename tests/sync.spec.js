@@ -44,7 +44,11 @@ async function device(browser, drive, options) {
   await drive.attach(context);
   return tab(context, options);
 }
-const sync = page => page.evaluate(async () => { await Store.flushDirty(); await Sync.run({ announce: true }); return syncMeta(); });
+// A tab that loads already connected starts its own sync; let that finish before asking for another.
+const sync = async page => {
+  await page.waitForFunction(() => !Sync.busy);
+  return page.evaluate(async () => { await Store.flushDirty(); await Sync.run({ announce: true }); return syncMeta(); });
+};
 const titles = page => page.evaluate(() => Store.get('tasks').map(t => t.title).sort());
 
 test('three-way merge keeps edits, additions and deletions from both sides', async ({ page }) => {
