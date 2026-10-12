@@ -26,4 +26,4 @@ Only enable it when Seth chooses to do so. Apple's [VoiceOver on/off guide](http
 - [ ] Test podcast playback with a public sample and confirm pause/resume without autoplay surprises.
 - [ ] Test optional user-entered service keys locally, never through chat or repository files.
 
-TalkBack and actual mobile-device checks belong to the later mobile phase; do not start hosting or sync to make this checklist possible without Seth's approval.
+Actual mobile-device checks belong to the mobile phase, which Seth resumed on 2026-10-12. Enabling a host or sync still needs his explicit go-ahead.

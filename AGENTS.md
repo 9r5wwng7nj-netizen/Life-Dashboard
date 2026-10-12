@@ -34,7 +34,7 @@ npm run probe:performance   # large task fixtures, startup reads and photo lifec
 
 You can also just open `index.html` in Chrome; that is how the user runs it.
 
-**Storage is per origin.** `file://`, `http://localhost:8080` and any hosted URL each have their own separate IndexedDB. For testing, use a localhost server or a fresh profile; the user's real data lives under `file://`. The smoke tests use a fresh, empty browser profile every run.
+**Storage is per origin.** `file://`, `http://localhost:8080` and any hosted URL each have their own separate IndexedDB. The service worker caches only the app's own files (Cache Storage `ld-shell-*`), never personal data. For testing, use a localhost server or a fresh profile; the user's real data lives under `file://`. The smoke tests use a fresh, empty browser profile every run.
 
 CLI probes use isolated contexts and accept localhost URLs only. Never point a probe at the user's regular Chrome profile or change it to reuse a personal browser session. CI runs both probes after npm test. See docs/QUALITY_ASSURANCE.md for coverage and remaining manual checks.
 
@@ -82,7 +82,10 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
 
 ## Roadmap the user has agreed to
 
-- **Phone + laptop:** host at an https URL as an installable offline PWA, and sync through a private Google Drive `appDataFolder`.
+- **Phone + laptop** (resumed by Seth on 2026-10-12; his phone is an iPhone): host at an https URL as an installable offline PWA, and sync through a private Google Drive `appDataFolder`. Sync does not need to be real time.
+  - Built: `manifest.webmanifest`, `assets/icons/`, `sw.js` (offline app shell) and safe-area padding. `index.html` registers the worker on https only; `?pwa` on localhost is for `tests/pwa.spec.js`. When a vendored file is renamed or added, update the `SHELL` list in `sw.js`.
+  - Not done yet: choosing and enabling the host (GitHub Pages is the leading option and needs Seth's go-ahead to make the repo public), then Drive sync using his `connection.church` Google account.
+  - On iPhone the installed home-screen app has its own storage, separate from Safari. Import the backup inside the installed app.
   - Keep `id` and `updated` on records to make merging possible.
   - Keep reference data (Bibles, lexicons) separate from personal data.
 - The user has said not now to Miyo integration and Claude-powered answers in Smart Search. Leave that code as is.
