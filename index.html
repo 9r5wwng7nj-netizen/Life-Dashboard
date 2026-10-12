@@ -2088,14 +2088,15 @@ async function backupPhotos() {
 }
 async function restoreBackupPhotos(items, mode) {
   if (!Array.isArray(items) || !Photos.ok()) return 0;
-  if (mode === 'replace') await idbClear('photos');
-  let n = 0;
+  const decoded = [];
   for (const x of items) {
     if (!x || typeof x.id !== 'string' || typeof x.data !== 'string') continue;
-    await Photos.put(x.id, dataUrlToBlob(x.data)); n++;
+    decoded.push([x.id, dataUrlToBlob(x.data)]);
   }
+  if (mode === 'replace') await idbClear('photos');
+  for (const [id, blob] of decoded) await Photos.put(id, blob);
   Photos.urls.forEach(u => URL.revokeObjectURL(u)); Photos.urls.clear();
-  return n;
+  return decoded.length;
 }
 async function buildBackupPayload() {
   const { esvKey, fdcKey, aiKey, view, collapsed, ...settings } = S;
