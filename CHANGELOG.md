@@ -3,6 +3,10 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Startup reads the 51 saved collections in a single transaction and stops safely if that read is interrupted.
+- Projects and People group tasks once per view instead of rescanning all tasks per project/person. Photo loads are deduplicated and unused object URLs are released without deleting saved photos.
+- A repeatable isolated-browser performance probe checks large synthetic task lists, startup reads and photo cache lifecycle.
+- Long section-tab strips remain inside the main view at medium desktop widths instead of widening the whole page.
 - Shared accessibility fixes add associated form labels, dialog focus management, keyboard navigation, live announcements, visible focus indicators, reduced-motion support and improved small-text/button contrast.
 - Accessibility regression checks cover the main views/sections in light/dark mode and common editing dialogs.
 - Backup import validates the file before modifying data and commits records/photos in one IndexedDB transaction, preserving existing data on failure.

@@ -9,6 +9,7 @@
     "build:css": "tailwindcss -i src/app.css -o assets/app.css --minify",
     "check": "node scripts/check.mjs",
     "test": "npm run build:css && node scripts/check.mjs && playwright test",
+    "probe:performance": "node scripts/performance-probe.mjs",
     "test:install": "playwright install chromium"
   },
   "devDependencies": {
