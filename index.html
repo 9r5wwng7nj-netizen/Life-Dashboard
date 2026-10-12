@@ -41,6 +41,8 @@
   .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
   .scroll-thin::-webkit-scrollbar-thumb { background: rgba(100,116,139,.35); border-radius: 3px; }
   textarea { resize: vertical; }
+  /* iPhone zooms into any field whose text is under 16px and does not zoom back out. */
+  @media (pointer: coarse) { input, select, textarea { font-size: 16px !important; } }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 antialiased">
@@ -61,7 +63,7 @@
   </aside>
   <div class="flex-1 flex flex-col min-w-0">
     <header class="h-14 shrink-0 flex items-center gap-2 px-3 md:px-6 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur">
-      <button class="btn btn-ghost md:hidden" data-action="openSidebar" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false"><i data-lucide="menu" class="w-5 h-5"></i></button>
+      <button class="btn btn-ghost md:hidden relative" data-action="openSidebar" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false"><i data-lucide="menu" class="w-5 h-5"></i><span id="menu-dot" class="hidden absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900"></span></button>
       <h1 id="view-title" tabindex="-1" class="font-semibold truncate"></h1>
       <div class="ml-auto flex items-center gap-2">
         <span id="header-date" class="hidden sm:inline text-sm muted"></span>
@@ -470,19 +472,24 @@ const VIEWS = [
   { id: 'fitness', label: 'Workouts', icon: 'dumbbell', render: () => renderFitness(), badge: () => Store.get('activeWorkout') ? '<span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>' : '' },
   { id: 'nutrition', label: 'Nutrition', icon: 'apple', render: () => renderNutrition() },
   { section: 'Faith' },
-  { id: 'scripture', label: 'Scripture', icon: 'book-open', render: () => renderScripture() },
+  { id: 'scripture', label: 'Scripture', icon: 'book-open', render: () => renderScripture(), badge: () => { const r = readingDue() ? 1 : 0, v = memDue().length; return navCount(r + v, [r ? 'reading to do' : '', v ? `verse${v === 1 ? '' : 's'} to review` : ''].filter(Boolean).join(' and '), false); } },
   { id: 'journal', label: 'Journal', icon: 'notebook-pen', render: () => renderJournal() },
   { id: 'media', label: 'Media Library', icon: 'podcast', render: () => renderMedia() },
   { section: 'Home' },
   { id: 'family', label: 'Marriage & Family', icon: 'heart', render: () => renderFamily() },
   { id: 'recipes', label: 'Recipes & Meals', icon: 'chef-hat', render: () => renderRecipes() },
-  { id: 'tasks', label: 'Tasks', icon: 'list-checks', render: () => renderTasks(), badge: () => { const n = Store.get('tasks').filter(t => t.status !== 'done' && t.due && t.due < ymd()).length; return n ? `<span class="chip bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200">${n}</span>` : ''; } }
+  { id: 'tasks', label: 'Tasks', icon: 'list-checks', render: () => renderTasks(), badge: () => { const t = ymd(), due = Store.get('tasks').filter(x => x.status !== 'done' && !x.someday && x.due && x.due <= t), late = due.some(x => x.due < t); return navCount(due.length, `task${due.length === 1 ? '' : 's'} due${late ? ', some overdue' : ''}`, late); } }
 ];
 let lastRendered = null, tickIv = null;
+// A count beside a menu item for what needs attention there today; red when something is overdue.
+const navCount = (n, what, late) => n ? `<span class="chip ${late ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200' : 'bg-brand-100 text-brand-800 dark:bg-brand-900/60 dark:text-brand-200'}" title="${n} ${what}">${n}<span class="sr-only"> ${what}</span></span>` : '';
 function renderNav() {
   $('#nav').innerHTML = VIEWS.map(v => v.section
     ? `<div class="nav-label px-3 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">${v.section}</div>`
     : `<button class="nav-item w-full ${S.view === v.id ? 'nav-active' : ''}" aria-current="${S.view === v.id ? 'page' : 'false'}" data-action="go" data-view="${v.id}" title="${v.label}">${icon(v.icon, 'w-5 h-5 shrink-0')}<span class="nav-label truncate">${v.label}</span>${v.badge ? `<span class="nav-label ml-auto">${v.badge()}</span>` : ''}</button>`).join('');
+  // On a phone the menu is closed, so the menu button carries a dot when anything inside has a count.
+  const waiting = !!$('#nav .chip'), menu = $('[data-action="openSidebar"]');
+  $('#menu-dot').classList.toggle('hidden', !waiting); menu.setAttribute('aria-label', waiting ? 'Open menu (items need attention)' : 'Open menu');
 }
 let _rendering = false;
 function render() {
@@ -2612,6 +2619,8 @@ const p412ThisWeek = () => { const d = new Date(), m = d.getMonth(), ws = P412.m
 function planFocusIdx(p) { const k = planKind(p); if (k === 'weekly') return p412ThisWeek(); if (k === 'self') return Math.max(0, planNext(p)); return daysBetween(p.start, ymd()) >= 0 ? planToday(p) : 0; }
 function readingStreak() { const ds = new Set(Store.get('readingPlans').flatMap(p => Object.values(p.done || {}))); let d = ymd(); if (!ds.has(d)) d = addDays(d, -1); let n = 0; while (ds.has(d)) { n++; d = addDays(d, -1); } return n; }
 const activePlan = () => Store.get('readingPlans').find(p => planNext(p) >= 0);
+// Is there reading still to do today (or this week, for a weekly plan)? A go-at-your-own-pace plan counts any reading marked today.
+function readingDue() { const p = activePlan(); if (!p) return false; if (planKind(p) === 'self') return !Object.values(p.done).includes(ymd()); return daysBetween(p.start, ymd()) >= 0 && !p.done[planFocusIdx(p)]; }
 
 // Memory verses (Leitner boxes)
 const BOX_DAYS = [0, 1, 3, 7, 14, 30];
@@ -5926,7 +5935,9 @@ const tFind = id => TK().find(x => x.id === id);
 const projFind = id => Store.get('projects').find(p => p.id === id);
 function areaOf(t) { if (t.area) return t.area; const p = t.project && projFind(t.project); if (p && p.area) return p.area; for (const [a, tags] of Object.entries(AREA_TAGS)) if ((t.tags || []).some(x => tags.includes(x))) return a; return null; }
 const tOpen = t => t.status !== 'done';
-const isInbox = t => tOpen(t) && !t.due && !t.project && !areaOf(t) && !t.someday && !(t.tags || []).length && !t.waiting && !t.person;
+// A task stays in the Inbox until it has both a due date and a home (an area or a project). Someday and waiting-on tasks are parked on purpose.
+const isSorted = t => !!t.due && !!(t.project || areaOf(t));
+const isInbox = t => tOpen(t) && !t.someday && !t.waiting && !isSorted(t);
 const inArea = t => !ui.taskArea || areaOf(t) === ui.taskArea;
 const weekKeyT = (d = ymd()) => startOfWeek(d);
 const weekRec = (wk = weekKeyT()) => { const k = tkit(); return k.weeks[wk] || (k.weeks[wk] = { big3: [], notes: '' }); };
@@ -6128,9 +6139,11 @@ function dayPlanner(d) {
 // Inbox
 function tasksInbox() {
   const items = TK().filter(isInbox).sort((a, b) => (a.created || '').localeCompare(b.created || '')), ps = Store.get('projects').filter(p => p.status !== 'done');
-  if (!items.length) return emptyState('inbox', 'Inbox zero 🎉', 'Anything you add without a date, area or project lands here so nothing slips. Sort it when you have a minute.', '');
-  return `<p class="text-sm muted mb-3">Give each one a home: a day, an area, a project — or Someday.</p><div class="space-y-2">${items.map(t => `<div class="card p-3"><div class="flex items-start gap-2"><input type="checkbox" class="mt-0.5 w-4 h-4 accent-brand-600" data-change="taskToggle" data-id="${t.id}" aria-label="Complete"><button class="flex-1 text-left text-sm font-medium hover:underline" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><span class="text-xs muted">${daysBetween(ymd(new Date(t.created || Date.now())), ymd())}d</span><button class="btn btn-ghost btn-sm" data-action="tdDel" data-id="${t.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div>
-    <div class="flex flex-wrap items-center gap-1.5 mt-2 pl-6">${[['today', 'Today'], ['tomorrow', 'Tomorrow'], ['fri', 'Friday'], ['nextweek', 'Next week'], ['someday', 'Someday']].map(([v, l]) => `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="${v}">${l}</button>`).join('')}<span class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1"></span>${AREAS.map(([k, l]) => `<button class="chip" data-action="tdArea" data-id="${t.id}" data-v="${k}"><span class="w-2 h-2 rounded-full ${AREA_CLS[k]}"></span> ${l}</button>`).join('')}${ps.length ? `<select class="input w-auto py-1 text-xs" data-change="tdProject" data-id="${t.id}" aria-label="Move to project"><option value="">Project…</option>${ps.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}</div></div>`).join('')}</div>`;
+  if (!items.length) return emptyState('inbox', 'Inbox zero 🎉', 'A task stays here until it has both a due date and an area or project, so nothing slips. Sort it when you have a minute.', '');
+  const needs = t => [t.due ? '' : 'a due date', t.project || areaOf(t) ? '' : 'an area or project'].filter(Boolean).join(' and ');
+  return `<p class="text-sm muted mb-3">A task leaves the Inbox once it has both a due date and an area or project — or move it to Someday.</p><div class="space-y-2">${items.map(t => `<div class="card p-3"><div class="flex items-start gap-2"><input type="checkbox" class="mt-0.5 w-4 h-4 accent-brand-600" data-change="taskToggle" data-id="${t.id}" aria-label="Complete"><button class="flex-1 text-left text-sm font-medium hover:underline" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><span class="text-xs muted">${daysBetween(ymd(new Date(t.created || Date.now())), ymd())}d</span><button class="btn btn-ghost btn-sm" data-action="tdDel" data-id="${t.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div>
+    <div class="flex flex-wrap items-center gap-1.5 mt-1.5 pl-6 text-xs"><span class="chip bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">Needs ${needs(t)}</span>${t.due ? `<span class="muted">Due ${fmtDate(t.due, { weekday: 'short', month: 'short', day: 'numeric' })}</span>` : ''}${t.project && projFind(t.project) ? `<span class="muted">${esc(projFind(t.project).name)}</span>` : ''}</div>
+    <div class="flex flex-wrap items-center gap-1.5 mt-2 pl-6">${[['today', 'Today'], ['tomorrow', 'Tomorrow'], ['fri', 'Friday'], ['nextweek', 'Next week'], ['someday', 'Someday']].map(([v, l]) => `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="${v}">${l}</button>`).join('')}<span class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1"></span>${AREAS.map(([k, l]) => `<button class="chip ${areaOf(t) === k ? 'chip-on' : ''}" aria-pressed="${areaOf(t) === k}" data-action="tdArea" data-id="${t.id}" data-v="${k}"><span class="w-2 h-2 rounded-full ${AREA_CLS[k]}"></span> ${l}</button>`).join('')}${ps.length ? `<select class="input w-auto py-1 text-xs" data-change="tdProject" data-id="${t.id}" aria-label="Move to project"><option value="">Project…</option>${ps.map(p => `<option value="${p.id}" ${t.project === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : ''}</div></div>`).join('')}</div>`;
 }
 // Upcoming
 function tasksUpcoming() {
@@ -6299,7 +6312,7 @@ const A_TASKS = {
     Store.save('tasks'); render();
   },
   tdAllToday: () => { const t = ymd(); TK().filter(x => tOpen(x) && !x.someday && x.due && x.due < t && inArea(x)).forEach(x => setDue(x, t)); Store.save('tasks'); render(); },
-  tdArea: el => { const t = tFind(el.dataset.id); if (!t) return; t.area = el.dataset.v; Store.save('tasks'); toast(`Moved to ${areaLabel(t.area)}`); render(); },
+  tdArea: el => { const t = tFind(el.dataset.id); if (!t) return; t.area = el.dataset.v; Store.save('tasks'); toast(isSorted(t) ? `Moved to ${areaLabel(t.area)}` : `${areaLabel(t.area)} — now give it a due date`); render(); },
   tdProject: el => { const t = tFind(el.dataset.id); if (!t || !el.value) return; t.project = el.value; Store.save('tasks'); toast(`Moved to ${projFind(el.value)?.name}`); render(); },
   tdDel: el => { if (!confirm('Delete this task?')) return; Store.set('tasks', TK().filter(x => x.id !== el.dataset.id)); render(); },
   sdOff: el => { const t = tFind(el.dataset.id); if (!t) return; t.someday = false; Store.save('tasks'); toast('Activated — find it in Inbox or its area'); render(); },
