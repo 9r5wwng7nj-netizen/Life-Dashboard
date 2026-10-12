@@ -71,3 +71,38 @@ test('phone width: no view scrolls sideways', async ({ page }) => {
   expect(wide, wide.join('\n')).toEqual([]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('version 2 backup includes and restores personal photos', async ({ page }) => {
+  const errors = await prepare(page);
+  const got = await page.evaluate(async () => {
+    const id = 'test-photo', blob = new Blob(['photo bytes'], { type: 'text/plain' });
+    await Photos.put(id, blob);
+    Store.get('photoMeta').push({ id, date: '2026-10-12', pose: 'front' });
+    const backup = await buildBackupPayload();
+    await idbClear('photos');
+    await restoreBackupPhotos(backup.assets.photos, 'replace');
+    const restored = await Photos.get(id);
+    return { version: backup.version, photos: backup.assets.photos.length, meta: backup.data.photoMeta.some(x => x.id === id), text: await restored.text() };
+  });
+  expect(got).toEqual({ version: 2, photos: 1, meta: true, text: 'photo bytes' });
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('full reset clears personal stores, libraries, settings and API keys', async ({ page }) => {
+  const errors = await prepare(page);
+  const got = await page.evaluate(async () => {
+    await Photos.put('secret-photo', new Blob(['x']));
+    await BibleDb.put('test-library', { private: true });
+    localStorage.setItem('ld.test-secret', 'present');
+    S.esvKey = 'secret'; saveSettings();
+    await resetAllData();
+    return {
+      photoMissing: !(await Photos.get('secret-photo')),
+      libraryMissing: !(await BibleDb.get('test-library')),
+      secret: localStorage.getItem('ld.test-secret'),
+      key: S.esvKey
+    };
+  });
+  expect(got).toEqual({ photoMissing: true, libraryMissing: true, secret: null, key: '' });
+  expect(errors, errors.join('\n')).toEqual([]);
+});
