@@ -1,25 +1,9 @@
 // Hosted-copy checks: the app installs from a web address and reopens with no connection.
 // Served from a throwaway local server, since service workers never run from file://.
 import { test, expect } from '@playwright/test';
-import http from 'node:http';
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
-
-function serveRepo() {
-  const root = path.resolve('.');
-  const server = http.createServer(async (req, res) => {
-    const file = path.join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
-    if (!file.startsWith(root + path.sep)) return res.writeHead(403).end();
-    try {
-      const body = await readFile(file);
-      res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' }).end(body);
-    } catch { res.writeHead(404).end(); }
-  });
-  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
-}
+import { serveRepo, stopServer } from './serve.js';
 
 test('hosted copy is installable and reopens offline', async ({ page }) => {
   const server = await serveRepo();
@@ -42,8 +26,7 @@ test('hosted copy is installable and reopens offline', async ({ page }) => {
     await page.evaluate(() => { addTask('Saved before going offline'); Store.flushDirty(); });
     await page.waitForTimeout(300);
   } finally {
-    server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
+    await stopServer(server);
   }
 
   await page.reload();

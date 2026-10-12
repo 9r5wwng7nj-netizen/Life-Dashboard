@@ -46,4 +46,15 @@ To start using the hosted address:
 1. On the laptop, export a backup from the copy you use today, open the hosted address in Chrome and import the backup there. Use the hosted address from then on.
 2. On the iPhone, open the address in Safari, tap **Share → Add to Home Screen**, then open the app from the home-screen icon and import the same backup **inside that installed app**. The installed app keeps its own data, separate from Safari.
 
-Until sync is built, the phone and laptop each keep their own copy of your data.
+Until sync is switched on, the phone and laptop each keep their own copy of your data.
+
+### Sync
+
+Sync keeps one copy of your records in a hidden app folder in your Google Drive. Only this app can read that folder; it does not appear among your Drive files.
+
+- Turn it on per device: **Settings & Sync → Connect Google Drive**. The first device uploads its records. Each later device asks whether to combine its records with the Drive copy or use the Drive copy.
+- Records and basic settings (name, units, targets, translation) sync. Photos, API keys and downloaded Bibles stay on each device for now.
+- It is not instant. A device syncs when you open the app, when you come back to it, shortly after you change something, and when you tap the sync button in the header.
+- Google sign-in lasts about an hour. When the header button shows a warning cloud, tap it to sign in again; your changes are kept on the device in the meantime.
+- If the same item is edited on two devices before they sync, both edits are kept where they touch different fields; where they touch the same field, the most recent save wins. Deleting an item on one device removes it from the others.
+- Keep exporting backups. Sync copies mistakes to every device as faithfully as it copies everything else.
