@@ -164,6 +164,8 @@ try {
     await page.locator('[data-action="jFocus"]').click();
     await page.waitForFunction(() => !!$('#j-focus') && document.activeElement.id === 'jf-body');
     await page.evaluate(() => focusableElements($('#j-focus'))[0].focus());
+    await page.waitForTimeout(100); // Catch an obsolete delayed focus call stealing focus after opening.
+    await page.evaluate(() => { if (document.activeElement !== focusableElements($('#j-focus'))[0]) throw new Error('Journal Focus moved focus after opening'); });
     await page.keyboard.press('Shift+Tab');
     await page.evaluate(() => { const list = focusableElements($('#j-focus')); if (document.activeElement !== list[list.length - 1]) throw new Error('Journal Focus does not wrap Shift+Tab'); if (getComputedStyle($('#jf-body')).outlineStyle === 'none') throw new Error('Journal Focus lacks a visible keyboard focus indicator'); });
     await page.keyboard.press('Tab');

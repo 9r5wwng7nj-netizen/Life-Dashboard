@@ -12,6 +12,7 @@ The shared UI now links visible labels to their fields, names otherwise unlabele
 - Custom actions, Scripture verse selection and hidden photo/file pickers support keyboard activation.
 - Task-board titles are native edit buttons, even when the card contains other controls. Completed task text keeps its strike-through without reducing the opacity of the entire card/row.
 - Journal Focus is a named dialog with an inert workspace/sidebar/header, Tab/Shift+Tab wrapping, a visible writing-field focus indicator, Escape timer/dictation cleanup and return focus. The normal journal type selector and family detail actions have meaningful names.
+- Focus is set once, synchronously, when Journal Focus opens. CI exposed and fixed an older delayed call that could steal focus after the user began navigating.
 - Keyboard focus has a visible outline; reduced-motion preferences suppress decorative motion.
 
 ## Development rules

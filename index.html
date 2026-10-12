@@ -3843,7 +3843,7 @@ const JournalFocus = {
     this.active = !!dialog;
     for (const el of $$('#app-shell header, #j-workspace, #timer, #mini-player, .skip-link')) el.inert = !!dialog || Modal.isOpen();
     syncSidebarAccessibility();
-    if (opening) $('#jf-body').focus({ preventScroll: true });
+    if (opening) { const text = $('#jf-body'); text.focus({ preventScroll: true }); text.selectionStart = text.selectionEnd = text.value.length; }
     if (closing) { if (!restoreFocus(this.origin)) $('#view-title').focus({ preventScroll: true }); this.origin = null; }
   },
   keydown(e) {
@@ -4072,7 +4072,7 @@ const A_JOURNAL = {
   },
   jpAdd: f => { const p = (fd(f).p || '').trim(); if (!p) return; jkit().prompts.push(p); Store.save('jkit'); A_JOURNAL.jpManage(); },
   jpDel: el => { jkit().prompts.splice(+el.dataset.i, 1); Store.save('jkit'); A_JOURNAL.jpManage(); },
-  jFocus: el => { ui.jFocus = el.dataset.id; render(); setTimeout(() => { const t = $('#jf-body'); if (t) { t.focus(); t.selectionStart = t.selectionEnd = t.value.length; } }, 30); },
+  jFocus: el => { ui.jFocus = el.dataset.id; render(); },
   jFocusExit: () => { ui.jFocus = null; clearInterval(jTimerInt); ui.jTimer = null; if (JDict.rec) JDict.rec.stop(); render(); },
   jTimer: el => jTimerStart(+el.value),
   jDictate: () => jDictate(),
