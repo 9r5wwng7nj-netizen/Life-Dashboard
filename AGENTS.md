@@ -66,6 +66,7 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
 - **Tabs:** `tabs('uiKey', [[id, label, icon], …])` wired through the generic `setTab` action.
 - **Icons:** `icon('lucide-name', 'w-4 h-4')`. The browser bundle is pinned under `vendor/lucide/`; confirm new icon names exist in that version.
 - **Top-level names are global.** Before adding `function foo` or `const foo`, search for `foo`. Duplicate `const` names break the whole script, and duplicate `function` names silently override each other.
+- **Imports and external URLs:** validate backups before planning a restore; persist records and photos through `commitBackupImport()`. Use `webUrl()` plus `esc()` for external links and image URLs. Podcast callbacks must remain in `isolatedPodcastRequest()`'s sandbox; never load service scripts in the main document.
 
 ## Known caveats
 

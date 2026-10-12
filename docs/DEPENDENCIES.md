@@ -21,8 +21,8 @@ Licenses and SHA-256 hashes are recorded in `THIRD_PARTY_NOTICES.md`. To change 
 | Strong's lexicon | `raw.githubusercontent.com/openscriptures/strongs` |
 | Berean interlinear / topical data | Downloaded manually by the user from berean.bible and imported (that site sends no CORS headers) |
 | Food search & barcodes | `world.openfoodfacts.org` · `api.nal.usda.gov` (USDA FoodData Central; `DEMO_KEY` unless the user adds a key) |
-| Podcast lookup | `itunes.apple.com` search/lookup (JSONP) |
-| Link previews | `noembed.com` (JSONP) |
+| Podcast lookup | `itunes.apple.com` search/lookup callbacks in a sandboxed iframe with an opaque origin; scripts cannot read dashboard storage |
+| Link previews | `noembed.com` via CORS JSON fetch, with a timeout and no credentials |
 | Embedded players | `youtube-nocookie.com`, `player.vimeo.com`, `open.spotify.com`, `embed.podcasts.apple.com` |
 | Smart Search “answers” (off; user opted out for now) | `api.anthropic.com` with the user's own key |
 | Miyo local search (off; user opted out for now) | `http://127.0.0.1:8742` |
