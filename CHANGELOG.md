@@ -3,6 +3,8 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Backups containing existing MacroFactor name|unit food identifiers can be restored; unsafe identifiers are still rejected and saved IDs are not rewritten.
+- CI now exercises populated views, common editing/search workflows, recurring tasks, imports/backup roundtrips and performance probes in isolated Chromium contexts.
 - Startup reads the 51 saved collections in a single transaction and stops safely if that read is interrupted.
 - Projects and People group tasks once per view instead of rescanning all tasks per project/person. Photo loads are deduplicated and unused object URLs are released without deleting saved photos.
 - A repeatable isolated-browser performance probe checks large synthetic task lists, startup reads and photo cache lifecycle.

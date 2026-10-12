@@ -2195,18 +2195,19 @@ async function restoreBackupPhotos(items, mode) {
 }
 const BACKUP_LIMIT = 256 * 1024 * 1024;
 const plainObject = v => !!v && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+const validRecordId = id => /^[A-Za-z0-9_.:-]+$/.test(String(id)) || /^mf:[a-z0-9-]*\|[a-z0-9-]*$/.test(String(id)); // Existing MacroFactor food IDs use name|unit.
 function validateJsonTree(value, depth = 0) {
   if (depth > 60) throw new Error('Backup nesting is too deep.');
   if (value === null || typeof value !== 'object') return;
   for (const [key, child] of Object.entries(value)) {
     if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Unsafe object key in imported data.');
-    if (key === 'id' && child != null && !/^[A-Za-z0-9_.:-]+$/.test(String(child))) throw new Error('Invalid identifier in imported data.');
+    if (key === 'id' && child != null && !validRecordId(child)) throw new Error('Invalid identifier in imported data.');
     validateJsonTree(child, depth + 1);
   }
 }
 function validateRecord(record, label) {
   if (!plainObject(record)) throw new Error(label + ' must contain records.');
-  if (record.id != null && !/^[A-Za-z0-9_.:-]+$/.test(String(record.id))) throw new Error(label + ' contains an invalid identifier.');
+  if (record.id != null && !validRecordId(record.id)) throw new Error(label + ' contains an invalid identifier.');
   for (const field of ['title', 'name', 'body', 'notes']) {
     if (record[field] != null && typeof record[field] !== 'string') throw new Error(label + '.' + field + ' must be text.');
   }

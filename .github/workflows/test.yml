@@ -17,3 +17,12 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm test
+      - run: node node_modules/@playwright/cli/node_modules/playwright/cli.js install --with-deps chromium
+      - name: Populated-data and performance probes
+        run: |
+          node node_modules/http-server/bin/http-server . -p 8080 -c-1 &
+          probe_server_pid=$!
+          trap 'kill "$probe_server_pid"' EXIT
+          curl --retry 10 --retry-connrefused --retry-delay 1 --silent --fail http://127.0.0.1:8080/index.html >/dev/null
+          npm run probe:populated
+          npm run probe:performance
