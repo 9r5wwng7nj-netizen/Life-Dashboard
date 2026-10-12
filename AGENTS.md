@@ -70,7 +70,7 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
 
 - CDN dependencies are not pinned: Tailwind Play CDN, `lucide@latest`, and `xlsx@0.18.5` loaded on demand. See `docs/DEPENDENCIES.md`. The app needs internet the first time for styles and icons; the browser cache covers it after that.
 - YouTube/Vimeo embeds refuse to play from `file://` (YouTube error 153). They need an `http(s)` origin. This is part of the planned hosted/PWA phase.
-- Photos (journal, memories, recipes, progress), downloaded Bibles, Berean tables and the Obsidian-vault link live in IndexedDB but are **not** in the JSON backup.
+- Version 2 JSON backups include personal photos. Downloaded Bibles, Berean tables and the Obsidian-vault link remain device-local. Legacy version 1 backups contain no photos, so importing one preserves photos already on the destination device.
 
 ## Roadmap the user has agreed to
 
