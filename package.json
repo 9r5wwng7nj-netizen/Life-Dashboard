@@ -1,0 +1,20 @@
+{
+  "name": "life-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline-first personal dashboard (fitness, nutrition, faith, home) in a single HTML file.",
+  "type": "module",
+  "scripts": {
+    "start": "http-server . -p 8080 -c-1 -o /index.html",
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/check.mjs && playwright test",
+    "test:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0",
+    "http-server": "^14.1.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

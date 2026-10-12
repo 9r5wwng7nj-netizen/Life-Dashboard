@@ -1,0 +1,18 @@
+# Dependencies & test output
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Personal data — never commit your backups
+life-dashboard-backup-*.json
+*backup*.json
+journal-*.zip
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

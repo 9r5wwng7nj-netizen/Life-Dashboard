@@ -1,0 +1,63 @@
+# Architecture
+
+`index.html` is the whole app. Here's the order of the file, top to bottom.
+
+## 1. `<head>`
+- A pre-paint theme script reads `ld.settings` and sets `class="dark"` early to avoid a flash.
+- Tailwind Play CDN plus an inline `tailwind.config`: `darkMode: 'class'`, a `brand` teal palette, Inter font.
+- Lucide icons (CDN).
+- `<style type="text/tailwindcss">` defines the component classes:
+  - `card`, `btn`, `btn-primary`, `btn-ghost`, `btn-danger`, `btn-sm`, `input`, `label`, `chip`, `chip-on`, `stat`, `tab`, `tab-active`, `muted`, `md`, `scroll-thin`
+  - plus a small `no-tw` fallback for when the CDN is unreachable.
+
+## 2. Shell markup
+- Sidebar `#sidebar` holds the `#nav` built from `VIEWS`, plus the Settings, Theme and Collapse buttons.
+- Header holds `#view-title`, `#header-date` and the rest-timer button.
+- `#view` is where the current page renders. `#modal` is the single modal host. Toasts sit alongside them.
+
+## 3. Script sections (search for the banner text)
+
+1. **CORE UTILITIES**: DOM helpers, date math (local `YYYY-MM-DD`, Monday weeks), formatting, `icon()`, `download()`, `copyText()`.
+2. **SETTINGS**: `SETTINGS_DEFAULT`, `S`, `saveSettings()`.
+3. **STORAGE**: `COLLECTIONS` and `Store` (IndexedDB `kv` store, localStorage fallback, debounced `save()`, flush on `pagehide`/`visibilitychange`).
+4. **UI PRIMITIVES**: `toast`, `Modal`, `modalShell`, `tabs`, `cardHead`, `emptyState`, `ui` state.
+5. **ROUTER / SHELL**: `VIEWS`, `renderNav`, `render`/`renderNow` (with a re-entrancy guard), `rerender` (keeps focus), `afterRender` (hydrate photos, icons, media player), `go(view)`.
+6. **REST TIMER**: floating timer `Timer` (persists in `ld.timer`), `beep`, `notify`.
+7. **DASHBOARD**: `renderDashboard()` and the module cards.
+8. **FITNESS**: logger with supersets and set types, routines and programs, exercise library, stats, Hevy CSV.
+9. **NUTRITION**:
+   - Daily log, the log-food modal (search, barcode, quick add, saved meals, recipes), foods and meals.
+   - Adaptive plan and weekly check-ins, weight trend and expenditure, body measurements and progress photos, MacroFactor import.
+10. **SETTINGS & SYNC**: Settings modal, backup export and import (merge/replace).
+11. **FAITH**:
+    - Shared note helpers (`nf`, `noteField`, `obsidianMd`).
+    - **Scripture**: reader, offline Bibles, reading plans, highlights, memory, prayer.
+    - **Smart Search**: 120 topics mapped to Scripture, plus your notes, vault and trusted sites.
+    - **Berean**: interlinear, word study, topical index, concordance, Strong's.
+    - **Journal**: templates, prompts, mood and energy, dictation, reviews, Obsidian zip export.
+    - **Media Library**: sermons, podcasts with a built-in player, videos, articles via a clipper bookmarklet, books, quotes, collections.
+12. **HOME**:
+    - **Marriage & Family**: Monday Family Review, Rule of Life, boundaries, repair log, people, gifts, love in action, date nights, memories, kids, prayer rotation.
+    - **Recipes & Meals**: recipe clipper, cook mode, macro calculator (`ING_DB`), meal-plan slots, pantry and freezer, grocery aisles, stores, staples and budget, hosting and meal trains, family table.
+    - **Tasks**: natural-language capture (`parseTaskInput`), recurrence, areas and projects, Today with time blocks and focus timer, Inbox, Upcoming, people follow-ups, Someday, weekly planning (Big 3), templates, reminders, stats.
+13. **ACTIONS**: the core `A` table, then `Object.assign(A, A_FIT, A_NUT, A_MF, A_FAITH, A_MEDIA, A_JOURNAL, A_SCR, A_SMART, A_BEREAN, A_HOME, A_FAMILY, A_RECIPES, A_TASKS)`. Later tables win.
+14. **EVENT WIRING & INIT**: global delegated listeners (`click` → `data-action`, `input` → `data-input`, `change` → `data-change`, `submit` → `data-submit`, plus drag and drop), then `init()`.
+
+## Request → render loop
+
+```
+user clicks [data-action="x"]  →  A.x(el, event)  →  mutate Store.get(key) / ui
+                                                  →  Store.save(key)   (debounced IndexedDB write)
+                                                  →  render()          (rebuild #view from state)
+```
+
+Modules render with template strings. `esc()` every user value. Keep handlers small and put logic in plain functions so it can be tested.
+
+## Adding a feature (checklist)
+
+1. Data: add a collection to `COLLECTIONS` (with a default) or add optional fields. Never rename anything.
+2. UI state: add defaults to that module's `Object.assign(ui, {...})`.
+3. View: a function returning HTML, reached from the module's `tabs(...)` map.
+4. Actions: add them to the module's `A_*` table. Search first to avoid name clashes.
+5. Dark mode, 390px width, empty states.
+6. Run `npm test`.
