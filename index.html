@@ -484,16 +484,22 @@ const VIEWS = [
 let lastRendered = null, tickIv = null;
 // What needs attention in each section today. Every menu item has an entry, so any of them can show a
 // count: return { n, what } (add late: true for red, or dot: true for a plain dot), or null for nothing.
+// Daily checks ("not done yet today") look at today only, so a missed day never carries into the next.
+// A check stays quiet until the person has used that part of the app at least once.
 const NAV_COUNTS = {
   dashboard: () => null,
   fitness: () => Store.get('activeWorkout') ? { n: 1, what: 'workout in progress', dot: true } : null,
-  nutrition: () => null,
+  nutrition: () => {
+    const days = Object.values(Store.get('nutrition')), today = Store.get('nutrition')[ymd()] || {};
+    const food = days.some(d => (d.entries || []).length) && !(today.entries || []).length, weight = days.some(d => d.weight != null) && today.weight == null;
+    return { n: (food ? 1 : 0) + (weight ? 1 : 0), what: [food ? 'no food logged' : '', weight ? 'no weigh-in' : ''].filter(Boolean).join(' and ') + ' today' };
+  },
   scripture: () => { const r = readingDue() ? 1 : 0, v = memDue().length; return { n: r + v, what: [r ? 'reading to do' : '', v ? `verse${v === 1 ? '' : 's'} to review` : ''].filter(Boolean).join(' and ') }; },
-  journal: () => null,
-  media: () => null,
+  journal: () => { const j = Store.get('journal'); return j.length && !j.some(e => e.date === ymd()) ? { n: 1, what: 'no journal entry today' } : null; },
+  media: () => null, // none wanted
   // Only for people who use the weekly review; otherwise it would nag every week.
   family: () => Store.get('freviews').length && !reviewThisWeek() ? { n: 1, what: 'weekly family review to do' } : null,
-  recipes: () => null,
+  recipes: () => Object.values(Store.get('mealPlan')).some(d => d.length) && !mpItems(ymd()).some(it => it.slot === 'dinner') ? { n: 1, what: 'no dinner planned today' } : null,
   tasks: () => { const t = ymd(), due = Store.get('tasks').filter(x => x.status !== 'done' && !x.someday && x.due && x.due <= t), late = due.some(x => x.due < t); return { n: due.length, what: `task${due.length === 1 ? '' : 's'} due${late ? ', some overdue' : ''}`, late }; }
 };
 function navCount(id) {
@@ -6514,7 +6520,7 @@ const RELEASES = [
     { title: 'Levels, streaks and badges', img: '2026-10-memory-progress.png', alt: 'A progress card showing level 3, a 9-day streak and a row of badges.',
       body: '<p>Practice earns XP toward the next level. Keep a daily streak going and collect badges along the way.</p>' },
     { title: 'The menu shows what needs attention', img: '2026-10-menu-counts.png', alt: 'The menu with a number beside Scripture and beside Tasks.',
-      body: '<p>A number beside a menu item means something there needs attention today: tasks due, reading or a memory verse to do, or the weekly family review. On a phone, a red dot on the menu button says the same.</p>' },
+      body: '<p>A number beside a menu item means something there needs attention today: tasks due, reading or a memory verse to do, no food logged or weigh-in yet, no journal entry, no dinner planned, or the weekly family review. Daily reminders start fresh each morning. On a phone, a red dot on the menu button says the same.</p>' },
     { title: 'A stricter task Inbox', img: '2026-10-task-inbox.png', alt: 'Inbox tasks, each labelled with what it still needs: a due date, or an area or project.',
       body: '<p>A task now stays in the Inbox until it has both a due date and an area or project, so nothing is filed half-sorted.</p>', go: ['tasks', 'taskTab', 'inbox', 'Open the Inbox'] },
     { title: 'A library of task templates', img: '2026-10-template-library.png', alt: 'Template cards such as Sermon prep and Small group week, each with Use and Add to mine buttons.',

@@ -68,8 +68,26 @@ test('menu items show what needs attention today', async ({ page }) => {
   await page.evaluate(() => { Store.set('activeWorkout', { id: 'w', name: 'Workout', start: new Date().toISOString(), exercises: [] }); Store.get('freviews').push({ id: 'r', week: '2020-01-06' }); render(); });
   await expect(page.locator('#nav [data-view="fitness"]')).toContainText('workout in progress');
   await expect(chip('family')).toHaveText('1 weekly family review to do');
-  await page.evaluate(() => { NAV_COUNTS.journal = () => ({ n: 4, what: 'things to try' }); render(); });
-  await expect(chip('journal')).toHaveText('4 things to try');
+
+  // Daily checks: quiet until that part of the app has been used, then about today only.
+  for (const view of ['nutrition', 'journal', 'recipes', 'media', 'dashboard']) await expect(chip(view)).toHaveCount(0);
+  await page.evaluate(() => {
+    const y = addDays(ymd(), -1), old = addDays(ymd(), -5);
+    Store.set('nutrition', { [old]: { weight: 80, entries: [] }, [y]: { entries: [{ id: 'e', name: 'Oats', kcal: 300 }] } });
+    Store.get('journal').push({ id: 'j', date: y, type: 'journal', title: 'Yesterday', body: '' });
+    Store.set('mealPlan', { [y]: [{ id: 'm', text: 'Soup' }], [ymd()]: [{ id: 'l', text: 'Sandwiches', slot: 'lunch' }] }); render();
+  });
+  await expect(chip('nutrition')).toHaveText('2 no food logged and no weigh-in today');
+  await expect(chip('journal')).toHaveText('1 no journal entry today');
+  await expect(chip('recipes')).toHaveText('1 no dinner planned today');
+  // Several missed days still count once: nothing carries over.
+  expect(await page.evaluate(() => NAV_COUNTS.nutrition().n + NAV_COUNTS.journal().n + NAV_COUNTS.recipes().n)).toBe(4);
+  await page.evaluate(() => {
+    const n = Store.get('nutrition'); n[ymd()] = { weight: 79.5, entries: [{ id: 'e2', name: 'Eggs', kcal: 150 }] };
+    Store.get('journal').push({ id: 'j2', date: ymd(), type: 'journal', title: 'Today', body: '' });
+    Store.get('mealPlan')[ymd()].push({ id: 'd', text: 'Tacos' }); render();
+  });
+  for (const view of ['nutrition', 'journal', 'recipes']) await expect(chip(view)).toHaveCount(0);
 
   // On a phone the menu is closed, so its button carries the dot.
   await page.setViewportSize({ width: 390, height: 844 });
