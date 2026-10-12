@@ -56,6 +56,7 @@
     </div>
     <nav id="nav" aria-label="Main navigation" class="flex-1 overflow-y-auto scroll-thin p-2 space-y-0.5"></nav>
     <div class="p-2 border-t border-slate-200 dark:border-slate-800 space-y-0.5">
+      <button class="nav-item w-full" data-action="openHelp" title="Help &amp; what’s new"><i data-lucide="life-buoy" class="w-5 h-5 shrink-0"></i><span class="nav-label">Help &amp; what’s new</span><span id="help-dot" class="nav-label ml-auto hidden"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block"></span><span class="sr-only"> (something new)</span></span></button>
       <button class="nav-item w-full" data-action="openSettings" title="Settings & Sync"><i data-lucide="settings" class="w-5 h-5 shrink-0"></i><span class="nav-label">Settings &amp; Sync</span></button>
       <button class="nav-item w-full" data-action="cycleTheme" title="Toggle theme"><i data-lucide="sun-moon" class="w-5 h-5 shrink-0"></i><span class="nav-label" id="theme-label">Theme</span></button>
       <button class="nav-item w-full hidden md:flex" data-action="toggleCollapse" title="Collapse sidebar"><i data-lucide="panel-left" class="w-5 h-5 shrink-0"></i><span class="nav-label">Collapse</span></button>
@@ -160,7 +161,7 @@ const SETTINGS_DEFAULT = {
   name: '', theme: 'system', unit: 'lbs', restSeconds: 90, timerSound: true,
   targets: { cal: 2400, p: 180, c: 240, f: 75 },
   translation: 'web', esvKey: '', collapsed: false, view: 'dashboard', lastExport: null,
-  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: ''
+  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: '', tour: '', newsSeen: ''
 };
 let S = loadSettings();
 function loadSettings() {
@@ -488,7 +489,8 @@ function renderNav() {
     ? `<div class="nav-label px-3 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">${v.section}</div>`
     : `<button class="nav-item w-full ${S.view === v.id ? 'nav-active' : ''}" aria-current="${S.view === v.id ? 'page' : 'false'}" data-action="go" data-view="${v.id}" title="${v.label}">${icon(v.icon, 'w-5 h-5 shrink-0')}<span class="nav-label truncate">${v.label}</span>${v.badge ? `<span class="nav-label ml-auto">${v.badge()}</span>` : ''}</button>`).join('');
   // On a phone the menu is closed, so the menu button carries a dot when anything inside has a count.
-  const waiting = !!$('#nav .chip'), menu = $('[data-action="openSidebar"]');
+  $('#help-dot').classList.toggle('hidden', !helpWaiting());
+  const waiting = !!$('#nav .chip') || helpWaiting(), menu = $('[data-action="openSidebar"]');
   $('#menu-dot').classList.toggle('hidden', !waiting); menu.setAttribute('aria-label', waiting ? 'Open menu (items need attention)' : 'Open menu');
 }
 let _rendering = false;
@@ -612,6 +614,7 @@ function renderDashboard() {
   const lastMedia = Store.get('media').filter(m => m.status === 'active').sort((a, b) => (b.updated || '').localeCompare(a.updated || ''))[0] || Store.get('media').filter(m => m.status === 'queue').sort((a, b) => (a.qpos ?? 1e9) - (b.qpos ?? 1e9))[0];
   return `
   <div class="mb-6"><h2 class="text-2xl font-bold tracking-tight">${greet}${S.name ? `, ${esc(S.name)}` : ''}</h2><p class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div>
+  ${dashNotices()}
   ${needBackup ? `<div class="card mb-4 flex flex-wrap items-center gap-3 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40">${icon('hard-drive-download', 'w-5 h-5 text-amber-600')}<div class="flex-1 text-sm min-w-[12rem]">${S.lastExport ? `Last backup: ${fmtDate(ymd(new Date(S.lastExport)))}.` : "You haven't exported a backup yet."} Your data lives only in this browser.</div><button class="btn btn-sm btn-primary" data-action="exportAll">Back up now</button></div>` : ''}
   <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
     <div class="card">${cardHead('apple', 'Nutrition today', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="nutrition">Log ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
@@ -6439,6 +6442,76 @@ const A_HOME = {
 };
 
 /* =====================================================================
+   HELP: start-here tour and what's new
+   ===================================================================== */
+// RELEASES is what users are told about updates. Add an entry at the top with every change a user
+// would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
+// a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
+const RELEASES = [
+  { id: '2026-10-12', title: 'Memory practice, menu reminders and a stricter Inbox', slides: [
+    { title: 'Memorize Scripture by typing', img: '2026-10-memory-practice.png', alt: 'A verse with some words shown and others as blanks, above a box for typing first letters.',
+      body: '<p>Scripture → Memory now has typing practice. Type the first letter of each word through three steps: Read, Recall and Master.</p>', go: ['scripture', 'scrTab', 'memory', 'Open Memory'] },
+    { title: 'Levels, streaks and badges', img: '2026-10-memory-progress.png', alt: 'A progress card showing level 3, a 9-day streak and a row of badges.',
+      body: '<p>Practice earns XP toward the next level. Keep a daily streak going and collect badges along the way.</p>' },
+    { title: 'The menu shows what needs attention', img: '2026-10-menu-counts.png', alt: 'The menu with a number beside Scripture and beside Tasks.',
+      body: '<p>A number beside Tasks or Scripture means tasks are due, or there is reading or a memory verse to do today. On a phone, a red dot on the menu button says the same.</p>' },
+    { title: 'A stricter task Inbox', img: '2026-10-task-inbox.png', alt: 'Inbox tasks, each labelled with what it still needs: a due date, or an area or project.',
+      body: '<p>A task now stays in the Inbox until it has both a due date and an area or project, so nothing is filed half-sorted.</p>', go: ['tasks', 'taskTab', 'inbox', 'Open the Inbox'] },
+    { title: 'Smaller changes', body: '<ul class="list-disc pl-5 space-y-1"><li>Tapping a text box on an iPhone no longer zooms the screen.</li><li>New users get a start-here tour. You can open it any time from Help &amp; what’s new in the menu.</li><li>Updates like this one will be announced here from now on.</li></ul>' }
+  ] }
+];
+const TOUR = [
+  { title: 'Welcome to Life Dashboard', body: '<p>One place for your health, your faith and your home life.</p><p>Everything you enter is saved on this device. There is no account to create, and nobody else can see your records.</p>' },
+  { title: 'Getting around', body: '<p>The menu lists every section. On a phone, tap the <strong>☰</strong> button at the top left to open it.</p><ul class="list-disc pl-5 space-y-1"><li><strong>Dashboard</strong> is today at a glance, with a shortcut into each section.</li><li>Inside a section, the row of tabs across the top switches between its pages.</li><li>A number beside a menu item means something there needs attention today.</li></ul>' },
+  { title: 'Health', body: '<ul class="list-disc pl-5 space-y-1"><li><strong>Workouts</strong>: log your sets as you train, with a rest timer in the top bar.</li><li><strong>Nutrition</strong>: search for foods or scan a barcode to log what you eat, and track your weight.</li></ul>', go: ['fitness', '', '', 'Open Workouts'] },
+  { title: 'Faith', body: '<ul class="list-disc pl-5 space-y-1"><li><strong>Scripture</strong>: read, follow a reading plan, memorize verses with typing practice, and keep a prayer list.</li><li><strong>Journal</strong>: write entries from templates, with mood and photos.</li><li><strong>Media Library</strong>: save sermons, podcasts, articles and books, with your notes and quotes.</li></ul>', go: ['scripture', '', '', 'Open Scripture'] },
+  { title: 'Home', body: '<ul class="list-disc pl-5 space-y-1"><li><strong>Marriage &amp; Family</strong>: a weekly family review, date ideas, and notes on the people you love.</li><li><strong>Recipes &amp; Meals</strong>: recipes, a meal plan and a grocery list.</li><li><strong>Tasks</strong>: type something like <em>call Jake fri at 9</em> and it is dated for you. A task waits in the Inbox until it has a due date and an area or project.</li></ul>', go: ['tasks', '', '', 'Open Tasks'] },
+  { title: 'Put it on your phone', body: '<p>Open this page’s web address on your phone. On an iPhone use Safari: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>. On Android use Chrome: open the <strong>⋮</strong> menu and choose <strong>Add to Home screen</strong>.</p><p>It then opens like any other app and works without a connection.</p>' },
+  { title: 'Keep your records safe', body: '<p>Your records live only on this device. Removing the app from your home screen, or clearing the browser’s data, erases them.</p><p>Every so often, open <strong>Settings &amp; Sync</strong> and tap <strong>Back up personal data + photos</strong>. Keep the file somewhere safe; you can import it on a new phone.</p><p>You can open this tour again from <strong>Help &amp; what’s new</strong> in the menu.</p>' }
+];
+const newsWaiting = () => S.tour !== 'new' && !!RELEASES.length && S.newsSeen !== RELEASES[0].id;
+const helpWaiting = () => S.tour === 'new' || newsWaiting();
+function dashNotices() {
+  const card = (ic, title, text, action, label, what) => `<div class="card mb-4 border-brand-300 dark:border-brand-800 bg-brand-50/60 dark:bg-brand-950/30"><div class="flex flex-wrap items-center gap-3">${icon(ic, 'w-5 h-5 shrink-0 text-brand-700 dark:text-brand-300')}<div class="flex-1 min-w-[12rem]"><div class="font-semibold">${title}</div><div class="text-sm muted">${text}</div></div><button class="btn btn-primary" data-action="${action}">${label}</button><button class="btn" data-action="helpDismiss" data-what="${what}">Not now</button></div></div>`;
+  if (S.tour === 'new') return card('compass', 'New here? Take the two-minute tour', 'See what each section does and how to get around.', 'helpTour', 'Start the tour', 'tour');
+  if (newsWaiting()) return card('megaphone', 'What’s new', esc(RELEASES[0].title) + '.', 'helpNews', 'See what changed', 'news');
+  return '';
+}
+// Opening a deck counts as having seen it, so its dashboard card and menu dot go away.
+function deckOpen(kind, id = '') {
+  if (kind === 'tour') S.tour = 'done'; else S.newsSeen = RELEASES[0].id;
+  saveSettings(); ui.deck = { kind, id, i: 0 }; deckDraw();
+}
+const deckSlides = D => D.kind === 'tour' ? TOUR : (RELEASES.find(r => r.id === D.id) || RELEASES[0]).slides;
+function deckDraw() {
+  const D = ui.deck, slides = deckSlides(D), s = slides[D.i], last = D.i === slides.length - 1;
+  Modal.open(modalShell(D.kind === 'tour' ? 'Start here' : 'What’s new', `
+    ${s.img ? `<img src="./assets/whatsnew/${s.img}" alt="${esc(s.alt)}" class="mx-auto max-h-[45dvh] rounded-xl border border-slate-200 dark:border-slate-700">` : ''}
+    <div><h4 class="text-lg font-semibold">${s.title}</h4><div class="text-sm space-y-2 mt-1.5">${s.body}</div></div>
+    <div class="flex items-center justify-center gap-1.5">${slides.map((_, i) => `<span class="w-2 h-2 rounded-full ${i === D.i ? 'bg-brand-600' : 'bg-slate-300 dark:bg-slate-600'}"></span>`).join('')}<span class="sr-only">Slide ${D.i + 1} of ${slides.length}</span></div>`,
+    `${D.i ? `<button type="button" class="btn mr-auto" data-action="deckStep" data-d="-1">Back</button>` : '<span class="mr-auto"></span>'}${s.go ? `<button type="button" class="btn" data-action="deckGo">${s.go[3]}</button>` : ''}<button type="button" class="btn btn-primary" data-action="${last ? 'closeModal' : 'deckStep'}" data-d="1" autofocus>${last ? 'Done' : 'Next'}</button>`), { onClose: () => { ui.deck = null; render(); } });
+}
+function openHelp() {
+  closeSidebar();
+  Modal.open(modalShell('Help &amp; what’s new', `
+    <section class="space-y-2"><h4 class="font-semibold text-sm">Finding your way</h4>
+      <p class="text-sm muted">A short tour of every section, how the menu works, putting the app on your phone and backing up your records.</p>
+      <button type="button" class="btn btn-primary" data-action="helpTour">${icon('compass')} Start the tour</button></section>
+    <section class="space-y-2"><h4 class="font-semibold text-sm">What’s new</h4>
+      ${RELEASES.map(r => `<div class="rounded-xl border border-slate-200 dark:border-slate-800 p-3"><div class="flex flex-wrap items-center gap-2"><div class="flex-1 min-w-[10rem]"><div class="text-sm font-medium">${esc(r.title)}</div><div class="text-xs muted">${fmtDate(r.id.slice(0, 10), { month: 'long', day: 'numeric', year: 'numeric' })}</div></div><button type="button" class="btn btn-sm" data-action="helpNews" data-id="${r.id}">See what changed</button></div>
+        <ul class="list-disc pl-5 mt-2 text-xs muted space-y-0.5">${r.slides.map(s => `<li>${s.title}</li>`).join('')}</ul></div>`).join('')}</section>`,
+    `<button type="button" class="btn" data-action="closeModal">Close</button>`));
+}
+const A_HELP = {
+  openHelp,
+  helpTour: () => deckOpen('tour'),
+  helpNews: el => deckOpen('news', el.dataset.id || ''),
+  helpDismiss: el => { if (el.dataset.what === 'tour') S.tour = 'done'; else S.newsSeen = RELEASES[0].id; saveSettings(); render(); },
+  deckStep: el => { const D = ui.deck; if (!D) return; D.i = Math.max(0, Math.min(deckSlides(D).length - 1, D.i + +el.dataset.d)); deckDraw(); },
+  deckGo: () => { const D = ui.deck; if (!D) return; const [view, key, val] = deckSlides(D)[D.i].go; if (key) ui[key] = val; Modal.close(); go(view); }
+};
+
+/* =====================================================================
    DEVICE SYNC (Google Drive app folder)
    ===================================================================== */
 // One snapshot of personal records lives in the Google account's hidden app folder. Each device
@@ -6736,7 +6809,7 @@ const A = {
   }
 };
 
-Object.assign(A, A_FIT, A_NUT, A_MF, A_FAITH, A_MEDIA, A_JOURNAL, A_SCR, A_SMART, A_BEREAN, A_HOME, A_FAMILY, A_RECIPES, A_TASKS, A_SYNC);
+Object.assign(A, A_FIT, A_NUT, A_MF, A_FAITH, A_MEDIA, A_JOURNAL, A_SCR, A_SMART, A_BEREAN, A_HOME, A_FAMILY, A_RECIPES, A_TASKS, A_SYNC, A_HELP);
 
 /* =====================================================================
    EVENT WIRING & INIT
@@ -6786,6 +6859,8 @@ async function init() {
   const signedIn = syncFinishSignIn();
   applyTheme(); applyCollapse();
   $('#header-date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  // A browser that has never opened the app gets the start-here card instead of old release notes.
+  if (!localStorage.getItem('ld.seeded') && !localStorage.getItem('ld.settings')) { S.tour = 'new'; S.newsSeen = RELEASES[0].id; saveSettings(); }
   await Store.init(); ensureSeeds(); sortWorkouts();
   render(); Timer.restore();
   try { if (navigator.storage && navigator.storage.persisted && !(await navigator.storage.persisted())) navigator.storage.persist(); } catch (e) {}
