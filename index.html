@@ -220,6 +220,24 @@ const Store = {
   flushDirty() { const ks = [...this.dirty]; this.dirty.clear(); return Promise.all(ks.map(k => this.write(k, this.data[k]))); },
   async flushAll() { clearTimeout(this.t); this.dirty.clear(); await Promise.all(Object.keys(this.data).map(k => this.write(k, this.data[k]))); }
 };
+
+function idbEntries(store) {
+  if (!Store.db || !Store.db.objectStoreNames.contains(store)) return Promise.resolve([]);
+  return new Promise((res, rej) => {
+    const out = [], q = Store.db.transaction(store, 'readonly').objectStore(store).openCursor();
+    q.onsuccess = () => { const c = q.result; if (!c) return res(out); out.push([c.key, c.value]); c.continue(); };
+    q.onerror = () => rej(q.error);
+  });
+}
+function idbClear(store) {
+  if (!Store.db || !Store.db.objectStoreNames.contains(store)) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const t = Store.db.transaction(store, 'readwrite');
+    t.objectStore(store).clear();
+    t.oncomplete = res;
+    t.onerror = () => rej(t.error);
+  });
+}
 window.addEventListener('pagehide', () => Store.flushDirty());
 document.addEventListener('visibilitychange', () => { if (document.hidden) Store.flushDirty(); });
 
@@ -2043,7 +2061,8 @@ function openSettings() {
       <div><label class="label">ESV API key (optional)</label><input name="esvKey" type="password" class="input" value="${esc(S.esvKey)}" placeholder="From api.esv.org" autocomplete="off"></div></div>
       <p class="text-xs muted">Public-domain translations load from bible-api.com with no key. For ESV, create a free key at api.esv.org. The key stays in this browser and is left out of exports.</p></section>
     <section class="space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 p-4"><h4 class="font-semibold text-sm flex items-center gap-2">${icon('database', 'w-4 h-4')} Data &amp; sync</h4>
-      <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-primary" data-action="exportAll">${icon('download')} Export all data (.json)</button><button type="button" class="btn" data-action="importAll">${icon('upload')} Import backup…</button><button type="button" class="btn" data-action="hevyImport">${icon('dumbbell')} Import Hevy CSV…</button><button type="button" class="btn" data-action="mfImport">${icon('apple')} Import MacroFactor…</button></div>
+      <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-primary" data-action="exportAll">${icon('download')} Back up personal data + photos</button><button type="button" class="btn" data-action="importAll">${icon('upload')} Import backup…</button><button type="button" class="btn" data-action="hevyImport">${icon('dumbbell')} Import Hevy CSV…</button><button type="button" class="btn" data-action="mfImport">${icon('apple')} Import MacroFactor…</button></div>
+      <p class="text-xs muted">Backups include personal records and photos. Downloaded Bibles, imported reference libraries, the Obsidian folder connection and API keys are device-specific and are not included.</p>
       <p class="text-xs muted">Last backup: ${S.lastExport ? fmtDateTime(S.lastExport) : 'never'} · <span id="storage-info">checking storage…</span></p>
       <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="persistStorage">${icon('shield-check', 'w-3.5 h-3.5')} Ask browser to keep data</button><button type="button" class="btn btn-sm btn-danger" data-action="clearAll">${icon('trash-2', 'w-3.5 h-3.5')} Erase all data</button></div></section>`,
     `<button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn btn-primary">Save settings</button>`, 'saveSettings'), { wide: true });
@@ -2053,12 +2072,53 @@ function openSettings() {
     catch (e) { el.textContent = Store.db ? 'IndexedDB' : 'localStorage'; }
   })();
 }
-function exportAll() {
+function blobToDataUrl(blob) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
+}
+function dataUrlToBlob(src) {
+  if (typeof src !== 'string' || !src.startsWith('data:') || !src.includes(',')) throw new Error('Invalid photo data');
+  const [head, body] = src.split(',', 2), type = (head.match(/^data:([^;,]+)/) || [])[1] || 'application/octet-stream';
+  const raw = head.includes(';base64') ? atob(body) : decodeURIComponent(body), bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+async function backupPhotos() {
+  const rows = await idbEntries('photos');
+  return Promise.all(rows.map(async ([id, blob]) => ({ id: String(id), type: blob.type || 'application/octet-stream', data: await blobToDataUrl(blob) })));
+}
+async function restoreBackupPhotos(items, mode) {
+  if (!Array.isArray(items) || !Photos.ok()) return 0;
+  if (mode === 'replace') await idbClear('photos');
+  let n = 0;
+  for (const x of items) {
+    if (!x || typeof x.id !== 'string' || typeof x.data !== 'string') continue;
+    await Photos.put(x.id, dataUrlToBlob(x.data)); n++;
+  }
+  Photos.urls.forEach(u => URL.revokeObjectURL(u)); Photos.urls.clear();
+  return n;
+}
+async function buildBackupPayload() {
   const { esvKey, fdcKey, aiKey, view, collapsed, ...settings } = S;
-  const payload = { app: 'life-dashboard', version: 1, exportedAt: new Date().toISOString(), settings, data: { ...Store.data, photoMeta: undefined } };
+  return { app: 'life-dashboard', version: 2, exportedAt: new Date().toISOString(), settings, data: { ...Store.data }, assets: { photos: await backupPhotos() } };
+}
+async function exportAll() {
+  toast('Preparing backup…');
+  let payload;
+  try { payload = await buildBackupPayload(); }
+  catch (e) { return toast('Backup failed: ' + e.message, 'error'); }
   download(`life-dashboard-backup-${ymd()}.json`, JSON.stringify(payload, null, 2));
   S.lastExport = payload.exportedAt; saveSettings(); toast('Backup downloaded');
   if (S.view === 'dashboard' && !Modal.isOpen()) render();
+}
+async function resetAllData() {
+  clearTimeout(Store.t); Store.dirty.clear();
+  await Promise.all(['kv', 'photos', 'bibles'].map(idbClear));
+  Object.keys(localStorage).filter(k => k.startsWith('ld.')).forEach(k => localStorage.removeItem(k));
+  Photos.urls.forEach(u => URL.revokeObjectURL(u)); Photos.urls.clear();
+  Object.keys(BibleMem).forEach(k => delete BibleMem[k]); Object.keys(chapCache).forEach(k => delete chapCache[k]);
+  S = structuredClone(SETTINGS_DEFAULT);
+  Store.data = Object.fromEntries(Object.entries(COLLECTIONS).map(([k, v]) => [k, structuredClone(v)]));
+  ensureSeeds(); await Store.flushAll(); saveSettings(); applyTheme(); applyCollapse();
 }
 function ensureSeeds() {
   const d = Store.data;
@@ -5954,8 +6014,10 @@ const A = {
     let d; try { d = JSON.parse(text); } catch (e) { return toast('That file is not valid JSON', 'error'); }
     if (!d || typeof d.data !== 'object') return toast("This doesn't look like a Life Dashboard backup", 'error');
     ui.pendingImport = d;
-    const counts = Object.entries(d.data).filter(([, v]) => v != null).map(([k, v]) => `<span class="chip">${k}: ${Array.isArray(v) ? v.length : typeof v === 'object' ? Object.keys(v).length : 1}</span>`).join(' ');
+    const counts = Object.entries(d.data).filter(([k, v]) => k in COLLECTIONS && v != null).map(([k, v]) => `<span class="chip">${esc(k)}: ${Array.isArray(v) ? v.length : typeof v === 'object' ? Object.keys(v).length : 1}</span>`).join(' '),
+      photos = d.assets && Array.isArray(d.assets.photos) ? d.assets.photos.length : null;
     Modal.open(modalShell('Import backup', `<p class="text-sm">Backup from <strong>${d.exportedAt ? fmtDateTime(d.exportedAt) : 'an unknown date'}</strong>.</p><div class="flex flex-wrap gap-1">${counts}</div>
+      <p class="text-sm muted">${photos == null ? 'Legacy backup: it does not contain photos, so your existing photos will be kept.' : `${photos} photo${photos === 1 ? '' : 's'} included.`}</p>
       <p class="text-sm muted"><strong>Merge</strong> keeps your current data and adds or updates items from the file. <strong>Replace</strong> erases what's here first and restores the file exactly.</p>`,
       `<button type="button" class="btn" data-action="closeModal">Cancel</button><button type="button" class="btn" data-action="doImport" data-mode="merge">Merge</button><button type="button" class="btn btn-danger" data-action="doImport" data-mode="replace">Replace everything</button>`));
   }),
@@ -5963,8 +6025,8 @@ const A = {
     const d = ui.pendingImport, mode = el.dataset.mode; if (!d) return;
     if (mode === 'replace' && !confirm('Replace ALL current data with this backup? This cannot be undone.')) return;
     for (const k of Object.keys(COLLECTIONS)) {
-      if (k === 'photoMeta') continue;
       const has = k in d.data, inc = d.data[k], cur = Store.data[k];
+      if (k === 'photoMeta' && !has && !(d.assets && Array.isArray(d.assets.photos))) continue;
       if (mode === 'replace') { Store.data[k] = has ? inc : structuredClone(COLLECTIONS[k]); continue; }
       if (!has || inc == null) continue;
       if (k === 'activeWorkout') { if (!cur) Store.data[k] = inc; continue; }
@@ -5976,15 +6038,15 @@ const A = {
         for (const [dt, v] of Object.entries(inc)) { const c = cur[dt]; if (!c) cur[dt] = v; else { const m = new Map((c.entries || []).map(x => [x.id, x])); (v.entries || []).forEach(x => m.set(x.id, x)); c.entries = [...m.values()]; if (v.weight != null) c.weight = v.weight; } }
       } else if (typeof cur === 'object' && typeof inc === 'object') Object.assign(cur, inc);
     }
+    if (d.assets && Array.isArray(d.assets.photos)) await restoreBackupPhotos(d.assets.photos, mode);
     if (mode === 'replace' && d.settings) { const keep = { esvKey: S.esvKey, fdcKey: S.fdcKey, aiKey: S.aiKey, view: S.view, collapsed: S.collapsed }; S = { ...SETTINGS_DEFAULT, ...d.settings, ...keep, targets: { ...SETTINGS_DEFAULT.targets, ...(d.settings.targets || {}) } }; saveSettings(); applyTheme(); }
     ensureSeeds(); sortWorkouts(); await Store.flushAll(); ui.pendingImport = null; Modal.close(); toast(mode === 'replace' ? 'Backup restored' : 'Backup merged'); render();
   },
   persistStorage: async () => { try { const ok = await navigator.storage.persist(); toast(ok ? 'Browser will keep your data ✓' : 'Browser declined — keep exporting backups', ok ? 'ok' : 'error'); } catch (e) { toast('Not supported in this browser', 'error'); } },
   enableNotifications: async () => { if (!('Notification' in window)) return toast('Notifications not supported here', 'error'); const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Notifications enabled' : 'Notifications blocked', p === 'granted' ? 'ok' : 'error'); },
   clearAll: async () => {
-    if (prompt('This erases ALL data in this browser. Type DELETE to confirm.') !== 'DELETE') return;
-    for (const k of Object.keys(COLLECTIONS)) Store.data[k] = structuredClone(COLLECTIONS[k]);
-    localStorage.removeItem('ld.seeded'); ensureSeeds(); await Store.flushAll(); Modal.close(); toast('All data erased'); render();
+    if (prompt('This erases ALL Life Dashboard records, photos, downloaded libraries, settings and API keys from this browser. Type DELETE to confirm.') !== 'DELETE') return;
+    await resetAllData(); Modal.close(); toast('Life Dashboard reset — all personal data was erased'); render();
   },
 
   saveSettings: f => {
