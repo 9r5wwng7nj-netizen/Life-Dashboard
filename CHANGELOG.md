@@ -3,6 +3,9 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Failed saves retain pending collections, serialize retries and show an unsaved-changes warning with retry/export controls. Reset waits for pending writes; malformed localStorage fallback data is not silently treated as empty.
+- Photo/reference transactions reject aborts instead of hanging or resolving as success. Image resizing releases decoded bitmaps; mixed Journal photo batches retain successful uploads and report failures.
+- CI now checks workout/photo editing, synthetic Bible/Berean parsing and interrupted-storage recovery.
 - Journal Focus is a named keyboard-contained dialog with an inert background, visible focus, Escape cleanup and return focus. Journal/family detail controls have meaningful names; task-board titles are keyboard-editable and completed tasks retain readable contrast.
 - Food lookups and Bible requests have bounded response/body waits and offline/unreachable/invalid-response recovery messages. Public-service checks and remaining manual steps are documented without claiming service availability or screen-reader certification.
 - Backups containing existing MacroFactor name|unit food identifiers can be restored; unsafe identifiers are still rejected and saved IDs are not rewritten.

@@ -64,6 +64,10 @@
   </div>
 </div>
 <div id="timer" class="fixed z-40 bottom-4 right-4 hidden"></div>
+<div id="save-warning" role="region" aria-label="Unsaved changes" class="hidden fixed z-40 bottom-4 left-4 right-4 max-w-3xl mx-auto card border-rose-600">
+  <p class="text-sm">Some changes have not been saved. Keep this tab open. Retry saving, or export a backup before closing.</p>
+  <div class="flex flex-wrap gap-2 mt-3"><button class="btn btn-primary" data-action="retrySave">Retry saving</button><button class="btn" data-action="exportAll">Export backup</button></div>
+</div>
 <div id="modal" class="fixed inset-0 z-50 hidden"></div>
 <div id="toasts" class="fixed z-[60] bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-none"></div>
 <div id="status-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -176,7 +180,7 @@ const COLLECTIONS = {
   recipes: [], mealPlan: {}, grocery: [], tasks: [], pantry: [], freezer: [], hosting: [], gkit: {}, projects: [], ttemplates: [], tkit: {}, tblocks: {}
 };
 const Store = {
-  db: null, data: {}, dirty: new Set(), t: null,
+  db: null, data: {}, dirty: new Set(), t: null, writeQueue: Promise.resolve(), saveFailed: false,
   async init() {
     try {
       this.db = await new Promise((res, rej) => {
@@ -201,22 +205,44 @@ const Store = {
     });
   },
   read(k) {
-    if (!this.db) { try { const s = localStorage.getItem('ld.data.' + k); return Promise.resolve(s == null ? undefined : JSON.parse(s)); } catch (e) { return Promise.resolve(undefined); } }
-    return new Promise(res => { const q = this.db.transaction('kv', 'readonly').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(undefined); });
+    if (!this.db) { try { const s = localStorage.getItem('ld.data.' + k); return Promise.resolve(s == null ? undefined : JSON.parse(s)); } catch (e) { return Promise.reject(e); } }
+    return this.readMany([k]).then(values => values[0]);
   },
   write(k, v) {
-    if (!this.db) { try { localStorage.setItem('ld.data.' + k, JSON.stringify(v)); } catch (e) { toast('Storage is full — export a backup!', 'error'); } return Promise.resolve(); }
-    return new Promise(res => {
+    if (!this.db) { try { localStorage.setItem('ld.data.' + k, JSON.stringify(v)); return Promise.resolve(); } catch (e) { return Promise.reject(e); } }
+    return new Promise((res, rej) => {
       const tx = this.db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k);
-      tx.oncomplete = res; tx.onerror = () => { toast('Save failed: ' + tx.error, 'error'); res(); };
+      tx.oncomplete = res; tx.onerror = tx.onabort = () => rej(tx.error || new Error('Save was interrupted'));
     });
   },
   get(k) { return this.data[k]; },
   set(k, v) { this.data[k] = v; this.save(k); },
-  save(k) { this.dirty.add(k); clearTimeout(this.t); this.t = setTimeout(() => this.flushDirty(), 250); },
-  flushDirty() { const ks = [...this.dirty]; this.dirty.clear(); return Promise.all(ks.map(k => this.write(k, this.data[k]))); },
-  async flushAll() { clearTimeout(this.t); this.dirty.clear(); await Promise.all(Object.keys(this.data).map(k => this.write(k, this.data[k]))); }
+  save(k) { this.dirty.add(k); clearTimeout(this.t); this.t = setTimeout(() => this.flushDirty().catch(() => {}), 250); },
+  flushDirty() {
+    clearTimeout(this.t);
+    const run = async () => {
+      const keys = [...this.dirty]; keys.forEach(k => this.dirty.delete(k));
+      const results = await Promise.allSettled(keys.map(k => Promise.resolve().then(() => this.write(k, this.data[k]))));
+      const failed = results.flatMap((r, i) => r.status === 'rejected' ? [keys[i]] : []);
+      failed.forEach(k => this.dirty.add(k));
+      if (failed.length && !this.saveFailed) { const announcement = $('#error-announcement'); announcement.textContent = ''; requestAnimationFrame(() => { announcement.textContent = 'Some changes have not been saved. Keep this tab open. Retry saving or export a backup.'; }); }
+      if (failed.length) this.saveFailed = true; else if (!this.dirty.size) this.saveFailed = false;
+      $('#save-warning').classList.toggle('hidden', !this.saveFailed);
+      if (failed.length) throw new Error('Some changes could not be saved. Keep this tab open and retry or export a backup.');
+    };
+    const result = this.writeQueue.then(run); this.writeQueue = result.catch(() => {}); return result;
+  },
+  flushAll() { Object.keys(this.data).forEach(k => this.dirty.add(k)); return this.flushDirty(); }
 };
+
+function idbOperation(store, mode, operation) {
+  return new Promise((resolve, reject) => {
+    const tx = Store.db.transaction(store, mode); let request;
+    tx.oncomplete = () => resolve(request?.result);
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error('Storage operation was interrupted'));
+    try { request = operation(tx.objectStore(store)); } catch (e) { tx.abort(); reject(e); }
+  });
+}
 
 function idbEntries(store) {
   if (!Store.db || !Store.db.objectStoreNames.contains(store)) return Promise.resolve([]);
@@ -228,15 +254,10 @@ function idbEntries(store) {
 }
 function idbClear(store) {
   if (!Store.db || !Store.db.objectStoreNames.contains(store)) return Promise.resolve();
-  return new Promise((res, rej) => {
-    const t = Store.db.transaction(store, 'readwrite');
-    t.objectStore(store).clear();
-    t.oncomplete = res;
-    t.onerror = () => rej(t.error);
-  });
+  return idbOperation(store, 'readwrite', objectStore => objectStore.clear());
 }
-window.addEventListener('pagehide', () => Store.flushDirty());
-document.addEventListener('visibilitychange', () => { if (document.hidden) Store.flushDirty(); });
+window.addEventListener('pagehide', () => Store.flushDirty().catch(() => {}));
+document.addEventListener('visibilitychange', () => { if (document.hidden) Store.flushDirty().catch(() => {}); });
 
 /* =====================================================================
    UI PRIMITIVES
@@ -307,7 +328,7 @@ function syncSidebarAccessibility() {
   $('[data-action="openSidebar"]').setAttribute('aria-expanded', String(small && open));
 }
 function modalBackground(inert) {
-  for (const el of $$('#app-shell, #timer, #mini-player, .skip-link')) el.inert = inert;
+  for (const el of $$('#app-shell, #timer, #mini-player, #save-warning, .skip-link')) el.inert = inert;
 }
 function trapDialogTab(e, dialog) {
   if (e.key !== 'Tab') return;
@@ -1552,9 +1573,9 @@ const Photos = {
   urls: new Map(), pending: new Map(),
   ok() { return !!(Store.db && Store.db.objectStoreNames.contains('photos')); },
   tx(mode) { return Store.db.transaction('photos', mode).objectStore('photos'); },
-  put(id, blob) { return new Promise((res, rej) => { const t = Store.db.transaction('photos', 'readwrite'); t.objectStore('photos').put(blob, id); t.oncomplete = res; t.onerror = () => rej(t.error); }); },
-  get(id) { return new Promise(res => { const q = this.tx('readonly').get(id); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); },
-  del(id) { this.pending.delete(id); return new Promise(res => { const t = Store.db.transaction('photos', 'readwrite'); t.objectStore('photos').delete(id); t.oncomplete = res; t.onerror = res; const u = this.urls.get(id); if (u) { URL.revokeObjectURL(u); this.urls.delete(id); } }); },
+  put(id, blob) { return idbOperation('photos', 'readwrite', store => store.put(blob, id)); },
+  get(id) { return idbOperation('photos', 'readonly', store => store.get(id)); },
+  async del(id) { await idbOperation('photos', 'readwrite', store => store.delete(id)); this.pending.delete(id); const u = this.urls.get(id); if (u) { URL.revokeObjectURL(u); this.urls.delete(id); } },
   async url(id) {
     if (this.urls.has(id)) return this.urls.get(id);
     if (this.pending.has(id)) return this.pending.get(id);
@@ -1583,8 +1604,9 @@ async function hydratePhotos() {
 }
 async function resizeImage(file, max = 1400) {
   const bmp = await createImageBitmap(file), s = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
-  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-  return new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+  try { c.width = Math.max(1, Math.round(bmp.width * s)); c.height = Math.max(1, Math.round(bmp.height * s)); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); }
+  finally { bmp.close(); }
+  return new Promise((resolve, reject) => c.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode photo')), 'image/jpeg', 0.85));
 }
 
 /* ---------- Views ---------- */
@@ -2359,7 +2381,9 @@ async function exportAll() {
   if (S.view === 'dashboard' && !Modal.isOpen()) render();
 }
 async function resetAllData() {
+  clearTimeout(Store.t); await Store.writeQueue;
   clearTimeout(Store.t); Store.dirty.clear();
+  Store.saveFailed = false; $('#save-warning').classList.add('hidden');
   await Promise.all(['kv', 'photos', 'bibles'].map(idbClear));
   Object.keys(localStorage).filter(k => k.startsWith('ld.')).forEach(k => localStorage.removeItem(k));
   Photos.clearURLs();
@@ -2478,9 +2502,9 @@ const bibleMeta = () => { try { return JSON.parse(localStorage.getItem('ld.bible
 const setBibleMeta = m => localStorage.setItem('ld.bibles', JSON.stringify(m));
 const BibleDb = {
   ok() { return !!(Store.db && Store.db.objectStoreNames.contains('bibles')); },
-  get(tr) { return new Promise(res => { const q = Store.db.transaction('bibles', 'readonly').objectStore('bibles').get(tr); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); },
-  put(tr, d) { return new Promise((res, rej) => { const t = Store.db.transaction('bibles', 'readwrite'); t.objectStore('bibles').put(d, tr); t.oncomplete = res; t.onerror = () => rej(t.error); }); },
-  del(tr) { return new Promise(res => { const t = Store.db.transaction('bibles', 'readwrite'); t.objectStore('bibles').delete(tr); t.oncomplete = res; t.onerror = res; }); }
+  get(tr) { return idbOperation('bibles', 'readonly', store => store.get(tr)); },
+  put(tr, d) { return idbOperation('bibles', 'readwrite', store => store.put(d, tr)); },
+  del(tr) { return idbOperation('bibles', 'readwrite', store => store.delete(tr)); }
 };
 async function loadBible(tr) {
   if (BibleMem[tr]) return BibleMem[tr]; if (!bibleMeta()[tr] || !BibleDb.ok()) return null;
@@ -3841,7 +3865,7 @@ const JournalFocus = {
     const dialog = $('#j-focus'), opening = !!dialog && !this.active, closing = !dialog && this.active;
     if (opening) this.origin = focused || focusSnapshot();
     this.active = !!dialog;
-    for (const el of $$('#app-shell header, #j-workspace, #timer, #mini-player, .skip-link')) el.inert = !!dialog || Modal.isOpen();
+    for (const el of $$('#app-shell header, #j-workspace, #timer, #mini-player, #save-warning, .skip-link')) el.inert = !!dialog || Modal.isOpen();
     syncSidebarAccessibility();
     if (opening) { const text = $('#jf-body'); text.focus({ preventScroll: true }); text.selectionStart = text.selectionEnd = text.value.length; }
     if (closing) { if (!restoreFocus(this.origin)) $('#view-title').focus({ preventScroll: true }); this.origin = null; }
@@ -4079,12 +4103,15 @@ const A_JOURNAL = {
   jPhotoAdd: async el => {
     const j = findNote('journal', el.dataset.id), files = [...(el.files || [])]; el.value = ''; if (!j || !files.length) return;
     if (!Photos.ok()) return toast('This browser blocked photo storage for this file', 'error');
-    try { for (const f of files) { const blob = await resizeImage(f, 1600), id = `jp_${uid()}`; await Photos.put(id, blob); (j.photos = j.photos || []).push(id); } jCommit(j); toast(files.length > 1 ? `${files.length} photos added` : 'Photo added'); }
-    catch (e) { console.error(e); toast('Couldn’t add that photo', 'error'); }
+    let added = 0;
+    for (const f of files) { try { const blob = await resizeImage(f, 1600), id = `jp_${uid()}`; await Photos.put(id, blob); (j.photos = j.photos || []).push(id); added++; } catch (e) { console.warn('Could not add photo', e); } }
+    if (added) jCommit(j);
+    const failed = files.length - added;
+    toast(failed ? `${added} photo(s) added; ${failed} could not be added. Existing photos are unchanged.` : added > 1 ? `${added} photos added` : 'Photo added', failed ? 'error' : 'ok');
     render();
   },
   jPhotoView: el => Modal.open(modalShell('Photo', `<img data-photo="${el.dataset.p}" alt="Journal photo" class="w-full rounded-lg bg-slate-100 dark:bg-slate-800">`), { wide: true }),
-  jPhotoDel: async el => { const j = findNote('journal', el.dataset.id); if (!j || !confirm('Remove this photo from the entry?')) return; j.photos = (j.photos || []).filter(p => p !== el.dataset.p); await Photos.del(el.dataset.p); jCommit(j); render(); },
+  jPhotoDel: async el => { const j = findNote('journal', el.dataset.id); if (!j || !confirm('Remove this photo from the entry?')) return; try { await Photos.del(el.dataset.p); } catch (e) { return toast('Could not remove the photo. Your entry is unchanged.', 'error'); } j.photos = (j.photos || []).filter(p => p !== el.dataset.p); jCommit(j); render(); },
   jPrayLink: el => { const j = findNote('journal', el.dataset.id); if (!j || !el.value) return; (j.prayers = j.prayers || []).push(el.value); jCommit(j); render(); },
   jPrayUnlink: el => { const j = findNote('journal', el.dataset.id); if (!j) return; j.prayers = (j.prayers || []).filter(p => p !== el.dataset.p); jCommit(j); render(); },
   prayTimeline: el => { const p = Store.get('prayers').find(x => x.id === el.dataset.id); if (p) Modal.open(modalShell(`${icon('hand-heart', 'w-4 h-4 inline -mt-0.5')} ${esc(p.title)}`, prayTimelineHtml(p))); },
@@ -6305,6 +6332,7 @@ const A_HOME = {
    ACTIONS (event-delegated)
    ===================================================================== */
 const A = {
+  retrySave: async () => { try { await Store.flushDirty(); toast('Pending changes saved'); } catch (e) {} },
   // shell
   go: el => go(el.dataset.view),
   setTab: el => { ui[el.dataset.key] = el.dataset.val; render(); },

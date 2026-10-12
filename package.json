@@ -11,6 +11,7 @@
     "test": "npm run build:css && node scripts/check.mjs && playwright test",
     "probe:performance": "node scripts/performance-probe.mjs",
     "probe:populated": "node scripts/populated-probe.mjs",
+    "probe:records": "node scripts/record-probe.mjs",
     "probe:install": "node node_modules/@playwright/cli/node_modules/playwright/cli.js install chromium",
     "test:install": "playwright install chromium"
   },

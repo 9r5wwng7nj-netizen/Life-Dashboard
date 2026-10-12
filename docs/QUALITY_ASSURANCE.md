@@ -16,14 +16,15 @@ Verified:
 - Completing a recurring task twice creates one successor, not duplicates.
 - Fourteen light/dark populated detail states pass accessibility scans. Journal Focus keyboard wrapping, visible focus, background isolation, Escape cleanup and return focus are verified; task-board titles have native edit buttons.
 - Simulated slow headers/body, network/CORS failure, invalid JSON, USDA rate limits, Open Food Facts HTTP errors and offline mode produce recoverable errors without live credentials.
+- The record probe checks workout name/weight/reps edits while retaining notes, duration sets and import source; photo resize/partial batch/reload; failed saves and retries; queued edits; eight aborted storage operations; corrupt fallback preservation; reset waiting for pending writes; and synthetic reference parsers/typed-array persistence.
 
 This pass found a real compatibility defect: generated MacroFactor food IDs use mf:name|unit, but backup validation previously rejected the separator. The shared validator now accepts this exact existing format without changing stored IDs or allowing arbitrary pipe-containing identifiers, quotes or markup.
 
 ## How to repeat
 
 1. Run `npm ci`, `npm run probe:install` and `npm start`.
-2. In another terminal run `npm run probe:populated` and `npm run probe:performance`.
-3. Run `npm test` for the 21 existing smoke/security/accessibility regressions. CI runs all three commands against a temporary local server.
+2. In another terminal run `npm run probe:populated`, `npm run probe:performance` and `npm run probe:records`.
+3. Run `npm test` for the 21 existing smoke/security/accessibility regressions. CI runs all four commands, with a temporary local server for the CLI probes.
 
 `APP_URL` supports another localhost port. `PLAYWRIGHT_CLI` optionally selects an existing CLI wrapper. Defaults use the pinned local CLI and scripts/probe-browser.json: an isolated context, with no personal browser profile. The populated probe resets/seeds only its own isolated test context; generated backups stay in memory and are never committed. Closing the context discards test storage.
 
@@ -35,7 +36,7 @@ Local synchronous populated renders were roughly 30–70 ms for the slowest scre
 
 1. **Manual assistive technology:** VoiceOver/TalkBack reading order, announcements, dialog navigation, embedded media, and detailed WCAG 2.2 target-size review. Automated axe/keyboard checks are not certification.
 2. **Live optional services:** public Bible, podcast discovery, video metadata, barcode and USDA demo checks were separately performed on 2026-10-12; see docs/LIVE_SERVICES.md. Authenticated Scripture/food keys, actual playback, generic article metadata, notifications and dictation remain unverified. Network access is blocked during deterministic probes; a passing probe does not guarantee live availability.
-3. **Reference libraries and additional workflows:** downloaded full Bibles/Berean tables, workout-editor flows, photo uploads/resizing, very large media libraries, and more cross-record links. Not every collection is populated and not every action is activated.
+3. **Photo/record atomicity and additional workflows:** some existing replacement/deletion paths change photo blobs and record links in separate transactions. A follow-up should commit both atomically; retaining failed collection writes does not fully solve that risk if a user closes the tab before recovery. Synthetic reference parsers, basic workout edits and Journal photo resize/partial batches now pass, but full production Berean files, every photo workflow, very large media libraries and all cross-record links are not covered.
 4. **Additional browsers and failures:** Safari/Firefox, more browser-storage failures, interrupted imports, and file-origin populated interactions. The standard smoke suite checks file-origin startup/navigation/persistence, while CLI populated probes run on localhost.
 5. **Mobile foundation:** hosting, offline PWA and private sync remain deferred by Seth's request. Phone-width regression checks preserve existing layout; they do not enable cross-device use.
 
