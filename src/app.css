@@ -3,6 +3,21 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Keep keyboard focus visible on every interactive control, including chips. */
+@layer base {
+  :focus-visible { outline: 2px solid var(--color-brand-700); outline-offset: 3px; }
+  .dark :focus-visible { outline-color: var(--color-brand-300); }
+}
+
+.skip-link { position: fixed; left: 1rem; top: .5rem; z-index: 100; padding: .75rem 1rem; background: #0f766e; color: white; border-radius: .5rem; transform: translateY(-200%); }
+.skip-link:focus { transform: translateY(0); }
+label:has(input:focus-visible) { outline: 2px solid #0f766e; outline-offset: 3px; }
+.dark label:has(input:focus-visible) { outline-color: #5eead4; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
 @theme {
   --color-brand-50: #f0fdfa;
   --color-brand-100: #ccfbf1;
@@ -21,19 +36,19 @@
 @layer components {
   .card { @apply bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm; }
   .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 select-none whitespace-nowrap; }
-  .btn-primary { @apply bg-brand-600 border-brand-600 text-white hover:bg-brand-700 dark:bg-brand-600 dark:border-brand-600 dark:hover:bg-brand-500; }
+  .btn-primary { @apply bg-brand-700 border-brand-700 text-white hover:bg-brand-800 dark:bg-brand-700 dark:border-brand-700 dark:hover:bg-brand-800; }
   .btn-danger { @apply text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950; }
   .btn-ghost { @apply border-transparent bg-transparent dark:bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800; }
   .btn-sm { @apply px-2 py-1 text-xs rounded-md; }
   .input { @apply w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 placeholder:text-slate-400; }
   .label { @apply block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1; }
   .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300; }
-  .chip-on { @apply bg-brand-600 text-white dark:bg-brand-600 dark:text-white; }
+  .chip-on { @apply bg-brand-700 text-white dark:bg-brand-700 dark:text-white; }
   .tab { @apply px-3 py-1.5 text-sm rounded-lg font-medium text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800 whitespace-nowrap; }
   .tab-active { @apply bg-white dark:bg-slate-800 text-brand-700 dark:text-brand-300 shadow-sm; }
   .nav-item { @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800; }
   .nav-active { @apply bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300; }
-  .muted { @apply text-slate-500 dark:text-slate-400; }
+  .muted { @apply text-slate-600 dark:text-slate-400; }
   .stat { @apply rounded-xl bg-slate-100/80 dark:bg-slate-800/60 p-3; }
   .md h1 { @apply text-xl font-bold mt-4 mb-2; }
   .md h2 { @apply text-lg font-bold mt-4 mb-2; }
@@ -45,4 +60,15 @@
   .md hr { @apply my-4 border-slate-200 dark:border-slate-700; }
   .md a { @apply text-brand-600 dark:text-brand-400 underline; }
   .md mark { @apply bg-amber-200 dark:bg-amber-700/60 rounded px-0.5; }
+}
+
+/* Existing small utility text must remain readable on tinted cards in both themes. */
+@layer utilities {
+  .text-slate-400, .text-slate-500 { color: #475569; }
+  .text-brand-600 { color: #0f766e; }
+  .text-rose-600 { color: #be123c; }
+  .dark .text-slate-400, .dark .text-slate-500 { color: #94a3b8; }
+  .dark .text-brand-600 { color: #5eead4; }
+  .dark .text-rose-600 { color: #fda4af; }
+  .bg-brand-600.text-white { background-color: #0f766e; }
 }

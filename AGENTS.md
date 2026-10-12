@@ -63,6 +63,7 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
 - **Saving:** mutate `Store.get('key')` then call `Store.save('key')` (debounced write), or use `Store.set('key', value)`. Then call `render()`.
 - **UI state** that shouldn't persist goes on `ui` (defaults come from `Object.assign(ui, {...})` near each module). Persistent preferences go on `S` plus `saveSettings()`.
 - **Modals:** `Modal.open(modalShell(title, bodyHtml, footerHtml, submitActionName), { wide })`.
+- **Accessibility:** use associated labels or meaningful accessible names. Shared rendering links existing label/field pairs and restores focus; Modal manages its name, focus loop, inert background and return focus. Decorative icons are hidden from assistive technology, so icon-only buttons need their own name. See `docs/ACCESSIBILITY.md`.
 - **Tabs:** `tabs('uiKey', [[id, label, icon], …])` wired through the generic `setTab` action.
 - **Icons:** `icon('lucide-name', 'w-4 h-4')`. The browser bundle is pinned under `vendor/lucide/`; confirm new icon names exist in that version.
 - **Top-level names are global.** Before adding `function foo` or `const foo`, search for `foo`. Duplicate `const` names break the whole script, and duplicate `function` names silently override each other.

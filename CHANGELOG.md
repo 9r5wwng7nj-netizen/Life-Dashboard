@@ -3,6 +3,8 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Shared accessibility fixes add associated form labels, dialog focus management, keyboard navigation, live announcements, visible focus indicators, reduced-motion support and improved small-text/button contrast.
+- Accessibility regression checks cover the main views/sections in light/dark mode and common editing dialogs.
 - Backup import validates the file before modifying data and commits records/photos in one IndexedDB transaction, preserving existing data on failure.
 - External links and media embeds reject unsafe URL schemes and lookalike service hosts; structured article/recipe clips validate their types.
 - Podcast callback scripts run in an isolated sandbox, and link previews use ordinary JSON requests.
