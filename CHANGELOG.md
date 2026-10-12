@@ -6,6 +6,8 @@ The app was built in phases, one module at a time. Each phase was tested by upgr
 - Backup format v2 includes personal photo files as well as their metadata. API keys and re-downloadable reference libraries remain excluded.
 - Legacy v1 backups still import safely and preserve photos already stored in the destination browser.
 - “Erase all data” now clears records, photos, downloaded libraries, settings and API keys from the browser.
+- Tailwind styles, Lucide icons and SheetJS are pinned and served locally; startup and spreadsheet imports no longer execute CDN-hosted dependency code.
+- The static check and browser suite prevent remote dependency scripts or styles from being reintroduced.
 
 ## 1.0.0 — moved to Git (2026-10-12)
 - The repo starts from the working `life-dashboard.html`, saved byte-for-byte as `index.html`. The app itself is unchanged.

@@ -2,17 +2,21 @@
   "name": "life-dashboard",
   "version": "1.0.0",
   "private": true,
-  "description": "Offline-first personal dashboard (fitness, nutrition, faith, home) in a single HTML file.",
+  "description": "Offline-first personal dashboard for fitness, nutrition, faith and home.",
   "type": "module",
   "scripts": {
     "start": "http-server . -p 8080 -c-1 -o /index.html",
+    "build:css": "tailwindcss -i src/app.css -o assets/app.css --minify",
     "check": "node scripts/check.mjs",
-    "test": "node scripts/check.mjs && playwright test",
+    "test": "npm run build:css && node scripts/check.mjs && playwright test",
     "test:install": "playwright install chromium"
   },
   "devDependencies": {
     "@playwright/test": "^1.47.0",
-    "http-server": "^14.1.1"
+    "@tailwindcss/cli": "4.3.0",
+    "http-server": "^14.1.1",
+    "lucide": "1.55.0",
+    "tailwindcss": "4.3.0"
   },
   "engines": {
     "node": ">=18"

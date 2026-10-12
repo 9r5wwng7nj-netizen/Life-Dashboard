@@ -1,25 +1,19 @@
 // Smoke tests: open index.html from disk, visit every view and tab, and make sure nothing throws.
-// Network is locked down so tests are deterministic: only the Tailwind and Lucide CDNs are allowed.
-// No internet? Set CDN_SHIM_DIR to a folder containing tailwind.js and lucide.min.js to serve them locally.
+// Runtime dependencies are local. Network is blocked so tests stay deterministic.
 import { test, expect } from '@playwright/test';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const APP = pathToFileURL(path.resolve('index.html')).href;
-const ALLOW = [/cdn\.tailwindcss\.com/, /unpkg\.com\/lucide/];
 
 async function prepare(page) {
   const errors = [];
   page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
   page.on('console', m => { if (m.type() === 'error' && !/ERR_|Failed to load resource/.test(m.text())) errors.push(`console: ${m.text()}`); });
   page.on('dialog', d => d.accept());
-  const shim = process.env.CDN_SHIM_DIR;
   await page.route('**/*', route => {
     const u = route.request().url();
     if (/^(file|data|blob):/.test(u)) return route.continue();
-    if (shim && /cdn\.tailwindcss\.com/.test(u)) return route.fulfill({ path: path.join(shim, 'tailwind.js'), contentType: 'application/javascript' });
-    if (shim && /lucide/.test(u)) return route.fulfill({ path: path.join(shim, 'lucide.min.js'), contentType: 'application/javascript' });
-    if (ALLOW.some(r => r.test(u))) return route.continue();
     return route.abort(); // Bible downloads, APIs, embeds: not needed for a smoke test
   });
   await page.goto(APP);
@@ -104,5 +98,24 @@ test('full reset clears personal stores, libraries, settings and API keys', asyn
     };
   });
   expect(got).toEqual({ photoMissing: true, libraryMissing: true, secret: null, key: '' });
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('runtime libraries are local and work with the network blocked', async ({ page }) => {
+  const externalCode = [];
+  page.on('request', req => {
+    if (/^https?:/.test(req.url()) && ['script', 'stylesheet'].includes(req.resourceType())) externalCode.push(req.url());
+  });
+  const errors = await prepare(page);
+  const got = await page.evaluate(async () => {
+    const sheets = await readSpreadsheet(new TextEncoder().encode('name,value\nTest,42'));
+    return {
+      icon: typeof lucide?.createIcons === 'function',
+      xlsx: XLSX.version,
+      row: sheets.Sheet1[1]
+    };
+  });
+  expect(got).toEqual({ icon: true, xlsx: '0.20.3', row: ['Test', 42] });
+  expect(externalCode).toEqual([]);
   expect(errors, errors.join('\n')).toEqual([]);
 });

@@ -3,6 +3,7 @@
 //  1. Every inline <script> parses (catches syntax errors and duplicate let/const names).
 //  2. No top-level function is declared twice (the later one silently wins).
 //  3. No action name is defined in two action tables (A_*) unless it is a known, intentional override.
+//  4. Runtime dependency scripts and styles are local, not executable CDN assets.
 // Usage: node scripts/check.mjs [path/to/index.html]
 import { readFileSync } from 'node:fs';
 
@@ -43,5 +44,12 @@ const clashes = Object.entries(owner).filter(([k, v]) => new Set(v.map(x => x.sp
 const bad = clashes.filter(([k]) => !INTENTIONAL.has(k));
 bad.forEach(([k, v]) => fail(`action "${k}" is defined in more than one table: ${v.join(', ')}`));
 if (!bad.length) ok(`${Object.keys(owner).length} actions, ${clashes.length} intentional overrides, no accidental collisions`);
+
+// 4. Remote web services are allowed, but executable dependencies must be vendored.
+const remoteScripts = [...html.matchAll(/<script\b[^>]*\bsrc=["']https?:\/\/[^"']+/gi)].map(m => m[0]);
+const remoteStyles = [...html.matchAll(/<link\b[^>]*\brel=["']stylesheet["'][^>]*\bhref=["']https?:\/\/[^"']+/gi)].map(m => m[0]);
+const remoteLoaders = [...html.matchAll(/loadScript\(\s*["'`]https?:\/\/[^"'`]+/gi)].map(m => m[0]);
+const remoteExec = [...remoteScripts, ...remoteStyles, ...remoteLoaders];
+if (remoteExec.length) fail(`remote executable dependencies found: ${remoteExec.join(', ')}`); else ok('runtime dependency scripts and styles are local');
 
 process.exit(failed ? 1 : 0);

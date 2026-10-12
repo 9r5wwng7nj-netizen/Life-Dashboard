@@ -6,51 +6,12 @@
 <title>Life Dashboard</title>
 <meta name="theme-color" content="#0f766e" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Cpath d='M9 17l4 4 10-10' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="./assets/app.css" />
 <script>
   // Apply theme before paint to avoid a flash
   (function(){try{var s=JSON.parse(localStorage.getItem('ld.settings')||'{}');var t=s.theme||'system';if(t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');}catch(e){}})();
 </script>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  if (window.tailwind) tailwind.config = {
-    darkMode: 'class',
-    theme: { extend: {
-      colors: { brand: {50:'#f0fdfa',100:'#ccfbf1',200:'#99f6e4',300:'#5eead4',400:'#2dd4bf',500:'#14b8a6',600:'#0d9488',700:'#0f766e',800:'#115e59',900:'#134e4a',950:'#042f2e'} },
-      fontFamily: { sans: ['Inter','ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','sans-serif'] }
-    } }
-  };
-</script>
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-<style type="text/tailwindcss">
-  @layer components {
-    .card { @apply bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm; }
-    .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 select-none whitespace-nowrap; }
-    .btn-primary { @apply bg-brand-600 border-brand-600 text-white hover:bg-brand-700 dark:bg-brand-600 dark:border-brand-600 dark:hover:bg-brand-500; }
-    .btn-danger { @apply text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950; }
-    .btn-ghost { @apply border-transparent bg-transparent dark:bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800; }
-    .btn-sm { @apply px-2 py-1 text-xs rounded-md; }
-    .input { @apply w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 placeholder:text-slate-400; }
-    .label { @apply block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1; }
-    .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300; }
-    .chip-on { @apply bg-brand-600 text-white dark:bg-brand-600 dark:text-white; }
-    .tab { @apply px-3 py-1.5 text-sm rounded-lg font-medium text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800 whitespace-nowrap; }
-    .tab-active { @apply bg-white dark:bg-slate-800 text-brand-700 dark:text-brand-300 shadow-sm; }
-    .nav-item { @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800; }
-    .nav-active { @apply bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300; }
-    .muted { @apply text-slate-500 dark:text-slate-400; }
-    .stat { @apply rounded-xl bg-slate-100/80 dark:bg-slate-800/60 p-3; }
-    .md h1 { @apply text-xl font-bold mt-4 mb-2; }
-    .md h2 { @apply text-lg font-bold mt-4 mb-2; }
-    .md h3, .md h4 { @apply font-semibold mt-3 mb-1; }
-    .md p { @apply my-2 leading-relaxed; }
-    .md ul { @apply list-disc pl-5 my-2 space-y-1; }
-    .md ol { @apply list-decimal pl-5 my-2 space-y-1; }
-    .md blockquote { @apply border-l-4 border-brand-300 dark:border-brand-700 pl-3 my-2 italic text-slate-600 dark:text-slate-300; }
-    .md hr { @apply my-4 border-slate-200 dark:border-slate-700; }
-    .md a { @apply text-brand-600 dark:text-brand-400 underline; }
-    .md mark { @apply bg-amber-200 dark:bg-amber-700/60 rounded px-0.5; }
-  }
-</style>
+<script src="./vendor/lucide/lucide-1.55.0.min.js"></script>
 <style>
   html, body { height: 100%; }
   .orig[lang=he] { font-family: 'SBL Hebrew', 'Ezra SIL', 'Noto Serif Hebrew', 'Times New Roman', serif; }
@@ -72,8 +33,6 @@
   .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
   .scroll-thin::-webkit-scrollbar-thumb { background: rgba(100,116,139,.35); border-radius: 3px; }
   textarea { resize: vertical; }
-  /* Minimal fallback if Tailwind can't load (first open while offline) */
-  .no-tw .hidden { display: none; }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 antialiased">
@@ -1807,9 +1766,10 @@ function readMacros(v) {
 }
 
 /* ---------- MacroFactor import (.xlsx export: Quick Export + Food Log sheets) ---------- */
-function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Could not load the spreadsheet reader — connect to the internet and try again.')); document.head.appendChild(s); }); }
+const XLSX_SCRIPT = './vendor/sheetjs/xlsx-0.20.3.full.min.js';
+function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Could not load the local spreadsheet reader.')); document.head.appendChild(s); }); }
 async function readSpreadsheet(buf) {
-  if (!window.XLSX) await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+  if (!window.XLSX) await loadScript(XLSX_SCRIPT);
   const wb = XLSX.read(buf, { type: 'array' }), out = {};
   wb.SheetNames.forEach(n => out[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null }));
   return out;
@@ -3299,13 +3259,13 @@ const A_BEREAN = {
     const f = el.files && el.files[0]; el.value = ''; if (!f) return; if (!BibleDb.ok()) return toast('This browser blocked storage for this file', 'error');
     ui.bBusy.topics = 'Reading the spreadsheet…'; render();
     try {
-      if (!window.XLSX) await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+      if (!window.XLSX) await loadScript(XLSX_SCRIPT);
       const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' }), rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
       ui.bBusy.topics = 'Organizing topics…'; render(); await new Promise(r => setTimeout(r, 30));
       const topics = parseBereanTopics(rows); await BibleDb.put('berean.topics', topics);
       const m = bereanMeta(); m.topics = { date: new Date().toISOString(), count: topics.length }; setBereanMeta(m); TI = null; await topicalIndex();
       toast(`Topical index ready ✓ — ${fmtNum(topics.length)} topics`);
-    } catch (e) { console.error(e); toast(/XLSX|fetch|load/i.test(e.message) && !window.XLSX ? 'Couldn’t load the spreadsheet reader — connect to the internet once and try again' : (e.message || 'Couldn’t read that file'), 'error'); }
+    } catch (e) { console.error(e); toast(/XLSX|load/i.test(e.message) && !window.XLSX ? 'Couldn’t load the local spreadsheet reader' : (e.message || 'Couldn’t read that file'), 'error'); }
     delete ui.bBusy.topics; render();
   },
   lexDl: async () => {
@@ -6081,12 +6041,10 @@ document.addEventListener('drop', e => { const col = e.target.closest && e.targe
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (S.theme === 'system') applyTheme(); });
 
 async function init() {
-  if (!window.tailwind) document.documentElement.classList.add('no-tw');
   applyTheme(); applyCollapse();
   $('#header-date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   await Store.init(); ensureSeeds(); sortWorkouts();
   render(); Timer.restore();
-  if (!window.tailwind) toast('Styles could not load (offline?). Your data is safe — reconnect once to restore the look.', 'error');
   try { if (navigator.storage && navigator.storage.persisted && !(await navigator.storage.persisted())) navigator.storage.persist(); } catch (e) {}
 }
 init();
