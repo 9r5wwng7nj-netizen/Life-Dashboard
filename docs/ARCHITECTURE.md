@@ -4,11 +4,11 @@
 
 ## 1. `<head>`
 - A pre-paint theme script reads `ld.settings` and sets `class="dark"` early to avoid a flash.
-- Tailwind Play CDN plus an inline `tailwind.config`: `darkMode: 'class'`, a `brand` teal palette, Inter font.
-- Lucide icons (CDN).
-- `<style type="text/tailwindcss">` defines the component classes:
+- Compiled `assets/app.css`, generated from `src/app.css` with the pinned Tailwind CLI.
+- Pinned local Lucide icons from `vendor/lucide/`.
+- `src/app.css` defines the brand palette, class-based dark mode and component classes:
   - `card`, `btn`, `btn-primary`, `btn-ghost`, `btn-danger`, `btn-sm`, `input`, `label`, `chip`, `chip-on`, `stat`, `tab`, `tab-active`, `muted`, `md`, `scroll-thin`
-  - plus a small `no-tw` fallback for when the CDN is unreachable.
+  - the build scans `index.html`; run `npm run build:css` after changing classes.
 
 ## 2. Shell markup
 - Sidebar `#sidebar` holds the `#nav` built from `VIEWS`, plus the Settings, Theme and Collapse buttons.

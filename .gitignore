@@ -4,6 +4,8 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
+.playwright-cli/
+output/playwright/
 
 # Personal data — never commit your backups
 life-dashboard-backup-*.json

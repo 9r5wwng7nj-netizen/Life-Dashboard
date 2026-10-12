@@ -1,12 +1,12 @@
 # Life Dashboard
 
-A personal, offline-first dashboard in a single HTML file:
+A personal, offline-first, single-page dashboard:
 
 - **Health:** workouts and nutrition
 - **Faith:** Scripture with Berean study tools and Smart Search, a journal, and a media library
 - **Home:** marriage and family, recipes and meals, tasks
 
-Your data stays in your browser. There's no account, no server and no build step.
+Your data stays in your browser. There's no account or application server. Runtime styles and libraries are pinned in the repo, so normal use does not depend on a CDN.
 
 ## Use it
 
@@ -38,12 +38,15 @@ GitHub Actions runs `npm test` on every push (`.github/workflows/test.yml`).
 ## What's in the repo
 
 ```
-index.html               the entire app (HTML + CSS + JS), unchanged from the working version
+index.html               the application UI and JavaScript
+assets/app.css           compiled, local Tailwind styles
+src/app.css              Tailwind source used when styles change
+vendor/                  pinned Lucide and SheetJS browser libraries
 AGENTS.md / CLAUDE.md    briefs for Codex and Claude Code
 docs/
   ARCHITECTURE.md        how the file is organized and the patterns it uses
   DATA_MODEL.md          every stored collection and where data lives
-  DEPENDENCIES.md        CDN scripts, web services and browser APIs
+  DEPENDENCIES.md        local runtime libraries, web services and browser APIs
   YOUR_DATA.md           moving your data safely; backups
 scripts/check.mjs        static safety check
 tests/smoke.spec.js      Playwright smoke tests

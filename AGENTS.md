@@ -4,7 +4,7 @@ This file is the shared brief for **Claude Code** (via `CLAUDE.md`) and **OpenAI
 
 ## What this is
 
-A personal, offline-first dashboard for one person (Seth): Workouts, Nutrition, Scripture, Journal, Media Library, Marriage & Family, Recipes & Meals and Tasks. It is **one self-contained file, `index.html`**: HTML, CSS and roughly 6,000 lines of vanilla JavaScript. There is no build step and no framework. All data lives in the user's browser (IndexedDB). The app is opened directly from disk (`file://`) in Chrome.
+A personal, offline-first dashboard for one person (Seth): Workouts, Nutrition, Scripture, Journal, Media Library, Marriage & Family, Recipes & Meals and Tasks. The application UI and roughly 6,000 lines of vanilla JavaScript remain in `index.html`; pinned runtime libraries and compiled Tailwind CSS live in `vendor/` and `assets/`. There is no framework or application server. All data lives in the user's browser (IndexedDB). The app is opened directly from disk (`file://`) in Chrome.
 
 ## Golden rules
 
@@ -14,7 +14,7 @@ A personal, offline-first dashboard for one person (Seth): Workouts, Nutrition, 
    - Never rename or delete a collection key, a localStorage key (`ld.*`), the IndexedDB name (`life-dashboard`) or a store name. Never bump the DB version without an `onupgradeneeded` path that keeps the existing data.
    - If a shape must change, migrate in place on load and keep reading the old shape.
 2. **Preserve the design.** Use the existing Tailwind utility patterns and components (`card`, `btn`, `btn-primary`, `chip`, `chip-on`, `stat`, `label`, `input`, `muted`). Every new UI needs `dark:` variants and must work at 390px wide.
-3. **Keep it one file** unless the user explicitly asks for a refactor. The single file is what the user opens and backs up.
+3. **Keep application code in `index.html`** unless the user explicitly asks for a refactor. Supporting build input, compiled CSS and vendored third-party libraries stay in their existing folders.
 4. **Run the checks before you finish:** `npm test`, or at least `npm run check`.
 5. **No secrets in the repo.** API keys (ESV, USDA, Anthropic) are entered in Settings, live in localStorage and are excluded from backups. Never hard-code them. Never commit backup JSON files; `.gitignore` already blocks them.
 
@@ -22,6 +22,7 @@ A personal, offline-first dashboard for one person (Seth): Workouts, Nutrition, 
 
 ```bash
 npm install                 # dev tools only — the app itself has no npm dependencies
+npm run build:css           # rebuild assets/app.css after changing classes or src/app.css
 npm start                   # serves http://localhost:8080 (see the storage note below)
 npm run check               # static check: syntax, duplicate functions, action-name collisions
 npx playwright install chromium   # once
@@ -34,7 +35,7 @@ You can also just open `index.html` in Chrome; that is how the user runs it.
 
 ## Architecture (all in `index.html`)
 
-The `<head>` holds the theme pre-paint script, the Tailwind Play CDN and its config, Lucide icons from the CDN, and component CSS (`@layer components`). The body holds the app shell (sidebar `#nav`, header, `#view`, `#modal`, toasts) and one large `<script>`. Sections are marked with banner comments, so search for these strings:
+The `<head>` holds the theme pre-paint script, compiled `assets/app.css`, and the pinned local Lucide browser bundle. Tailwind source and component CSS live in `src/app.css`. The body holds the app shell (sidebar `#nav`, header, `#view`, `#modal`, toasts) and one large `<script>`. Sections are marked with banner comments, so search for these strings:
 
 | Banner / marker | What's there |
 |---|---|
@@ -63,12 +64,12 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
 - **UI state** that shouldn't persist goes on `ui` (defaults come from `Object.assign(ui, {...})` near each module). Persistent preferences go on `S` plus `saveSettings()`.
 - **Modals:** `Modal.open(modalShell(title, bodyHtml, footerHtml, submitActionName), { wide })`.
 - **Tabs:** `tabs('uiKey', [[id, label, icon], …])` wired through the generic `setTab` action.
-- **Icons:** `icon('lucide-name', 'w-4 h-4')`. Lucide loads `@latest`, so use current names (for example `house`, not the old `home`).
+- **Icons:** `icon('lucide-name', 'w-4 h-4')`. The browser bundle is pinned under `vendor/lucide/`; confirm new icon names exist in that version.
 - **Top-level names are global.** Before adding `function foo` or `const foo`, search for `foo`. Duplicate `const` names break the whole script, and duplicate `function` names silently override each other.
 
 ## Known caveats
 
-- CDN dependencies are not pinned: Tailwind Play CDN, `lucide@latest`, and `xlsx@0.18.5` loaded on demand. See `docs/DEPENDENCIES.md`. The app needs internet the first time for styles and icons; the browser cache covers it after that.
+- Runtime styles, icons and spreadsheet parsing are pinned locally. Run `npm run build:css` after changing Tailwind classes and keep third-party notices and hashes current when upgrading vendored files. See `docs/DEPENDENCIES.md`.
 - YouTube/Vimeo embeds refuse to play from `file://` (YouTube error 153). They need an `http(s)` origin. This is part of the planned hosted/PWA phase.
 - Version 2 JSON backups include personal photos. Downloaded Bibles, Berean tables and the Obsidian-vault link remain device-local. Legacy version 1 backups contain no photos, so importing one preserves photos already on the destination device.
 
