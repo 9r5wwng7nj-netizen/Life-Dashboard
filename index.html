@@ -6322,6 +6322,9 @@ const DRIVE = { clientId: '868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.go
 const SYNC_SETTINGS = ['name', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
 const SYNC_SKIP = ['photoMeta'];
 const SYNC_BASE = 'sync.base';
+// A sync that would remove more than this many records (outside the lists that are routinely
+// cleared) stops and asks first, whatever the cause.
+const SYNC_LOSS_LIMIT = 10, SYNC_CLEARED_OFTEN = ['grocery', 'passageCache'];
 const syncMeta = () => { try { return JSON.parse(localStorage.getItem('ld.sync') || '{}'); } catch (e) { return {}; } };
 const setSyncMeta = patch => localStorage.setItem('ld.sync', JSON.stringify({ ...syncMeta(), ...patch }));
 const syncAvailable = () => !!DRIVE.clientId && BibleDb.ok() && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname));
@@ -6368,6 +6371,20 @@ function syncMerge(base, mine, theirs, preferMine) {
   return preferMine ? mine : theirs;
 }
 
+// How many records each collection in `before` has that `after` no longer has.
+function syncLosses(before, after) {
+  const key = x => plainObject(x) && x.id != null ? 'id:' + x.id : JSON.stringify(x), out = {};
+  for (const [k, b] of Object.entries(before)) {
+    if (SYNC_CLEARED_OFTEN.includes(k)) continue;
+    const a = after[k]; let n = 0;
+    if (Array.isArray(b)) { const kept = new Set((Array.isArray(a) ? a : []).map(key)); n = b.filter(x => !kept.has(key(x))).length; }
+    else if (plainObject(b)) n = Object.keys(b).filter(x => !plainObject(a) || !Object.hasOwn(a, x)).length;
+    if (n) out[k] = n;
+  }
+  return out;
+}
+const syncLossText = losses => Object.entries(losses).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${n} from ${k}`).join(', ');
+
 function syncSignIn() {
   const state = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
   setSyncMeta({ on: true, state });
@@ -6412,7 +6429,7 @@ async function driveSave(id, snap) {
 }
 
 const Sync = {
-  busy: false, timer: null, first: '',
+  busy: false, timer: null, first: '', allowLoss: false,
   connected() { return !!syncMeta().on; },
   signedIn() { const m = syncMeta(); return !!m.token && m.exp > Date.now(); },
   // This device's records in the same plain-JSON form the Drive copy and the base use.
@@ -6421,6 +6438,14 @@ const Sync = {
       data: Object.fromEntries(Object.keys(COLLECTIONS).filter(k => !SYNC_SKIP.includes(k)).map(k => [k, Store.data[k]])),
       settings: Object.fromEntries(SYNC_SETTINGS.filter(k => S[k] != null).map(k => [k, S[k]]))
     }));
+  },
+  // Another tab or window of the app may have saved since this one loaded. Take what is saved on
+  // the device, so this one never syncs or keeps working from an out-of-date copy in memory.
+  async adopt() {
+    await Store.flushDirty();
+    const keys = Object.keys(COLLECTIONS), saved = await Store.readMany(keys); let changed = false;
+    keys.forEach((k, i) => { if (saved[i] !== undefined && !Store.dirty.has(k) && !sameJson(saved[i], Store.data[k])) { Store.data[k] = saved[i]; changed = true; } });
+    return changed;
   },
   soon() { clearTimeout(this.timer); this.timer = setTimeout(() => this.auto(), 30000); },
   // Background runs wait while something is being edited, so open forms never lose their record.
@@ -6434,21 +6459,28 @@ const Sync = {
     if (!this.signedIn()) { if (signIn) syncSignIn(); else this.draw(); return; }
     if (navigator.onLine === false) { if (announce) toast('You are offline. Sync will run when you reconnect.', 'error'); return; }
     this.busy = true; this.draw();
+    let paused = '';
     try {
       const changed = await this.exchange();
       setSyncMeta({ last: new Date().toISOString(), error: '' });
       if (changed) { ensureSeeds(); sortWorkouts(); render(); }
       if (announce) toast(changed ? 'Synced. This device was updated.' : 'Synced');
     } catch (e) {
-      if (e.message === 'first') { if (announce) syncAskFirst(); else setSyncMeta({ error: 'Open Settings & Sync to finish setting up sync on this device.' }); }
+      if (e.losses) {
+        const part = (n, by, where) => n ? `remove ${n} record${n === 1 ? '' : 's'} from ${where} (${syncLossText(by)})` : '';
+        paused = [part(e.here, e.hereBy, 'this device'), part(e.away, e.awayBy, 'Google Drive and your other devices')].filter(Boolean).join(' and ');
+        setSyncMeta({ error: 'Sync is paused because it would ' + paused + '. Tap the sync button to review.' });
+      }
+      else if (e.message === 'first') { if (announce) syncAskFirst(); else setSyncMeta({ error: 'Open Settings & Sync to finish setting up sync on this device.' }); }
       else { setSyncMeta({ error: e.message }); if (announce) toast('Sync stopped: ' + e.message, 'error'); }
-    } finally { this.busy = false; this.draw(); }
+    } finally { this.busy = false; this.allowLoss = false; this.draw(); }
+    if (paused && announce && confirm('This sync would ' + paused + '.\n\nChoose OK only if you removed these on purpose. Choose Cancel to leave everything as it is.')) { this.allowLoss = true; return this.run({ announce }); }
   },
   // Returns true when this device's records changed.
   async exchange() {
     let changed = false;
     for (let attempt = 0; attempt < 3; attempt++) {
-      await Store.flushDirty();
+      if (await this.adopt()) changed = true;
       const file = await driveFind(), saved = await BibleDb.get(SYNC_BASE);
       if (!file) { const mine = this.local(), made = await driveSave(null, mine); await BibleDb.put(SYNC_BASE, mine); setSyncMeta({ ver: made.version || '' }); return changed; }
       if (!saved && !this.first) throw new Error('first');
@@ -6458,6 +6490,10 @@ const Sync = {
       const merged = { data: {}, settings: syncMerge(base?.settings, mine.settings, theirs.settings, preferMine) };
       for (const k of Object.keys(mine.data)) merged.data[k] = Object.hasOwn(theirs.data, k) ? syncMerge(base?.data[k], mine.data[k], theirs.data[k], preferMine) : mine.data[k];
       validateBackup({ app: 'life-dashboard', version: 1, data: merged.data, settings: merged.settings });
+      if (!this.allowLoss) {
+        const hereBy = syncLosses(mine.data, merged.data), awayBy = syncLosses(Object.fromEntries(Object.keys(merged.data).map(k => [k, theirs.data[k]])), merged.data), here = sum(Object.values(hereBy)), away = sum(Object.values(awayBy));
+        if (here > SYNC_LOSS_LIMIT || away > SYNC_LOSS_LIMIT) throw Object.assign(new Error('loss'), { losses: true, here, away, hereBy, awayBy });
+      }
       if (!sameJson(merged, mine)) {
         await commitBackupImport({ data: { ...Store.data, ...structuredClone(merged.data) }, photos: null, settings: { ...S, ...structuredClone(merged.settings) }, mode: 'merge' });
         changed = true;
@@ -6516,7 +6552,7 @@ const A_SYNC = {
   syncNow: () => Sync.run({ signIn: true, announce: true }),
   syncFirst: el => {
     if (el.dataset.mode === 'theirs' && !confirm('Replace the records on this device with the copy in Google Drive? This cannot be undone.')) return;
-    Sync.first = el.dataset.mode; Modal.close(); Sync.run({ announce: true });
+    Sync.first = el.dataset.mode; Sync.allowLoss = el.dataset.mode === 'theirs'; Modal.close(); Sync.run({ announce: true });
   },
   syncDisconnect: async () => { if (!confirm('Stop syncing this device? Your records stay on this device and in Google Drive.')) return; await Sync.disconnect(); toast('Sync is off on this device'); }
 };
@@ -6605,7 +6641,11 @@ document.addEventListener('dragleave', e => { const col = e.target.closest && e.
 document.addEventListener('drop', e => { const col = e.target.closest && e.target.closest('[data-col]'); if (!col) return; e.preventDefault(); const t = Store.get('tasks').find(x => x.id === e.dataTransfer.getData('text/plain')); if (t) { setTaskStatus(t, col.dataset.col); Store.save('tasks'); render(); } });
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (S.theme === 'system') applyTheme(); });
 // Catch up with other devices when the app comes back to the front or the connection returns.
-document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - new Date(syncMeta().last || 0) > 5 * 60000) Sync.auto(); });
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden || !syncAvailable() || !Sync.connected()) return;
+  if (!Modal.isOpen() && !Sync.busy && await Sync.adopt()) { sortWorkouts(); render(); }
+  if (Date.now() - new Date(syncMeta().last || 0) > 5 * 60000) Sync.auto();
+});
 window.addEventListener('online', () => Sync.auto());
 
 // The hosted copy caches its own files so it opens offline. The file:// copy never registers;

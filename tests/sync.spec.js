@@ -29,16 +29,20 @@ function fakeDrive() {
   return drive;
 }
 
-async function device(browser, drive, { connected = true } = {}) {
-  const context = await browser.newContext();
-  await drive.attach(context);
-  const page = await context.newPage(), errors = [];
+// A tab of the app. `answer` decides each confirm dialog; by default every one is accepted.
+async function tab(context, { connected = true, answer = () => true } = {}) {
+  const page = await context.newPage(), errors = [], asked = [];
   page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
-  page.on('dialog', d => d.accept());
+  page.on('dialog', d => { asked.push(d.message()); return answer(d.message()) ? d.accept() : d.dismiss(); });
   await page.goto(`${base}/index.html`);
   await page.waitForFunction(() => typeof Store !== 'undefined' && Store.data && Array.isArray(Store.data.tasks));
-  await page.evaluate(([token, on]) => { DRIVE.clientId = 'test-client'; if (on) localStorage.setItem('ld.sync', JSON.stringify({ on: true, token, exp: Date.now() + 3600e3 })); }, [TOKEN, connected]);
-  return { page, errors, context };
+  await page.evaluate(([token, on]) => { DRIVE.clientId = 'test-client'; if (on) localStorage.setItem('ld.sync', JSON.stringify({ on: true, token, exp: Date.now() + 3600e3, ...JSON.parse(localStorage.getItem('ld.sync') || '{}') })); }, [TOKEN, connected]);
+  return { page, errors, asked, context };
+}
+async function device(browser, drive, options) {
+  const context = await browser.newContext();
+  await drive.attach(context);
+  return tab(context, options);
 }
 const sync = page => page.evaluate(async () => { await Store.flushDirty(); await Sync.run({ announce: true }); return syncMeta(); });
 const titles = page => page.evaluate(() => Store.get('tasks').map(t => t.title).sort());
@@ -106,6 +110,52 @@ test('two devices converge, including deletions, and private items stay on the d
   expect(await titles(phone.page)).toEqual(expected);
   expect([...laptop.errors, ...phone.errors]).toEqual([]);
   await laptop.context.close(); await phone.context.close();
+});
+
+test('a second tab that loaded before the data arrived cannot sync its old view over it', async ({ browser }) => {
+  const drive = fakeDrive(), stale = await device(browser, drive), current = await tab(stale.context);
+  await current.page.evaluate(() => { for (let i = 1; i <= 15; i++) addTask('Task ' + i); });
+  await sync(current.page);
+  expect(JSON.parse(drive.file.body).data.tasks).toHaveLength(15);
+
+  // The first tab still holds the empty list it loaded with.
+  expect(await titles(stale.page)).toEqual([]);
+  expect((await sync(stale.page)).error).toBe('');
+  expect(await titles(stale.page)).toHaveLength(15);
+  expect(JSON.parse(drive.file.body).data.tasks).toHaveLength(15);
+  expect(stale.asked).toEqual([]);
+  await stale.context.close();
+});
+
+test('a sync that would remove many records pauses until it is confirmed', async ({ browser }) => {
+  let allow = false;
+  const drive = fakeDrive(), d = await device(browser, drive, { answer: () => allow });
+  await d.page.evaluate(() => { for (let i = 1; i <= 12; i++) addTask('Task ' + i); for (let i = 1; i <= 30; i++) Store.get('grocery').push({ id: 'g' + i, name: 'Item ' + i }); Store.save('grocery'); });
+  await sync(d.page);
+  expect(JSON.parse(drive.file.body).data.tasks).toHaveLength(12);
+
+  // Clearing a list that is routinely cleared goes through without a question.
+  await d.page.evaluate(() => { Store.set('grocery', []); });
+  expect((await sync(d.page)).error).toBe('');
+  expect(JSON.parse(drive.file.body).data.grocery).toHaveLength(0);
+  expect(d.asked).toEqual([]);
+
+  await d.page.evaluate(() => { Store.set('tasks', []); });
+  // In the background it only records why it stopped.
+  const paused = await d.page.evaluate(async () => { await Store.flushDirty(); await Sync.run(); return syncMeta().error; });
+  expect(paused).toContain('remove 12 records from Google Drive and your other devices (12 from tasks)');
+  expect(d.asked).toEqual([]);
+  // Asked directly and declined: Drive keeps everything.
+  await sync(d.page);
+  expect(d.asked).toHaveLength(1);
+  expect(JSON.parse(drive.file.body).data.tasks).toHaveLength(12);
+  // Confirmed: the removal goes through, and the permission does not linger.
+  allow = true;
+  expect((await sync(d.page)).error).toBe('');
+  expect(JSON.parse(drive.file.body).data.tasks).toHaveLength(0);
+  expect(await d.page.evaluate(() => Sync.allowLoss)).toBe(false);
+  expect(d.errors).toEqual([]);
+  await d.context.close();
 });
 
 test('an unreadable Drive copy changes nothing on the device', async ({ browser }) => {

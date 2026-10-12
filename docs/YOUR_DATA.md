@@ -57,4 +57,5 @@ Sync keeps one copy of your records in a hidden app folder in your Google Drive.
 - It is not instant. A device syncs when you open the app, when you come back to it, shortly after you change something, and when you tap the sync button in the header.
 - Google sign-in lasts about an hour. When the header button shows a warning cloud, tap it to sign in again; your changes are kept on the device in the meantime.
 - If the same item is edited on two devices before they sync, both edits are kept where they touch different fields; where they touch the same field, the most recent save wins. Deleting an item on one device removes it from the others.
+- If a sync would remove more than 10 records at once, it pauses and asks you first. Choose OK only if you removed them on purpose. (Clearing the grocery list never asks.)
 - Keep exporting backups. Sync copies mistakes to every device as faithfully as it copies everything else.
