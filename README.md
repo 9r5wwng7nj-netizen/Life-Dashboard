@@ -40,6 +40,9 @@ GitHub Actions runs `npm test` on every push (`.github/workflows/test.yml`).
 ```
 index.html               the application UI and JavaScript
 assets/app.css           compiled, local Tailwind styles
+assets/icons/            home-screen icons
+manifest.webmanifest     install details for the hosted copy
+sw.js                    offline app shell for the hosted copy
 src/app.css              Tailwind source used when styles change
 vendor/                  pinned Lucide and SheetJS browser libraries
 AGENTS.md / CLAUDE.md    briefs for Codex and Claude Code

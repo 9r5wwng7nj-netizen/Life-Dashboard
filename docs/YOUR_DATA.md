@@ -37,6 +37,13 @@ These live on the device. You redo them once on any new origin or device:
 
 `.gitignore` blocks `*backup*.json`. Don't rename backups to get around it. They hold your private journal, prayers and family notes.
 
-## Later: phone + laptop
+## Phone + laptop (in progress)
 
-The agreed plan is to host the app at an https address as an installable PWA and sync through a private Google Drive folder. When that happens, you'll import one backup into the hosted version and sync from then on.
+The plan is to host the app at an https address as an installable PWA and sync through a private Google Drive folder. The app can already be installed and opened offline once it is hosted; hosting and sync are not set up yet.
+
+When the hosted address exists:
+
+1. On the laptop, export a backup from the copy you use today, open the hosted address in Chrome and import the backup there. Use the hosted address from then on.
+2. On the iPhone, open the address in Safari, tap **Share → Add to Home Screen**, then open the app from the home-screen icon and import the same backup **inside that installed app**. The installed app keeps its own data, separate from Safari.
+
+Until sync is built, the phone and laptop each keep their own copy of your data.

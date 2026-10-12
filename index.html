@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Life Dashboard</title>
 <meta name="theme-color" content="#0f766e" />
+<meta name="robots" content="noindex" />
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="apple-touch-icon" href="./assets/icons/apple-touch-icon.png" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Dashboard" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Cpath d='M9 17l4 4 10-10' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="./assets/app.css" />
 <script>
@@ -14,6 +19,9 @@
 <script src="./vendor/lucide/lucide-1.55.0.min.js"></script>
 <style>
   html, body { height: 100%; }
+  /* Installed on a phone: keep the shell clear of the home indicator and rounded corners. */
+  #app-shell { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  #sidebar { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
   .orig[lang=he] { font-family: 'SBL Hebrew', 'Ezra SIL', 'Noto Serif Hebrew', 'Times New Roman', serif; }
   .orig[lang=grc] { font-family: 'SBL Greek', 'Gentium Plus', 'Noto Serif', 'Times New Roman', serif; }
   #sidebar { transform: translateX(-100%); transition: transform .2s ease, width .2s ease; }
@@ -6385,12 +6393,20 @@ document.addEventListener('dragleave', e => { const col = e.target.closest && e.
 document.addEventListener('drop', e => { const col = e.target.closest && e.target.closest('[data-col]'); if (!col) return; e.preventDefault(); const t = Store.get('tasks').find(x => x.id === e.dataTransfer.getData('text/plain')); if (t) { setTaskStatus(t, col.dataset.col); Store.save('tasks'); render(); } });
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (S.theme === 'system') applyTheme(); });
 
+// The hosted copy caches its own files so it opens offline. The file:// copy never registers;
+// ?pwa on localhost is for tests.
+function registerOfflineShell() {
+  const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('pwa');
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || local)) navigator.serviceWorker.register('./sw.js').catch(e => console.warn('Offline support unavailable', e));
+}
+
 async function init() {
   applyTheme(); applyCollapse();
   $('#header-date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   await Store.init(); ensureSeeds(); sortWorkouts();
   render(); Timer.restore();
   try { if (navigator.storage && navigator.storage.persisted && !(await navigator.storage.persisted())) navigator.storage.persist(); } catch (e) {}
+  registerOfflineShell();
 }
 init().catch(e => {
   console.error('Could not initialize saved data', e);

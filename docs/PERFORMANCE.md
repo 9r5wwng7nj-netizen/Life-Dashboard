@@ -32,4 +32,4 @@ Besides timings, it verifies grouping identity/order, large-fixture group counts
 2. **Bound very large lists:** several task/project details, People lists and other historical screens still generate every matching row. Profile full render/layout before deciding on accessible pagination or lazy rendering; do not silently hide records.
 3. **Strengthen action checks:** the current static action checker is line-based and tracks collisions but does not resolve every dynamic action reference. Add parser-based coverage if future changes expose a need.
 4. **Explicit modular refactor:** keep UI code in index.html under the current repository rule. Splitting modules or introducing a framework needs Seth's explicit approval and migration tests; it is not necessary for these fixes.
-5. **Mobile foundation:** HTTPS hosting, offline PWA and private sync remain paused by Seth's request. Measurements on actual mobile hardware belong to that later phase.
+5. **Mobile foundation:** Seth resumed this phase on 2026-10-12 and the offline app shell is built. HTTPS hosting and private sync are still to do; measurements on actual mobile hardware follow once the app is hosted.
