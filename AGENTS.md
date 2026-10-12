@@ -54,6 +54,7 @@ The `<head>` holds the theme pre-paint script, compiled `assets/app.css`, and th
 | `FITNESS` | workout logger, programs, exercise library, stats, Hevy CSV import/export |
 | `NUTRITION` | food log, Open Food Facts / USDA search, barcode, adaptive plan and check-ins, MacroFactor import |
 | `SETTINGS & SYNC` | Settings modal, `exportAll()` backup, import (merge/replace) |
+| `DEVICE SYNC (Google Drive app folder)` | `DRIVE` config, `syncMerge()` three-way merge, Google sign-in redirect, Drive calls, the `Sync` object, `A_SYNC` |
 | `FAITH` | shared note helpers; `// --- Scripture`, `// --- Smart Search`, `// --- Berean study tools`, `// --- Journal`, `// --- Media library` |
 | `HOME` | `// --- Marriage & family`, `// --- Family: …`, `// --- Recipes …`, `// --- Recipes & Meals: …`, `// --- Tasks`, `// --- Tasks: …` |
 | `ACTIONS (event-delegated)` | the core `A` table and `Object.assign(A, A_FIT, A_NUT, …)` |
@@ -85,7 +86,8 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
 - **Phone + laptop** (resumed by Seth on 2026-10-12; his phone is an iPhone): host at an https URL as an installable offline PWA, and sync through a private Google Drive `appDataFolder`. Sync does not need to be real time.
   - Built: `manifest.webmanifest`, `assets/icons/`, `sw.js` (offline app shell) and safe-area padding. `index.html` registers the worker on https only; `?pwa` on localhost is for `tests/pwa.spec.js`. When a vendored file is renamed or added, update the `SHELL` list in `sw.js`.
   - Hosted on GitHub Pages at https://9r5wwng7nj-netizen.github.io/Life-Dashboard/ (repo made public by Seth on 2026-10-12). Pages publishes the `main` branch root after every push, so everything on `main` is public and live within a few minutes.
-  - Not done yet: Drive sync using his `connection.church` Google account.
+  - Drive sync is built. `DRIVE.clientId` is the OAuth client ID from Seth's `connection.church` Google Cloud project (an Internal app; the ID is public by design and is tied to the hosted address). Each device turns sync on in Settings & Sync. It syncs records and the settings listed in `SYNC_SETTINGS`; photos (`photoMeta` and the `photos` store), API keys and downloaded libraries stay on each device. Photo sync is the next step.
+  - Sync rules: every write still goes through `Store.save()`/`Store.set()`, which is what marks a device as changed. Merged data is checked with `validateBackup()` and saved with `commitBackupImport()`, so a bad Drive copy changes nothing. A new collection syncs automatically; add it to `SYNC_SKIP` only if it must stay on the device. Lists of records merge by `id`, so keep giving records an `id`.
   - On iPhone the installed home-screen app has its own storage, separate from Safari. Import the backup inside the installed app.
   - Keep `id` and `updated` on records to make merging possible.
   - Keep reference data (Bibles, lexicons) separate from personal data.

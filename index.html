@@ -65,6 +65,7 @@
       <h1 id="view-title" tabindex="-1" class="font-semibold truncate"></h1>
       <div class="ml-auto flex items-center gap-2">
         <span id="header-date" class="hidden sm:inline text-sm muted"></span>
+        <button id="sync-btn" class="btn btn-sm hidden" data-action="syncNow"></button>
         <button class="btn btn-sm" data-action="showTimer" title="Rest timer"><i data-lucide="timer" class="w-4 h-4"></i><span class="hidden sm:inline">Timer</span></button>
       </div>
     </header>
@@ -222,7 +223,7 @@ const Store = {
   get(k) { return this.data[k]; },
   set(k, v) { this.data[k] = v; this.save(k); },
   save(k) { this.dirty.add(k); clearTimeout(this.t); this.t = setTimeout(() => this.flushDirty(), 250); },
-  flushDirty() { const ks = [...this.dirty]; this.dirty.clear(); return Promise.all(ks.map(k => this.write(k, this.data[k]))); },
+  flushDirty() { const ks = [...this.dirty]; this.dirty.clear(); if (ks.length) syncTouch(); return Promise.all(ks.map(k => this.write(k, this.data[k]))); },
   async flushAll() { clearTimeout(this.t); this.dirty.clear(); await Promise.all(Object.keys(this.data).map(k => this.write(k, this.data[k]))); }
 };
 
@@ -2189,6 +2190,7 @@ function openSettings() {
       <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-primary" data-action="exportAll">${icon('download')} Back up personal data + photos</button><button type="button" class="btn" data-action="importAll">${icon('upload')} Import backup…</button><button type="button" class="btn" data-action="hevyImport">${icon('dumbbell')} Import Hevy CSV…</button><button type="button" class="btn" data-action="mfImport">${icon('apple')} Import MacroFactor…</button></div>
       <p class="text-xs muted">Backups include personal records and photos. Downloaded Bibles, imported reference libraries, the Obsidian folder connection and API keys are device-specific and are not included.</p>
       <p class="text-xs muted">Last backup: ${S.lastExport ? fmtDateTime(S.lastExport) : 'never'} · <span id="storage-info">checking storage…</span></p>
+      <div id="sync-box" class="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">${syncBox()}</div>
       <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="persistStorage">${icon('shield-check', 'w-3.5 h-3.5')} Ask browser to keep data</button><button type="button" class="btn btn-sm btn-danger" data-action="clearAll">${icon('trash-2', 'w-3.5 h-3.5')} Erase all data</button></div></section>`,
     `<button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn btn-primary">Save settings</button>`, 'saveSettings'), { wide: true });
   (async () => {
@@ -6310,6 +6312,216 @@ const A_HOME = {
 };
 
 /* =====================================================================
+   DEVICE SYNC (Google Drive app folder)
+   ===================================================================== */
+// One snapshot of personal records lives in the Google account's hidden app folder. Each device
+// merges it with its own records against the last snapshot both sides agreed on (the "base"), so
+// edits and deletions from either device survive. Photos, API keys and downloaded libraries stay
+// on the device. Sign-in is a plain redirect, so no Google script is loaded.
+const DRIVE = { clientId: '868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.googleusercontent.com', scope: 'https://www.googleapis.com/auth/drive.appdata', file: 'life-dashboard-sync.json', api: 'https://www.googleapis.com', auth: 'https://accounts.google.com/o/oauth2/v2/auth' };
+const SYNC_SETTINGS = ['name', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
+const SYNC_SKIP = ['photoMeta'];
+const SYNC_BASE = 'sync.base';
+const syncMeta = () => { try { return JSON.parse(localStorage.getItem('ld.sync') || '{}'); } catch (e) { return {}; } };
+const setSyncMeta = patch => localStorage.setItem('ld.sync', JSON.stringify({ ...syncMeta(), ...patch }));
+const syncAvailable = () => !!DRIVE.clientId && BibleDb.ok() && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname));
+function syncTouch() { if (!syncMeta().on) return; setSyncMeta({ changed: new Date().toISOString() }); Sync.soon(); }
+
+function sameJson(a, b) {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  return ka.length === kb.length && ka.every(k => Object.hasOwn(b, k) && sameJson(a[k], b[k]));
+}
+// Three-way merge of JSON values. A side that still matches the base gives way to the side that
+// changed. Lists of records merge by id and objects by key; anything else changed on both sides
+// goes to whichever device saved most recently (preferMine).
+function syncMerge(base, mine, theirs, preferMine) {
+  if (sameJson(mine, theirs)) return mine;
+  if (base !== undefined && sameJson(base, mine)) return theirs;
+  if (base !== undefined && sameJson(base, theirs)) return mine;
+  if (Array.isArray(mine) && Array.isArray(theirs)) {
+    const record = x => plainObject(x) && x.id != null, all = [...mine, ...theirs];
+    const byId = all.every(record), byValue = !byId && all.every(x => x === null || typeof x !== 'object');
+    if (!byId && !byValue) return preferMine ? mine : theirs;
+    const key = byId ? x => String(x.id) : x => JSON.stringify(x), index = list => new Map(list.map(x => [key(x), x]));
+    const B = index((Array.isArray(base) ? base : []).filter(x => !byId || record(x))), M = index(mine), T = index(theirs), out = [];
+    // An item missing from one side was deleted there, unless the other side has since edited it.
+    const kept = (k, v) => !B.has(k) || !sameJson(B.get(k), v);
+    for (const [k, m] of M) { if (T.has(k)) out.push(byId ? syncMerge(B.get(k), m, T.get(k), preferMine) : m); else if (kept(k, m)) out.push(m); }
+    let at = -1; // items new from the other device keep their place relative to their neighbours there
+    for (const [k, t] of T) {
+      if (M.has(k)) { const i = out.findIndex(x => key(x) === k); if (i >= 0) at = i; }
+      else if (kept(k, t)) out.splice(++at, 0, t);
+    }
+    return out;
+  }
+  if (plainObject(mine) && plainObject(theirs)) {
+    const b = plainObject(base) ? base : {}, out = {};
+    for (const k of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
+      const inM = Object.hasOwn(mine, k), inT = Object.hasOwn(theirs, k), inB = Object.hasOwn(b, k);
+      if (inM && inT) out[k] = syncMerge(inB ? b[k] : undefined, mine[k], theirs[k], preferMine);
+      else { const v = inM ? mine[k] : theirs[k]; if (!inB || !sameJson(b[k], v)) out[k] = v; }
+    }
+    return out;
+  }
+  return preferMine ? mine : theirs;
+}
+
+function syncSignIn() {
+  const state = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+  setSyncMeta({ on: true, state });
+  location.assign(DRIVE.auth + '?' + new URLSearchParams({ client_id: DRIVE.clientId, redirect_uri: new URL('./index.html', location.href).href, response_type: 'token', scope: DRIVE.scope, state }));
+}
+// Google returns here with the access token in the address fragment; take it and clean the address.
+function syncFinishSignIn() {
+  if (!/(^#|&)(access_token|error)=/.test(location.hash)) return false;
+  const p = new URLSearchParams(location.hash.slice(1)), m = syncMeta();
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!m.state || p.get('state') !== m.state) return false;
+  if (!p.get('access_token')) { setSyncMeta({ state: '', error: 'Google sign-in was not completed.' }); return false; }
+  setSyncMeta({ state: '', token: p.get('access_token'), exp: Date.now() + (num(p.get('expires_in')) || 3600) * 1000 - 60000, error: '' });
+  return true;
+}
+async function driveFetch(path, options = {}) {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 60000);
+  let res;
+  try { res = await fetch(DRIVE.api + path, { ...options, signal: controller.signal, headers: { Authorization: 'Bearer ' + syncMeta().token, ...options.headers } }); }
+  catch (e) { throw new Error('Google Drive could not be reached.'); }
+  finally { clearTimeout(timer); }
+  if (res.status === 401) { setSyncMeta({ token: '', exp: 0 }); throw new Error('Sign in to Google again to keep syncing.'); }
+  if (!res.ok) throw new Error('Google Drive answered with error ' + res.status + '.');
+  return res;
+}
+async function driveFind() {
+  const q = new URLSearchParams({ spaces: 'appDataFolder', q: `name='${DRIVE.file}' and trashed=false`, orderBy: 'createdTime', fields: 'files(id,version)' });
+  return (await (await driveFetch('/drive/v3/files?' + q)).json()).files?.[0] || null;
+}
+async function driveLoad(id) {
+  const res = await driveFetch(`/drive/v3/files/${encodeURIComponent(id)}?alt=media`);
+  let d; try { d = validateBackup(await res.json()); }
+  catch (e) { throw new Error('The copy in Google Drive could not be read, so nothing was changed. (' + e.message + ')'); }
+  return { data: d.data, settings: Object.fromEntries(SYNC_SETTINGS.filter(k => d.settings?.[k] != null).map(k => [k, d.settings[k]])), exportedAt: typeof d.exportedAt === 'string' ? d.exportedAt : '' };
+}
+async function driveSave(id, snap) {
+  const body = JSON.stringify({ app: 'life-dashboard', version: 1, sync: 1, exportedAt: new Date().toISOString(), data: snap.data, settings: snap.settings });
+  if (id) return (await driveFetch(`/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,version`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })).json();
+  const mark = 'ld' + uid(), meta = JSON.stringify({ name: DRIVE.file, parents: ['appDataFolder'] });
+  return (await driveFetch('/upload/drive/v3/files?uploadType=multipart&fields=id,version', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + mark },
+    body: `--${mark}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${mark}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${mark}--` })).json();
+}
+
+const Sync = {
+  busy: false, timer: null, first: '',
+  connected() { return !!syncMeta().on; },
+  signedIn() { const m = syncMeta(); return !!m.token && m.exp > Date.now(); },
+  // This device's records in the same plain-JSON form the Drive copy and the base use.
+  local() {
+    return JSON.parse(JSON.stringify({
+      data: Object.fromEntries(Object.keys(COLLECTIONS).filter(k => !SYNC_SKIP.includes(k)).map(k => [k, Store.data[k]])),
+      settings: Object.fromEntries(SYNC_SETTINGS.filter(k => S[k] != null).map(k => [k, S[k]]))
+    }));
+  },
+  soon() { clearTimeout(this.timer); this.timer = setTimeout(() => this.auto(), 30000); },
+  // Background runs wait while something is being edited, so open forms never lose their record.
+  auto() {
+    if (!this.connected() || !this.signedIn()) return this.draw();
+    if (Modal.isOpen() || document.activeElement?.matches?.('input, textarea, select, [contenteditable="true"]')) return this.soon();
+    this.run();
+  },
+  async run({ signIn = false, announce = false } = {}) {
+    if (!syncAvailable() || !this.connected() || this.busy) return;
+    if (!this.signedIn()) { if (signIn) syncSignIn(); else this.draw(); return; }
+    if (navigator.onLine === false) { if (announce) toast('You are offline. Sync will run when you reconnect.', 'error'); return; }
+    this.busy = true; this.draw();
+    try {
+      const changed = await this.exchange();
+      setSyncMeta({ last: new Date().toISOString(), error: '' });
+      if (changed) { ensureSeeds(); sortWorkouts(); render(); }
+      if (announce) toast(changed ? 'Synced. This device was updated.' : 'Synced');
+    } catch (e) {
+      if (e.message === 'first') { if (announce) syncAskFirst(); else setSyncMeta({ error: 'Open Settings & Sync to finish setting up sync on this device.' }); }
+      else { setSyncMeta({ error: e.message }); if (announce) toast('Sync stopped: ' + e.message, 'error'); }
+    } finally { this.busy = false; this.draw(); }
+  },
+  // Returns true when this device's records changed.
+  async exchange() {
+    let changed = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await Store.flushDirty();
+      const file = await driveFind(), saved = await BibleDb.get(SYNC_BASE);
+      if (!file) { const mine = this.local(), made = await driveSave(null, mine); await BibleDb.put(SYNC_BASE, mine); setSyncMeta({ ver: made.version || '' }); return changed; }
+      if (!saved && !this.first) throw new Error('first');
+      const theirs = saved && file.version === syncMeta().ver ? saved : await driveLoad(file.id);
+      const mine = this.local(), base = saved || (this.first === 'theirs' ? mine : undefined);
+      const preferMine = (syncMeta().changed || '') > (theirs.exportedAt || '');
+      const merged = { data: {}, settings: syncMerge(base?.settings, mine.settings, theirs.settings, preferMine) };
+      for (const k of Object.keys(mine.data)) merged.data[k] = Object.hasOwn(theirs.data, k) ? syncMerge(base?.data[k], mine.data[k], theirs.data[k], preferMine) : mine.data[k];
+      validateBackup({ app: 'life-dashboard', version: 1, data: merged.data, settings: merged.settings });
+      if (!sameJson(merged, mine)) {
+        await commitBackupImport({ data: { ...Store.data, ...structuredClone(merged.data) }, photos: null, settings: { ...S, ...structuredClone(merged.settings) }, mode: 'merge' });
+        changed = true;
+      }
+      // Collections this version of the app does not know (saved by a newer one) pass through untouched.
+      const unknown = Object.fromEntries(Object.entries(theirs.data).filter(([k]) => !Object.hasOwn(merged.data, k)));
+      const agreed = { data: { ...unknown, ...merged.data }, settings: merged.settings, exportedAt: new Date().toISOString() };
+      let ver = file.version;
+      if (!sameJson(agreed.data, theirs.data) || !sameJson(agreed.settings, theirs.settings)) {
+        if ((await (await driveFetch(`/drive/v3/files/${encodeURIComponent(file.id)}?fields=version`)).json()).version !== file.version) continue; // another device saved meanwhile: merge again
+        ver = (await driveSave(file.id, agreed)).version || '';
+      }
+      await BibleDb.put(SYNC_BASE, agreed);
+      setSyncMeta({ ver }); this.first = '';
+      return changed;
+    }
+    throw new Error('Another device kept saving at the same time. Try again in a moment.');
+  },
+  async disconnect() { clearTimeout(this.timer); localStorage.removeItem('ld.sync'); if (BibleDb.ok()) await BibleDb.del(SYNC_BASE); this.draw(); },
+  status() {
+    const m = syncMeta();
+    if (this.busy) return 'Syncing…';
+    if (!this.signedIn()) return 'Sign in to Google to sync this device.';
+    if (m.error) return m.error;
+    return m.last ? 'Last synced ' + fmtDateTime(m.last) : 'Not synced yet';
+  },
+  draw() {
+    const on = syncAvailable() && this.connected(), btn = $('#sync-btn'), box = $('#sync-box');
+    if (btn) {
+      const alert = on && !this.busy && (!this.signedIn() || !!syncMeta().error);
+      btn.classList.toggle('hidden', !on); btn.disabled = this.busy;
+      btn.title = this.status(); btn.setAttribute('aria-label', 'Sync now. ' + this.status());
+      btn.innerHTML = icon(alert ? 'cloud-alert' : 'refresh-cw', 'w-4 h-4' + (alert ? ' text-amber-600 dark:text-amber-400' : '')) + '<span class="hidden sm:inline">Sync</span>';
+    }
+    if (box) box.innerHTML = syncBox();
+    if (btn || box) refreshIcons();
+  }
+};
+function syncBox() {
+  if (!syncAvailable()) return `<p class="text-xs muted">${DRIVE.clientId ? 'Syncing between devices works in the hosted copy of the app (its web address), not in a copy opened as a file.' : 'Syncing between devices is not set up yet.'}</p>`;
+  if (!Sync.connected()) return `<p class="text-sm">Keep this device and your others in step through a private app folder in your Google Drive.</p>
+    <p class="text-xs muted">Records and basic settings sync. Photos, API keys and downloaded libraries stay on each device.</p>
+    <button type="button" class="btn btn-sm" data-action="syncConnect">${icon('cloud', 'w-3.5 h-3.5')} Connect Google Drive</button>`;
+  return `<p class="text-sm" role="status">${icon('cloud', 'w-4 h-4 inline')} Google Drive sync is on · ${esc(Sync.status())}</p>
+    <p class="text-xs muted">Records and basic settings sync. Photos, API keys and downloaded libraries stay on each device.</p>
+    <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="syncNow" ${Sync.busy ? 'disabled' : ''}>${icon('refresh-cw', 'w-3.5 h-3.5')} Sync now</button><button type="button" class="btn btn-sm" data-action="syncDisconnect">${icon('cloud-off', 'w-3.5 h-3.5')} Stop syncing this device</button></div>`;
+}
+// The first sync on a device that finds an existing Drive copy has no shared base, so ask.
+function syncAskFirst() {
+  Modal.open(modalShell('Start syncing this device', `<p class="text-sm">Your Google Drive already holds Life Dashboard records from another device.</p>
+    <p class="text-sm muted"><strong>Combine</strong> keeps everything on this device and adds what is in Drive. <strong>Use the Drive copy</strong> replaces this device’s records with the Drive copy. Photos on this device are kept either way.</p>`,
+    `<button type="button" class="btn" data-action="closeModal">Not now</button><button type="button" class="btn" data-action="syncFirst" data-mode="theirs">Use the Drive copy</button><button type="button" class="btn btn-primary" data-action="syncFirst" data-mode="merge">Combine</button>`));
+}
+const A_SYNC = {
+  syncConnect: () => { setSyncMeta({ on: true }); Sync.run({ signIn: true, announce: true }); },
+  syncNow: () => Sync.run({ signIn: true, announce: true }),
+  syncFirst: el => {
+    if (el.dataset.mode === 'theirs' && !confirm('Replace the records on this device with the copy in Google Drive? This cannot be undone.')) return;
+    Sync.first = el.dataset.mode; Modal.close(); Sync.run({ announce: true });
+  },
+  syncDisconnect: async () => { if (!confirm('Stop syncing this device? Your records stay on this device and in Google Drive.')) return; await Sync.disconnect(); toast('Sync is off on this device'); }
+};
+
+/* =====================================================================
    ACTIONS (event-delegated)
    ===================================================================== */
 const A = {
@@ -6361,7 +6573,7 @@ const A = {
   }
 };
 
-Object.assign(A, A_FIT, A_NUT, A_MF, A_FAITH, A_MEDIA, A_JOURNAL, A_SCR, A_SMART, A_BEREAN, A_HOME, A_FAMILY, A_RECIPES, A_TASKS);
+Object.assign(A, A_FIT, A_NUT, A_MF, A_FAITH, A_MEDIA, A_JOURNAL, A_SCR, A_SMART, A_BEREAN, A_HOME, A_FAMILY, A_RECIPES, A_TASKS, A_SYNC);
 
 /* =====================================================================
    EVENT WIRING & INIT
@@ -6392,6 +6604,9 @@ document.addEventListener('dragover', e => { const col = e.target.closest && e.t
 document.addEventListener('dragleave', e => { const col = e.target.closest && e.target.closest('[data-col]'); if (col && !col.contains(e.relatedTarget)) col.classList.remove('ring-2', 'ring-brand-400'); });
 document.addEventListener('drop', e => { const col = e.target.closest && e.target.closest('[data-col]'); if (!col) return; e.preventDefault(); const t = Store.get('tasks').find(x => x.id === e.dataTransfer.getData('text/plain')); if (t) { setTaskStatus(t, col.dataset.col); Store.save('tasks'); render(); } });
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (S.theme === 'system') applyTheme(); });
+// Catch up with other devices when the app comes back to the front or the connection returns.
+document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - new Date(syncMeta().last || 0) > 5 * 60000) Sync.auto(); });
+window.addEventListener('online', () => Sync.auto());
 
 // The hosted copy caches its own files so it opens offline. The file:// copy never registers;
 // ?pwa on localhost is for tests.
@@ -6401,12 +6616,14 @@ function registerOfflineShell() {
 }
 
 async function init() {
+  const signedIn = syncFinishSignIn();
   applyTheme(); applyCollapse();
   $('#header-date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   await Store.init(); ensureSeeds(); sortWorkouts();
   render(); Timer.restore();
   try { if (navigator.storage && navigator.storage.persisted && !(await navigator.storage.persisted())) navigator.storage.persist(); } catch (e) {}
   registerOfflineShell();
+  Sync.draw(); Sync.run({ announce: signedIn });
 }
 init().catch(e => {
   console.error('Could not initialize saved data', e);

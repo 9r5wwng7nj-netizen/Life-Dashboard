@@ -52,7 +52,7 @@ docs/
   DEPENDENCIES.md        local runtime libraries, web services and browser APIs
   YOUR_DATA.md           moving your data safely; backups
 scripts/check.mjs        static safety check
-tests/smoke.spec.js      Playwright smoke tests
+tests/                   Playwright tests: smoke, accessibility, security, install/offline and sync
 CHANGELOG.md             what was built, phase by phase
 ```
 
