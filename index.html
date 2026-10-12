@@ -76,6 +76,10 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function webUrl(value) {
+  if (typeof value !== 'string' || /[\u0000-\u0020\u007f]/.test(value)) return '';
+  try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password ? u.href : ''; } catch (e) { return ''; }
+}
 const pad = n => String(n).padStart(2, '0');
 const ymd = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
@@ -108,9 +112,9 @@ async function copyText(text, msg = 'Copied to clipboard') {
   catch (e) { const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
   toast(msg);
 }
-function pickFile(accept, cb) {
+function pickFile(accept, cb, maxBytes = Infinity) {
   const inp = $('#file-input'); inp.value = ''; inp.accept = accept;
-  inp.onchange = () => { const f = inp.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => cb(r.result, f); r.readAsText(f); };
+  inp.onchange = () => { const f = inp.files[0]; if (!f) return; if (f.size > maxBytes) return toast('That backup exceeds the 256 MB import limit.', 'error'); const r = new FileReader(); r.onload = () => cb(r.result, f); r.onerror = () => toast('Could not read that file', 'error'); r.readAsText(f); };
   inp.click();
 }
 
@@ -753,7 +757,7 @@ function exerciseCard(ex, i, w, ctx, grp) {
     ${grp ? `<div class="text-[11px] font-semibold text-violet-600 dark:text-violet-300 mb-1 flex items-center gap-1">${icon('link', 'w-3 h-3')} Superset ${grp.label} · ${grp.pos}/${grp.size}${grp.pos < grp.size ? ' · go straight to the next exercise' : ' · rest after this one'}</div>` : ''}
     <div class="flex flex-wrap items-center gap-1.5 mb-2">
       <div class="flex-1 min-w-[10rem]"><button class="font-semibold text-brand-700 dark:text-brand-300 hover:underline text-left" data-action="libEdit" data-name="${esc(ex.name)}" title="Exercise settings">${esc(ex.name)}</button>
-        <div class="text-xs muted flex flex-wrap gap-x-2"><span>${esc(info.primary)} · ${typeLabel(type)}${info.countBW && BW_TYPES.has(type) ? ' · body weight counts' : ''}</span>${prev ? `<span>Last ${fmtDate(wDate(prev.w), { month: 'short', day: 'numeric' })}: ${setLabel(bestSet(prev.ex, type), type)}</span>` : '<span>First time logging this</span>'}${info.howto ? `<a href="${esc(info.howto)}" target="_blank" rel="noopener" class="text-brand-600 dark:text-brand-400 underline">How-to</a>` : ''}</div></div>
+        <div class="text-xs muted flex flex-wrap gap-x-2"><span>${esc(info.primary)} · ${typeLabel(type)}${info.countBW && BW_TYPES.has(type) ? ' · body weight counts' : ''}</span>${prev ? `<span>Last ${fmtDate(wDate(prev.w), { month: 'short', day: 'numeric' })}: ${setLabel(bestSet(prev.ex, type), type)}</span>` : '<span>First time logging this</span>'}${info.howto ? `<a href="${esc(webUrl(info.howto))}" target="_blank" rel="noopener" class="text-brand-600 dark:text-brand-400 underline">How-to</a>` : ''}</div></div>
       <label class="flex items-center gap-1 text-xs muted" title="Rest after each set">${icon('timer', 'w-3.5 h-3.5')}<select class="input py-1 px-1.5 w-auto text-xs" data-change="awRest" data-i="${i}">${restOptions(ex.rest)}</select></label>
       ${i < count - 1 ? `<button class="btn btn-ghost btn-sm ${ex.ss ? 'text-violet-600 dark:text-violet-300' : ''}" data-action="awLink" data-i="${i}" title="${ex.ss ? 'Remove from superset' : 'Superset with the next exercise'}">${icon(ex.ss ? 'unlink' : 'link', 'w-3.5 h-3.5')}</button>` : ''}
       <button class="btn btn-ghost btn-sm" data-action="awMoveEx" data-i="${i}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up">${icon('arrow-up', 'w-3.5 h-3.5')}</button>
@@ -1767,7 +1771,7 @@ function readMacros(v) {
 
 /* ---------- MacroFactor import (.xlsx export: Quick Export + Food Log sheets) ---------- */
 const XLSX_SCRIPT = './vendor/sheetjs/xlsx-0.20.3.full.min.js';
-function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Could not load the local spreadsheet reader.')); document.head.appendChild(s); }); }
+function loadScript(src) { if (src !== XLSX_SCRIPT) return Promise.reject(new Error('Only the bundled spreadsheet reader can be loaded.')); return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => { s.remove(); rej(new Error('Could not load the local spreadsheet reader.')); }; document.head.appendChild(s); }); }
 async function readSpreadsheet(buf) {
   if (!window.XLSX) await loadScript(XLSX_SCRIPT);
   const wb = XLSX.read(buf, { type: 'array' }), out = {};
@@ -2058,6 +2062,135 @@ async function restoreBackupPhotos(items, mode) {
   Photos.urls.forEach(u => URL.revokeObjectURL(u)); Photos.urls.clear();
   return decoded.length;
 }
+const BACKUP_LIMIT = 256 * 1024 * 1024;
+const plainObject = v => !!v && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+function validateJsonTree(value, depth = 0) {
+  if (depth > 60) throw new Error('Backup nesting is too deep.');
+  if (value === null || typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Unsafe object key in imported data.');
+    if (key === 'id' && child != null && !/^[A-Za-z0-9_.:-]+$/.test(String(child))) throw new Error('Invalid identifier in imported data.');
+    validateJsonTree(child, depth + 1);
+  }
+}
+function validateRecord(record, label) {
+  if (!plainObject(record)) throw new Error(label + ' must contain records.');
+  if (record.id != null && !/^[A-Za-z0-9_.:-]+$/.test(String(record.id))) throw new Error(label + ' contains an invalid identifier.');
+  for (const field of ['title', 'name', 'body', 'notes']) {
+    if (record[field] != null && typeof record[field] !== 'string') throw new Error(label + '.' + field + ' must be text.');
+  }
+}
+function validateBackup(d) {
+  if (!plainObject(d) || d.app !== 'life-dashboard' || ![1, 2].includes(d.version) || !plainObject(d.data)) throw new Error('Choose a Life Dashboard version 1 or 2 backup.');
+  validateJsonTree(d);
+  if (!Object.keys(d.data).some(k => Object.hasOwn(COLLECTIONS, k))) throw new Error('The backup contains no recognized collections.');
+  for (const [key, value] of Object.entries(d.data)) {
+    if (!Object.hasOwn(COLLECTIONS, key)) continue;
+    const def = COLLECTIONS[key];
+    if (['exercises', 'ministries', 'activeWorkout', 'nutPlan', 'mfImport'].includes(key) && value === null) continue;
+    if (Array.isArray(def) || ['exercises', 'ministries'].includes(key)) {
+      if (!Array.isArray(value)) throw new Error(key + ' must be a list.');
+      const ids = new Set();
+      for (const record of value) {
+        if (key === 'exercises') { if (typeof record !== 'string') throw new Error('Exercise names must be text.'); continue; }
+        validateRecord(record, key);
+        if (record.id != null) { const id = String(record.id); if (ids.has(id)) throw new Error(key + ' contains duplicate identifiers.'); ids.add(id); }
+      }
+    } else if (!plainObject(value)) throw new Error(key + ' must be an object.');
+  }
+  for (const key of ['workouts', 'routines']) for (const record of d.data[key] || []) {
+    if (!Array.isArray(record.exercises)) throw new Error(key + ' is missing its exercise list.');
+    for (const exercise of record.exercises) { validateRecord(exercise, key + '.exercises'); if (exercise.sets != null && !Array.isArray(exercise.sets) && !(key === 'routines' && typeof exercise.sets === 'number')) throw new Error('Invalid exercise sets.'); }
+  }
+  if (d.data.activeWorkout) {
+    validateRecord(d.data.activeWorkout, 'activeWorkout');
+    if (!Array.isArray(d.data.activeWorkout.exercises)) throw new Error('Active workout is missing its exercise list.');
+  }
+  for (const [day, record] of Object.entries(d.data.nutrition || {})) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !plainObject(record) || !Array.isArray(record.entries)) throw new Error('Invalid nutrition day.');
+    record.entries.forEach(entry => validateRecord(entry, 'nutrition.entries'));
+  }
+  for (const key of ['mealPlan', 'tblocks']) for (const records of Object.values(d.data[key] || {})) {
+    if (!Array.isArray(records)) throw new Error(key + ' days must contain lists.');
+    records.forEach(record => validateRecord(record, key));
+  }
+  for (const record of d.data.tasks || []) if (typeof record.title !== 'string') throw new Error('A task is missing its title.');
+  if (d.settings != null) {
+    if (!plainObject(d.settings)) throw new Error('Invalid backup settings.');
+    for (const [key, def] of Object.entries(SETTINGS_DEFAULT)) if (def != null && typeof def !== 'object' && d.settings[key] != null && typeof d.settings[key] !== typeof def) throw new Error('Invalid setting: ' + key);
+    if (d.settings.theme != null && !['system', 'light', 'dark'].includes(d.settings.theme)) throw new Error('Invalid theme.');
+    if (d.settings.unit != null && !['lbs', 'kg'].includes(d.settings.unit)) throw new Error('Invalid weight unit.');
+    if (d.settings.targets != null && (!plainObject(d.settings.targets) || Object.values(d.settings.targets).some(n => typeof n !== 'number' || !Number.isFinite(n) || n < 0))) throw new Error('Invalid nutrition targets.');
+  }
+  if (d.version === 2 && (!plainObject(d.assets) || !Array.isArray(d.assets.photos))) throw new Error('Version 2 backup is missing its photo list.');
+  if (d.assets != null && (!plainObject(d.assets) || !Array.isArray(d.assets.photos))) throw new Error('Invalid photo list.');
+  const ids = new Set();
+  for (const photo of d.assets?.photos || []) {
+    if (!plainObject(photo) || typeof photo.id !== 'string' || !/^[A-Za-z0-9_.:-]+$/.test(photo.id) || ids.has(photo.id) || typeof photo.data !== 'string') throw new Error('Invalid or duplicate photo record.');
+    ids.add(photo.id); dataUrlToBlob(photo.data);
+  }
+  return d;
+}
+function parseBackup(text) {
+  if (new Blob([text]).size > BACKUP_LIMIT) throw new Error('That backup exceeds the 256 MB import limit.');
+  let d; try { d = JSON.parse(text); } catch (e) { throw new Error('That file is not valid JSON.'); }
+  return validateBackup(d);
+}
+function planBackupImport(d, mode) {
+  validateBackup(d);
+  if (!['merge', 'replace'].includes(mode)) throw new Error('Choose Merge or Replace.');
+  const data = structuredClone(Store.data), photos = d.assets ? d.assets.photos.map(p => [p.id, dataUrlToBlob(p.data)]) : null;
+  if (photos?.length && !Photos.ok()) throw new Error('This browser cannot store photos. Import on a browser with photo storage enabled.');
+  for (const key of Object.keys(COLLECTIONS)) {
+    const has = Object.hasOwn(d.data, key), inc = structuredClone(d.data[key]), cur = data[key];
+    if (key === 'photoMeta' && photos === null) continue;
+    if (mode === 'replace') { data[key] = has ? inc : structuredClone(COLLECTIONS[key]); continue; }
+    if (!has || inc == null) continue;
+    if (key === 'activeWorkout') { if (!cur) data[key] = inc; continue; }
+    if (cur == null) { data[key] = inc; continue; }
+    if (Array.isArray(cur) && Array.isArray(inc)) {
+      if (inc.every(x => plainObject(x) && Object.hasOwn(x, 'id'))) { const m = new Map(cur.map(x => [x.id, x])); inc.forEach(x => m.set(x.id, x)); data[key] = [...m.values()]; }
+      else data[key] = [...new Set([...cur, ...inc])];
+    } else if (key === 'nutrition') {
+      for (const [day, record] of Object.entries(inc)) {
+        if (!cur[day]) cur[day] = record;
+        else { const m = new Map((cur[day].entries || []).map(x => [x.id, x])); record.entries.forEach(x => m.set(x.id, x)); cur[day].entries = [...m.values()]; if (record.weight != null) cur[day].weight = record.weight; }
+      }
+    } else Object.assign(cur, inc);
+  }
+  let settings = structuredClone(S);
+  if (mode === 'replace' && d.settings) {
+    const { esvKey, fdcKey, aiKey, view, collapsed } = S;
+    settings = { ...SETTINGS_DEFAULT, ...d.settings, esvKey, fdcKey, aiKey, view, collapsed, targets: { ...SETTINGS_DEFAULT.targets, ...d.settings.targets } };
+  }
+  return { data, photos, settings, mode };
+}
+async function commitBackupImport(plan) {
+  // Keep every collection and photo change in one IndexedDB transaction.
+  await Store.flushDirty();
+  const previousSettings = localStorage.getItem('ld.settings');
+  const previousFallback = Store.db ? null : Object.fromEntries(Object.keys(COLLECTIONS).map(k => [k, localStorage.getItem('ld.data.' + k)]));
+  try {
+    localStorage.setItem('ld.settings', JSON.stringify(plan.settings));
+    if (Store.db) await new Promise((resolve, reject) => {
+      const stores = plan.photos !== null ? ['kv', 'photos'] : ['kv'], tx = Store.db.transaction(stores, 'readwrite');
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error || new Error('Import could not be saved.')); tx.onabort = () => reject(tx.error || new Error('Import was cancelled.'));
+      try {
+        const kv = tx.objectStore('kv');
+        for (const [key, value] of Object.entries(plan.data)) kv.put(value, key);
+        if (plan.photos !== null) { const photos = tx.objectStore('photos'); if (plan.mode === 'replace') photos.clear(); plan.photos.forEach(([id, blob]) => photos.put(blob, id)); }
+      } catch (e) { tx.abort(); reject(e); }
+    });
+    else for (const [key, value] of Object.entries(plan.data)) localStorage.setItem('ld.data.' + key, JSON.stringify(value));
+  } catch (e) {
+    if (previousSettings === null) localStorage.removeItem('ld.settings'); else localStorage.setItem('ld.settings', previousSettings);
+    if (previousFallback) for (const [key, value] of Object.entries(previousFallback)) { if (value === null) localStorage.removeItem('ld.data.' + key); else localStorage.setItem('ld.data.' + key, value); }
+    throw e;
+  }
+  Store.data = plan.data; S = plan.settings;
+  Photos.urls.forEach(u => URL.revokeObjectURL(u)); Photos.urls.clear();
+  applyTheme(); applyCollapse();
+}
 async function buildBackupPayload() {
   const { esvKey, fdcKey, aiKey, view, collapsed, ...settings } = S;
   return { app: 'life-dashboard', version: 2, exportedAt: new Date().toISOString(), settings, data: { ...Store.data }, assets: { photos: await backupPhotos() } };
@@ -2267,7 +2400,7 @@ function studyLinks(b, c, v) {
   L.push(['Word study & cross-references', `https://www.blueletterbible.org/search/preSearch.cfm?Criteria=${encodeURIComponent(ref)}&t=KJV`, 'Blue Letter Bible'], [`BibleProject videos on ${BOOKS[b][0]}`, `https://www.youtube.com/@bibleproject/search?query=${encodeURIComponent(BOOKS[b][0])}`, 'YouTube']);
   return L;
 }
-const linkList = L => `<div class="space-y-1.5">${L.map(([l, u, s]) => `<a href="${esc(u)}" target="_blank" rel="noopener" class="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 hover:border-brand-400 text-sm">${icon('external-link', 'w-3.5 h-3.5 muted shrink-0')}<span class="flex-1">${esc(l)}</span><span class="text-xs muted">${esc(s)}</span></a>`).join('')}</div>`;
+const linkList = L => `<div class="space-y-1.5">${L.map(([l, u, s]) => `<a href="${esc(webUrl(u))}" target="_blank" rel="noopener" class="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 hover:border-brand-400 text-sm">${icon('external-link', 'w-3.5 h-3.5 muted shrink-0')}<span class="flex-1">${esc(l)}</span><span class="text-xs muted">${esc(s)}</span></a>`).join('')}</div>`;
 
 // Reading plans — generated (paced by calendar), templates (self-paced), and the weekly 412 plan (any order)
 const PLAN_PRESETS = {
@@ -2804,10 +2937,10 @@ function smartView() {
     <h3 class="font-semibold mb-3">Browse topics</h3><div class="space-y-4">${Object.entries(TOPIC_CATS).map(([k, l]) => `<div><div class="text-xs font-semibold uppercase tracking-wide muted mb-1.5">${l}</div><div class="flex flex-wrap gap-1.5">${TOPICS.filter(t => t.cat === k).map(t => `<button class="chip" data-action="smartTopic" data-id="${t.id}">${esc(t.label)}</button>`).join('')}</div></div>`).join('')}</div>`;
   const stems = new Set(R.stems), bible = R.tr && VIdx[R.tr] ? VIdx[R.tr].bible : null;
   const crisis = R.topics.filter(id => CRISIS[id]).map(id => `<div class="card mb-4 border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 text-sm space-y-1">${icon('life-buoy', 'w-5 h-5 text-rose-600 mb-1')}${CRISIS[id].map(x => `<p>${x}</p>`).join('')}</div>`).join('');
-  const refCard = R.ref ? `<div class="card mb-4 flex flex-wrap items-center gap-2 text-sm">${icon('book-open', 'w-4 h-4 text-brand-600')}<span class="flex-1 min-w-[10rem]">Looks like a reference</span><button class="btn btn-sm btn-primary" data-action="refOpen" data-ref="${esc(refLabel(R.ref))}">Open ${esc(refLabel(R.ref))}</button><a class="btn btn-sm" target="_blank" rel="noopener" href="${esc(gqLink(refLabel(R.ref)))}">${icon('external-link', 'w-3.5 h-3.5')} Got Questions</a></div>` : '';
+  const refCard = R.ref ? `<div class="card mb-4 flex flex-wrap items-center gap-2 text-sm">${icon('book-open', 'w-4 h-4 text-brand-600')}<span class="flex-1 min-w-[10rem]">Looks like a reference</span><button class="btn btn-sm btn-primary" data-action="refOpen" data-ref="${esc(refLabel(R.ref))}">Open ${esc(refLabel(R.ref))}</button><a class="btn btn-sm" target="_blank" rel="noopener" href="${esc(webUrl(gqLink(refLabel(R.ref))))}">${icon('external-link', 'w-3.5 h-3.5')} Got Questions</a></div>` : '';
   const head = `<div class="flex flex-wrap items-center gap-1.5 mb-4">${R.topics.length ? `<span class="text-sm muted mr-1">Topics:</span>${R.topics.map(id => `<button class="chip chip-on" data-action="smartTopic" data-id="${id}">${esc(TOPIC_BY[id].label)}</button>`).join('')}` : `<span class="text-sm muted">${R.ref ? '' : 'No built-in topic matched, so these are word matches, your notes, and resource searches.'}</span>`}${R.left.length && R.topics.length ? `<span class="text-xs muted ml-1">also: ${esc(R.left.join(', '))}</span>` : ''}
     <span class="flex-1"></span><button class="btn btn-sm" data-action="smartSave">${icon('notebook-pen', 'w-3.5 h-3.5')} Save as study note</button><button class="btn btn-sm btn-ghost" data-action="smartClear">${icon('x', 'w-3.5 h-3.5')} Clear</button></div>`;
-  const keyCards = R.keys.map(k => { const t = TOPIC_BY[k.id]; return `<div class="card"><div class="flex items-start gap-2 mb-1"><h3 class="font-semibold flex-1">${esc(t.label)}</h3><a class="text-xs text-brand-600 dark:text-brand-400 hover:underline shrink-0" target="_blank" rel="noopener" href="${esc(gqLink(t.search))}">Got Questions ↗</a></div><p class="text-sm muted mb-3">${esc(t.blurb)}</p>
+  const keyCards = R.keys.map(k => { const t = TOPIC_BY[k.id]; return `<div class="card"><div class="flex items-start gap-2 mb-1"><h3 class="font-semibold flex-1">${esc(t.label)}</h3><a class="text-xs text-brand-600 dark:text-brand-400 hover:underline shrink-0" target="_blank" rel="noopener" href="${esc(webUrl(gqLink(t.search)))}">Got Questions ↗</a></div><p class="text-sm muted mb-3">${esc(t.blurb)}</p>
     <div class="divide-y divide-slate-100 dark:divide-slate-800">${k.items.map(i => `<button class="w-full text-left py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded px-1 -mx-1" data-action="refOpen" data-ref="${esc(i.ref)}"><div class="text-xs font-semibold text-brand-600 dark:text-brand-400">${esc(i.ref)}</div>${i.text ? `<div class="text-sm font-serif leading-6">${esc(i.text)}</div>` : ''}</button>`).join('')}</div>
     ${R.hasBible ? '' : '<p class="text-xs muted mt-2">Download a Bible in Library to see the verse text here.</p>'}</div>`; }).join('');
   const ai = S.aiKey ? (() => { const A_ = R.ai, st = R.aiState || {};
@@ -2817,7 +2950,7 @@ function smartView() {
       <div class="divide-y divide-slate-100 dark:divide-slate-800 mt-3">${A_.passages.map(p => `<button class="w-full text-left py-2 px-1 -mx-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800/60" data-action="refOpen" data-ref="${esc(refLabel(p.r))}"><div class="text-xs font-semibold text-brand-600 dark:text-brand-400">${esc(refLabel(p.r))} <span class="font-normal muted">— ${esc(p.why)}</span></div>${bible ? `<div class="text-sm font-serif leading-6">${esc(passageSnippet(bible, p.r, 220))}</div>` : ''}</button>`).join('')}</div></div>`; })() : '';
   const more = R.more.length ? `<div class="card p-0"><div class="px-4 pt-3 pb-2"><h3 class="font-semibold">More verses</h3><p class="text-xs muted">${R.topics.length > 1 ? 'Ranked by where these topics meet' : 'Ranked by how closely they fit'} · ${BIBLES[R.tr].short}</p></div><div class="divide-y divide-slate-100 dark:divide-slate-800">${R.more.map(x => `<button class="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60" data-action="rdGoto" data-b="${x.b}" data-c="${x.c}" data-v="${x.v}"><div class="text-xs font-semibold text-brand-600 dark:text-brand-400">${BOOKS[x.b][0]} ${x.c}:${x.v}</div><div class="text-sm font-serif leading-6">${markStems(x.t, stems)}</div></button>`).join('')}</div></div>` : '';
   const qs = smartQueries(R), sites = resourceSites();
-  const res = qs.length ? `<div class="card"><h3 class="font-semibold mb-1">Go deeper</h3><p class="text-xs muted mb-3">Opens a search of each site in a new tab.</p><div class="space-y-3">${sites.map((s, i) => `<div><div class="text-sm font-medium ${i === 0 ? 'text-brand-700 dark:text-brand-300' : ''}">${esc(s.name)}</div><div class="flex flex-wrap gap-1 mt-1">${qs.map(q => `<a class="chip hover:border-brand-400" target="_blank" rel="noopener" href="${esc(s.url(q))}">${esc(q.length > 42 ? q.slice(0, 40) + '…' : q)}</a>`).join('')}</div></div>`).join('')}</div></div>` : '';
+  const res = qs.length ? `<div class="card"><h3 class="font-semibold mb-1">Go deeper</h3><p class="text-xs muted mb-3">Opens a search of each site in a new tab.</p><div class="space-y-3">${sites.map((s, i) => `<div><div class="text-sm font-medium ${i === 0 ? 'text-brand-700 dark:text-brand-300' : ''}">${esc(s.name)}</div><div class="flex flex-wrap gap-1 mt-1">${qs.map(q => `<a class="chip hover:border-brand-400" target="_blank" rel="noopener" href="${esc(webUrl(s.url(q)))}">${esc(q.length > 42 ? q.slice(0, 40) + '…' : q)}</a>`).join('')}</div></div>`).join('')}</div></div>` : '';
   const kindIc = { note: 'notebook-text', media: 'podcast', journal: 'notebook-pen', vnote: 'sticky-note', quote: 'quote', illus: 'lightbulb' }, kindL = { note: 'Study note', media: 'Saved resource', journal: 'Journal', vnote: 'Verse note', quote: 'Quote', illus: 'Illustration' };
   const lib = R.lib.length ? `<div class="card p-0"><h3 class="font-semibold px-4 pt-3 pb-2">From your notes</h3><div class="divide-y divide-slate-100 dark:divide-slate-800">${R.lib.map(d => `<button class="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60" data-action="smartOpen" data-kind="${d.kind}" data-id="${esc(d.id)}"><div class="flex items-center gap-1.5 text-xs muted">${icon(kindIc[d.kind], 'w-3.5 h-3.5')} ${kindL[d.kind]}${d.sub ? ` · ${esc(d.sub)}` : ''}</div><div class="text-sm font-medium">${esc(d.title)}</div><div class="text-xs muted line-clamp-2">${esc(d.snip)}</div></button>`).join('')}</div></div>` : '';
   const vm = vaultMeta(), vItems = [...(R.miyo && R.miyo.items || []), ...R.vault.filter(v => !(R.miyo && R.miyo.items || []).some(m => m.path === v.path))].slice(0, 12);
@@ -3834,35 +3967,61 @@ function matchMinistry(url, name) {
   const mins = Store.get('ministries') || [], h = hostOf(url), n = normQ(name || '');
   return (mins.find(m => m.url && h && (hostOf(m.url) === h || h.endsWith('.' + hostOf(m.url)))) || mins.find(m => n && m.name && (n.includes(normQ(m.name)) || normQ(m.name).includes(n))) || {}).id || '';
 }
-function jsonp(url, timeout = 10000) {
+function isolatedPodcastRequest(url, timeout = 10000) {
+  const u = new URL(url);
+  if (u.origin !== 'https://itunes.apple.com' || !['/search', '/lookup'].includes(u.pathname) || u.username || u.password) return Promise.reject(new Error('Unsupported podcast service.'));
   return new Promise((res, rej) => {
-    const cb = `__ldj${Date.now().toString(36)}${Math.floor(Math.random() * 1e6)}`, s = document.createElement('script');
-    const done = () => { clearTimeout(t); delete window[cb]; s.remove(); }, t = setTimeout(() => { done(); rej(new Error('No answer — check your internet connection')); }, timeout);
-    window[cb] = d => { done(); res(d); }; s.onerror = () => { done(); rej(new Error('Couldn’t reach the service')); };
-    s.src = `${url}${url.includes('?') ? '&' : '?'}callback=${cb}`; document.head.appendChild(s);
+    const frame = document.createElement('iframe'), token = crypto.randomUUID();
+    frame.hidden = true; frame.setAttribute('sandbox', 'allow-scripts'); frame.setAttribute('referrerpolicy', 'no-referrer');
+    u.searchParams.set('callback', '__ldPodcast');
+    const scriptUrl = JSON.stringify(u.href).replace(/</g, '\\u003c'), channel = JSON.stringify(token);
+    const done = () => { clearTimeout(timer); window.removeEventListener('message', receive); frame.remove(); };
+    const receive = e => {
+      if (e.source !== frame.contentWindow || e.origin !== 'null' || !e.data || e.data.token !== token) return;
+      done();
+      if (e.data.error) return rej(new Error('Could not reach the podcast directory.'));
+      try { validateJsonTree(e.data.payload); if (!plainObject(e.data.payload) || !Array.isArray(e.data.payload.results)) throw new Error('Invalid podcast response.'); res(e.data.payload); }
+      catch (error) { rej(error); }
+    };
+    const timer = setTimeout(() => { done(); rej(new Error('No answer — check your internet connection')); }, timeout);
+    window.addEventListener('message', receive);
+    frame.srcdoc = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://itunes.apple.com; connect-src 'none'"><script>
+      window.__ldPodcast = function(payload) { parent.postMessage({token:${channel}, payload:payload}, '*'); };
+      var script = document.createElement('script'); script.src = ${scriptUrl};
+      script.onerror = function() { parent.postMessage({token:${channel}, error:true}, '*'); };
+      document.head.appendChild(script);
+    <\/script>`;
+    document.body.appendChild(frame);
   });
 }
-const ytId = u => (String(u).match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/) || [])[1];
+function ytId(value) {
+  const safe = webUrl(value); if (!safe) return;
+  const u = new URL(safe), host = u.hostname.replace(/^www\./, '');
+  const id = host === 'youtu.be' ? u.pathname.split('/')[1] : ['youtube.com', 'm.youtube.com', 'youtube-nocookie.com'].includes(host) ? (u.pathname === '/watch' ? u.searchParams.get('v') : u.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)$/)?.[1]) : null;
+  return /^[\w-]{11}$/.test(id || '') ? id : undefined;
+}
 const isAudioUrl = u => /\.(mp3|m4a|aac|wav|ogg|opus)(\?|#|$)/i.test(u), isVideoUrl = u => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(u);
 const slugTitle = u => { try { const p = new URL(u).pathname.split('/').filter(Boolean); let s = decodeURIComponent(p[p.length - 1] || '').replace(/\.(html?|php|aspx?)$/i, ''); if (/^\d+$/.test(s) && p.length > 1) s = decodeURIComponent(p[p.length - 2]); return s.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase()).replace(/\b(A|An|The|And|Or|Of|In|On|To|For|With|At|By)\b/g, (w, x, i) => i ? w.toLowerCase() : w); } catch (e) { return ''; } };
-// Apple Podcasts directory (JSONP works from a local file)
-async function itunesLookup(id, episodes = false) { const d = await jsonp(`https://itunes.apple.com/lookup?id=${encodeURIComponent(id)}${episodes ? '&entity=podcastEpisode&limit=200' : ''}`); return d.results || []; }
-async function itunesSearch(term, entity = 'podcast', limit = 12) { const d = await jsonp(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=podcast&entity=${entity}&limit=${limit}`); return d.results || []; }
+// Apple's cross-origin callback runs in a sandbox with no access to dashboard storage.
+async function itunesLookup(id, episodes = false) { const d = await isolatedPodcastRequest(`https://itunes.apple.com/lookup?id=${encodeURIComponent(id)}${episodes ? '&entity=podcastEpisode&limit=200' : ''}`); return d.results || []; }
+async function itunesSearch(term, entity = 'podcast', limit = 12) { const d = await isolatedPodcastRequest(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=podcast&entity=${entity}&limit=${limit}`); return d.results || []; }
 const epInfo = e => ({ src: e.episodeUrl, title: e.trackName, show: e.collectionName, dur: e.trackTimeMillis ? Math.round(e.trackTimeMillis / 1000) : null, date: (e.releaseDate || '').slice(0, 10), art: e.artworkUrl160 || e.artworkUrl600 || '', id: e.trackId, desc: String(e.description || e.shortDescription || '').slice(0, 600) });
 // Paste a link → title, channel, format, source (and audio for podcasts)
 async function autofillLink(url) {
-  const out = { url }; if (!/^https?:\/\//i.test(url)) return out;
+  url = webUrl(url); const out = { url }; if (!url) return out;
   const h = hostOf(url);
   try {
-    if (ytId(url) || /vimeo\.com|soundcloud\.com/.test(h)) {
-      const d = await jsonp(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+    if (ytId(url) || ['vimeo.com', 'player.vimeo.com', 'soundcloud.com'].includes(h)) {
+      const response = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`, { credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw new Error('Link preview is unavailable.');
+      const d = await response.json();
       if (d && !d.error) Object.assign(out, { title: d.title, author: d.author_name, thumb: d.thumbnail_url, kind: /soundcloud/.test(h) ? 'podcast' : 'video', ministry: matchMinistry(url, d.author_name) });
-    } else if (/podcasts\.apple\.com/.test(h)) {
+    } else if (h === 'podcasts.apple.com') {
       const pid = (url.match(/\/id(\d+)/) || [])[1], eid = (url.match(/[?&]i=(\d+)/) || [])[1];
       if (pid) { const rs = await itunesLookup(pid, !!eid), show = rs.find(r => r.wrapperType === 'track' && r.kind === 'podcast') || rs[0], ep = eid && rs.find(r => String(r.trackId) === eid);
         Object.assign(out, { kind: 'podcast', author: show && (show.artistName || show.collectionName), thumb: show && (show.artworkUrl600 || show.artworkUrl100), title: ep ? ep.trackName : show && show.collectionName, feed: show && show.feedUrl, ministry: matchMinistry(url, show && show.artistName) || matchMinistry(url, show && show.collectionName) });
         if (ep) { out.audio = epInfo(ep); out.date = out.audio.date || ''; } }
-    } else if (/open\.spotify\.com/.test(h)) {
+    } else if (h === 'open.spotify.com') {
       out.kind = 'podcast';
       try { const r = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`); if (r.ok) { const d = await r.json(); Object.assign(out, { title: d.title, thumb: d.thumbnail_url }); } } catch (e) { }
     } else if (isAudioUrl(url)) Object.assign(out, { kind: 'podcast', audio: { src: url }, title: slugTitle(url), ministry: matchMinistry(url) });
@@ -3876,7 +4035,7 @@ async function findEpisodeAudio(title, show = '') { const rs = await itunesSearc
 // One persistent audio/video element so playback survives re-renders and navigation (mini player)
 const MP = { el: null, id: null, saveT: 0 };
 function mpLoad(o) {
-  const src = (o.audio && o.audio.src) || (isAudioUrl(o.url) || isVideoUrl(o.url) ? o.url : null); if (!src) return null;
+  const src = webUrl((o.audio && o.audio.src) || (isAudioUrl(o.url) || isVideoUrl(o.url) ? o.url : '')); if (!src) return null;
   if (MP.el && MP.id === o.id && MP.el.getAttribute('src') === src) return MP.el;
   if (MP.el) { MP.el.pause(); MP.el.remove(); }
   const video = isVideoUrl(src) && !(o.audio && o.audio.src), el = document.createElement(video ? 'video' : 'audio');
@@ -3896,7 +4055,7 @@ function mpMini() {
 }
 // YouTube’s player can report its time / seek by postMessage (works once the app has a web address)
 const YT = { t: 0 };
-window.addEventListener('message', e => { if (!/youtube(-nocookie)?\.com$/.test(hostOf(e.origin))) return; try { const d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; if (d && d.info && typeof d.info.currentTime === 'number') YT.t = d.info.currentTime; } catch (x) { } });
+window.addEventListener('message', e => { const frame = $('#m-yt'); if (!frame || e.source !== frame.contentWindow || e.origin !== 'https://www.youtube-nocookie.com') return; try { const d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; if (d && d.info && typeof d.info.currentTime === 'number' && Number.isFinite(d.info.currentTime)) YT.t = d.info.currentTime; } catch (x) { } });
 function ytListen() { const f = $('#m-yt'); if (!f) return; const send = () => { try { f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'ld' }), '*'); } catch (e) { } }; f.addEventListener('load', send); setTimeout(send, 1500); }
 function mediaTime() { if (MP.el && $('#m-player-slot') && MP.el.parentNode) return MP.el.currentTime; if ($('#m-yt')) return YT.t || null; return null; }
 function mediaSeek(t) {
@@ -3904,12 +4063,13 @@ function mediaSeek(t) {
   const f = $('#m-yt'); if (f) { f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [t, true] }), '*'); f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*'); return true; }
   return false;
 }
-function mediaEmbed(o) { // iframes for services we can’t play directly
-  const u = o.url || '', y = ytId(u); let m;
+function mediaEmbed(o) { // Parse the hostname and escape every constructed iframe URL.
+  const u = webUrl(o.url || ''); if (!u) return '';
+  const parsed = new URL(u), h = parsed.hostname.replace(/^www\./, ''), y = ytId(u); let m;
   if (y) return `<div class="aspect-video w-full"><iframe id="m-yt" src="https://www.youtube-nocookie.com/embed/${y}?enablejsapi=1&rel=0" class="w-full h-full rounded-xl" allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div><p class="text-[11px] muted mt-1">YouTube won’t play inside an app opened as a file (Error 153). Use “Open” for now — it plays here once the dashboard has a web address.</p>`;
-  if ((m = u.match(/vimeo\.com\/(?:video\/)?(\d+)/))) return `<div class="aspect-video w-full"><iframe src="https://player.vimeo.com/video/${m[1]}" class="w-full h-full rounded-xl" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div>`;
-  if ((m = u.match(/open\.spotify\.com\/(?:intl-\w+\/)?(episode|show|track|playlist)\/(\w+)/))) return `<iframe src="https://open.spotify.com/embed/${m[1]}/${m[2]}" class="w-full rounded-xl" height="152" allow="encrypted-media; clipboard-write" loading="lazy"></iframe>`;
-  if ((m = u.match(/podcasts\.apple\.com\/(.+)/))) return `<iframe src="https://embed.podcasts.apple.com/${m[1]}" class="w-full rounded-xl" height="175" allow="autoplay *; encrypted-media *" sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation" loading="lazy"></iframe>`;
+  if (['vimeo.com', 'player.vimeo.com'].includes(h) && (m = parsed.pathname.match(/^\/(?:video\/)?(\d+)(?:\/|$)/))) return `<div class="aspect-video w-full"><iframe src="https://player.vimeo.com/video/${m[1]}" class="w-full h-full rounded-xl" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div>`;
+  if (h === 'open.spotify.com' && (m = parsed.pathname.match(/^\/(?:intl-\w+\/)?(episode|show|track|playlist)\/(\w+)(?:\/|$)/))) return `<iframe src="https://open.spotify.com/embed/${m[1]}/${m[2]}" class="w-full rounded-xl" height="152" allow="encrypted-media; clipboard-write" loading="lazy"></iframe>`;
+  if (h === 'podcasts.apple.com') return `<iframe src="${esc('https://embed.podcasts.apple.com' + parsed.pathname + parsed.search)}" class="w-full rounded-xl" height="175" allow="autoplay *; encrypted-media *" sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation" loading="lazy"></iframe>`;
   return '';
 }
 // HTML → Markdown (for pasted articles; the clipper carries its own copy)
@@ -3968,7 +4128,14 @@ function CLIP_FN() {
   } catch (e) { alert('Life Dashboard clipper: ' + e.message); }
 }
 const clipperHref = () => `javascript:${encodeURIComponent(`(${CLIP_FN.toString()})()`)}`;
-function parseClip(text) { try { const d = JSON.parse(String(text || '').trim()); return d && d.ldClip ? d : null; } catch (e) { return null; } }
+function parseClip(text) {
+  try {
+    const d = JSON.parse(String(text || '').trim()); validateJsonTree(d);
+    if (!plainObject(d) || !d.ldClip || typeof d.md !== 'string') return null;
+    for (const key of ['title', 'url', 'byline', 'site', 'published', 'description']) if (d[key] != null && typeof d[key] !== 'string') return null;
+    return d;
+  } catch (e) { return null; }
+}
 const wordsOf = s => (String(s || '').match(/[A-Za-z0-9’']+/g) || []).length;
 function articleFromClip(d) {
   const ex = Store.get('media').find(m => m.url && m.url === d.url), o = ex || { id: uid(), created: new Date().toISOString(), tags: [], body: '' };
@@ -3979,7 +4146,7 @@ function articleFromClip(d) {
 
 const MSTATUS_CLS = { queue: 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200', active: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200', done: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200' };
 const stars = (n, cls = 'text-amber-500') => n ? `<span class="${cls}" aria-label="${n} of 5 stars">${'★'.repeat(n)}<span class="opacity-30">${'★'.repeat(5 - n)}</span></span>` : '';
-const mThumb = (m, cls = 'w-full aspect-video') => m.thumb ? `<img src="${esc(m.thumb)}" alt="" loading="lazy" class="${cls} object-cover rounded-lg bg-slate-100 dark:bg-slate-800" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+const mThumb = (m, cls = 'w-full aspect-video') => m.thumb ? `<img src="${esc(webUrl(m.thumb))}" alt="" loading="lazy" class="${cls} object-cover rounded-lg bg-slate-100 dark:bg-slate-800" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
 const localDay = iso => iso ? ymd(new Date(iso)) : '';
 const mProgress = m => m.kind === 'book' && m.pages ? Math.min(100, Math.round((m.page || 0) / m.pages * 100)) : (m.audio && m.audio.dur && m.pos ? Math.min(100, Math.round(m.pos / m.audio.dur * 100)) : null);
 const readMin = m => m.article ? Math.max(1, Math.round((m.article.words || 0) / 230)) : null;
@@ -4025,7 +4192,7 @@ function mediaDetail(o) {
   if (src) mpLoad(o);
   const player = src ? `<div id="m-player-slot" data-id="${o.id}"></div><div class="flex flex-wrap items-center gap-2 mt-2"><button class="btn btn-sm" data-action="mSkip" data-v="-15">${icon('rotate-ccw', 'w-3.5 h-3.5')} 15</button><button class="btn btn-sm" data-action="mSkip" data-v="30">30 ${icon('rotate-cw', 'w-3.5 h-3.5')}</button><select class="input w-auto py-1 text-sm" data-change="mSpeed" aria-label="Playback speed">${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}" ${+(S.mSpeed || 1) === v ? 'selected' : ''}>${v}×</option>`).join('')}</select><span class="text-xs muted">${o.pos ? `Resumes at ${fmtT(o.pos)}` : ''}</span></div>` : mediaEmbed(o);
   return `<div class="flex flex-wrap items-center gap-2 mb-3"><button class="btn btn-sm" data-action="mBack">${icon('arrow-left', 'w-3.5 h-3.5')} Library</button><span class="flex-1"></span>
-      ${o.url ? `<a href="${esc(o.url)}" target="_blank" rel="noopener" class="btn btn-sm">${icon('external-link', 'w-3.5 h-3.5')} Open</a>` : ''}<button class="btn btn-sm" data-action="mShare" data-id="${o.id}">${icon('share-2', 'w-3.5 h-3.5')} Share blurb</button>
+      ${o.url ? `<a href="${esc(webUrl(o.url))}" target="_blank" rel="noopener" class="btn btn-sm">${icon('external-link', 'w-3.5 h-3.5')} Open</a>` : ''}<button class="btn btn-sm" data-action="mShare" data-id="${o.id}">${icon('share-2', 'w-3.5 h-3.5')} Share blurb</button>
       <button class="btn btn-sm" data-action="noteObsidian" data-coll="media" data-id="${o.id}">${icon('copy', 'w-3.5 h-3.5')} Obsidian</button><button class="btn btn-sm" data-action="noteMd" data-coll="media" data-id="${o.id}">${icon('download', 'w-3.5 h-3.5')} .md</button><button class="btn btn-sm btn-danger" data-action="noteDelete" data-coll="media" data-id="${o.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div>
     <div class="grid lg:grid-cols-5 gap-4 items-start"><div class="lg:col-span-3 space-y-3 min-w-0">
       <div class="card space-y-3"><input id="m-title" class="input text-lg font-semibold" value="${esc(o.title)}" ${nf('media', o, 'title')} placeholder="Title" ${o.title ? '' : 'autofocus'}>
@@ -4156,7 +4323,7 @@ function podcastModal() {
   Modal.open(modalShell('Find a podcast episode', `<form class="flex gap-2" data-submit="mPodSearch"><input name="q" class="input" placeholder="Search Apple Podcasts — e.g. Ask Pastor John, BibleProject" value="${esc(P.q || '')}" autofocus autocomplete="off"><button class="btn btn-primary shrink-0">${icon('search')}</button></form>
     ${P.busy ? `<p class="text-sm muted">${icon('loader-circle', 'w-4 h-4 animate-spin inline')} Searching…</p>` : ''}${P.err ? `<p class="text-sm text-rose-600">${esc(P.err)}</p>` : ''}
     ${P.eps ? `<div class="flex items-center gap-2"><button type="button" class="btn btn-sm" data-action="mPodBack">${icon('arrow-left', 'w-3.5 h-3.5')}</button><span class="font-semibold text-sm">${esc(P.show.collectionName)}</span></div><div class="divide-y divide-slate-100 dark:divide-slate-800 max-h-[50vh] overflow-y-auto">${P.eps.map((e, i) => `<div class="flex items-start gap-2 py-2"><div class="flex-1 min-w-0"><div class="text-sm font-medium">${esc(e.title)}</div><div class="text-xs muted">${e.date ? fmtDate(e.date) : ''}${e.dur ? ` · ${fmtT(e.dur)}` : ''}</div></div><button type="button" class="btn btn-sm" data-action="mPodAdd" data-i="${i}" data-s="queue">Up next</button><button type="button" class="btn btn-sm btn-primary" data-action="mPodAdd" data-i="${i}" data-s="active">${icon('play', 'w-3.5 h-3.5')}</button></div>`).join('') || '<p class="text-sm muted">No playable episodes found.</p>'}</div>`
-      : P.shows ? `<div class="divide-y divide-slate-100 dark:divide-slate-800 max-h-[55vh] overflow-y-auto">${P.shows.map((s, i) => `<button type="button" class="w-full text-left flex items-center gap-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60" data-action="mPodShow" data-i="${i}">${s.artworkUrl100 ? `<img src="${esc(s.artworkUrl100)}" alt="" class="w-12 h-12 rounded-lg">` : ''}<div class="min-w-0"><div class="text-sm font-medium truncate">${esc(s.collectionName)}</div><div class="text-xs muted truncate">${esc(s.artistName || '')}</div></div></button>`).join('') || '<p class="text-sm muted">No podcasts found.</p>'}</div>` : '<p class="text-xs muted">Episodes play right here in the app, with speed control, skip buttons, and timestamps you can click in your notes.</p>'}`), { wide: true });
+      : P.shows ? `<div class="divide-y divide-slate-100 dark:divide-slate-800 max-h-[55vh] overflow-y-auto">${P.shows.map((s, i) => `<button type="button" class="w-full text-left flex items-center gap-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60" data-action="mPodShow" data-i="${i}">${s.artworkUrl100 ? `<img src="${esc(webUrl(s.artworkUrl100))}" alt="" class="w-12 h-12 rounded-lg">` : ''}<div class="min-w-0"><div class="text-sm font-medium truncate">${esc(s.collectionName)}</div><div class="text-xs muted truncate">${esc(s.artistName || '')}</div></div></button>`).join('') || '<p class="text-sm muted">No podcasts found.</p>'}</div>` : '<p class="text-xs muted">Episodes play right here in the app, with speed control, skip buttons, and timestamps you can click in your notes.</p>'}`), { wide: true });
 }
 function articleModal() {
   ui.mClip = null;
@@ -4927,7 +5094,7 @@ function canMake(r) { const ls = ingLines(r); if (!ls.length) return { have: 0, 
 // recipes: favorites & rotation
 const recFind = id => Store.get('recipes').find(x => x.id === id);
 const lastMade = r => (r.made || []).slice().sort().pop() || null;
-const recThumb = (r, cls) => r.photo ? `<img data-photo="${r.photo}" alt="" class="${cls} object-cover bg-slate-100 dark:bg-slate-800">` : r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="${cls} object-cover bg-slate-100 dark:bg-slate-800" onerror="this.remove()">` : '';
+const recThumb = (r, cls) => r.photo ? `<img data-photo="${r.photo}" alt="" class="${cls} object-cover bg-slate-100 dark:bg-slate-800">` : r.img ? `<img src="${esc(webUrl(r.img))}" alt="" loading="lazy" referrerpolicy="no-referrer" class="${cls} object-cover bg-slate-100 dark:bg-slate-800" onerror="this.remove()">` : '';
 const perServCost = r => num(r.cost) ? num(r.cost) / (num(r.servings) || 1) : null;
 const money = n => `$${(Math.round((+n || 0) * 100) / 100).toFixed(2).replace(/\.00$/, '')}`;
 function staleFavorites(n = 4) { const t = ymd(); return Store.get('recipes').filter(r => r.fav || (r.rating || 0) >= 4).map(r => ({ r, last: lastMade(r) })).filter(x => !x.last || daysBetween(x.last, t) >= 21).sort((a, b) => (a.last || '0').localeCompare(b.last || '0')).slice(0, n); }
@@ -4993,7 +5160,7 @@ function recList() {
 function recEditor(r, pre) {
   const isNew = !r; r = r || { id: '', title: '', tags: [], servings: 4, time: '', cal: '', p: '', c: '', f: '', ingredients: '', steps: '', notes: '', source: '', ...(pre || {}) };
   Modal.open(modalShell(r.id ? 'Edit recipe' : pre ? 'Imported recipe — check & save' : 'New recipe', `<input type="hidden" name="id" value="${r.id}"><input type="hidden" name="img" value="${esc(r.img || '')}">
-    ${pre && r.img ? `<img src="${esc(r.img)}" alt="" referrerpolicy="no-referrer" class="w-full h-40 object-cover rounded-xl" onerror="this.remove()">` : ''}
+    ${pre && r.img ? `<img src="${esc(webUrl(r.img))}" alt="" referrerpolicy="no-referrer" class="w-full h-40 object-cover rounded-xl" onerror="this.remove()">` : ''}
     <div><label class="label">Title</label><input name="title" class="input" value="${esc(r.title)}" required ${isNew && !pre ? 'autofocus' : ''}></div>
     <div class="grid sm:grid-cols-3 gap-3"><div class="sm:col-span-3"><label class="label">Tags (comma separated)</label><input name="tags" class="input" value="${esc((r.tags || []).join(', '))}" placeholder="Quick, High Protein, Kid-Friendly"></div>
     <div><label class="label">Servings</label><input name="servings" type="number" min="1" step="any" class="input" value="${r.servings}"></div><div><label class="label">Total time (min)</label><input name="time" type="number" class="input" value="${esc(r.time)}"></div><div><label class="label">Est. cost for whole recipe ($)</label><input name="cost" type="number" step="0.01" min="0" class="input" value="${r.cost ?? ''}" placeholder="e.g. 14"></div>
@@ -5023,7 +5190,7 @@ function recViewModal(r) {
     <div><div class="flex items-center gap-2 mb-2"><h4 class="font-semibold">Ingredients</h4><div class="ml-auto flex items-center gap-1 text-sm"><button type="button" class="btn btn-sm" data-action="recServ" data-id="${r.id}" data-d="-1" aria-label="Fewer servings">−</button><span class="min-w-[6rem] text-center">${fmtQty(serv)} serving${serv === 1 ? '' : 's'}</span><button type="button" class="btn btn-sm" data-action="recServ" data-id="${r.id}" data-d="1" aria-label="More servings">+</button></div></div>
       <ul class="space-y-1">${ings.map(l => { const have = pantryOn && pantryHas(l); return `<li><label class="flex gap-2 text-sm"><input type="checkbox" class="mt-1 accent-brand-600"><span class="flex-1">${esc(scaleLine(l, scale))}</span>${have && !have.basic ? '<span class="text-[10px] text-emerald-600 dark:text-emerald-400 shrink-0">✓ in pantry</span>' : ''}</label></li>`; }).join('') || '<li class="text-sm muted">No ingredients listed.</li>'}</ul></div>
     <div><h4 class="font-semibold mb-2">Steps</h4><ol class="list-decimal pl-5 space-y-2 text-sm">${String(r.steps || '').split('\n').filter(s => s.trim()).map(s => `<li>${esc(s.replace(/^\d+[.)]\s*/, ''))}</li>`).join('')}</ol></div>
-    ${r.notes ? `<div class="md text-sm muted">${md(r.notes)}</div>` : ''}${r.source ? `<a class="text-sm text-brand-600 underline" href="${esc(r.source)}" target="_blank" rel="noopener">View source</a>` : ''}
+    ${r.notes ? `<div class="md text-sm muted">${md(r.notes)}</div>` : ''}${r.source ? `<a class="text-sm text-brand-600 underline" href="${esc(webUrl(r.source))}" target="_blank" rel="noopener">View source</a>` : ''}
     <div class="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800"><span class="text-sm font-medium">Plan for</span><input type="date" id="rec-plan-date" class="input w-auto" value="${ymd()}"><select id="rec-plan-slot" class="input w-auto">${MSLOTS.map(([k, l]) => `<option value="${k}" ${k === 'dinner' ? 'selected' : ''}>${l}</option>`).join('')}</select><button type="button" class="btn btn-sm" data-action="recToPlan" data-id="${r.id}">${icon('calendar-plus', 'w-3.5 h-3.5')} Add to plan</button></div>`,
     `<button type="button" class="btn btn-sm btn-danger mr-auto" data-action="recDelete" data-id="${r.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button><button type="button" class="btn btn-sm" data-action="recObsidian" data-id="${r.id}">${icon('copy', 'w-3.5 h-3.5')} Obsidian</button><button type="button" class="btn btn-sm" data-action="recToGrocery" data-id="${r.id}">${icon('shopping-cart', 'w-3.5 h-3.5')} Grocery</button>${r.freezer ? `<button type="button" class="btn btn-sm" data-action="cookFreeze" data-id="${r.id}">${icon('snowflake', 'w-3.5 h-3.5')} Cook & freeze</button>` : ''}<button type="button" class="btn btn-sm" data-action="recEdit" data-id="${r.id}">${icon('pencil', 'w-3.5 h-3.5')} Edit</button><button type="button" class="btn btn-sm btn-primary" data-action="cookStart" data-id="${r.id}">${icon('chef-hat', 'w-3.5 h-3.5')} Cook</button>`), { wide: true });
   hydratePhotos();
@@ -5263,7 +5430,15 @@ function parseRecipeText(text) {
   const all = lines.join('\n'), sv = all.match(/(?:serves|servings?|yield|makes)\s*:?\s*(\d+)/i), tm = all.match(/total time:?\s*(?:(\d+)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i);
   return { title: title.slice(0, 120), ingredients: ings.filter(l => !/^(serves|servings?|yield|prep time|cook time|total time)/i.test(l)).join('\n'), steps: steps.join('\n'), servings: sv ? +sv[1] : 4, time: tm && (tm[1] || tm[2]) ? (+tm[1] || 0) * 60 + (+tm[2] || 0) : '', tags: [], notes: '' };
 }
-function parseRecipeClip(text) { try { const d = JSON.parse(String(text || '').trim()); return d && d.ldRecipe ? d : null; } catch (e) { return null; } }
+function parseRecipeClip(text) {
+  try {
+    const d = JSON.parse(String(text || '').trim()); validateJsonTree(d);
+    if (!plainObject(d) || !d.ldRecipe || !Array.isArray(d.ingredients) || !d.ingredients.every(s => typeof s === 'string') || (d.steps != null && (!Array.isArray(d.steps) || !d.steps.every(s => typeof s === 'string')))) return null;
+    for (const key of ['title', 'url', 'image', 'category', 'cuisine', 'description', 'site', 'author']) if (d[key] != null && typeof d[key] !== 'string') return null;
+    if (d.nutrition != null && !plainObject(d.nutrition)) return null;
+    return d;
+  } catch (e) { return null; }
+}
 
 // ---------- Actions ----------
 const recSaveNow = r => { r.updated = new Date().toISOString(); Store.save('recipes'); };
@@ -5972,36 +6147,25 @@ const A = {
   // settings & sync
   openSettings, exportAll,
   importAll: () => pickFile('.json,application/json', text => {
-    let d; try { d = JSON.parse(text); } catch (e) { return toast('That file is not valid JSON', 'error'); }
-    if (!d || typeof d.data !== 'object') return toast("This doesn't look like a Life Dashboard backup", 'error');
+    ui.pendingImport = null;
+    let d; try { d = parseBackup(text); } catch (e) { return toast(e.message, 'error'); }
     ui.pendingImport = d;
     const counts = Object.entries(d.data).filter(([k, v]) => k in COLLECTIONS && v != null).map(([k, v]) => `<span class="chip">${esc(k)}: ${Array.isArray(v) ? v.length : typeof v === 'object' ? Object.keys(v).length : 1}</span>`).join(' '),
       photos = d.assets && Array.isArray(d.assets.photos) ? d.assets.photos.length : null;
     Modal.open(modalShell('Import backup', `<p class="text-sm">Backup from <strong>${d.exportedAt ? fmtDateTime(d.exportedAt) : 'an unknown date'}</strong>.</p><div class="flex flex-wrap gap-1">${counts}</div>
       <p class="text-sm muted">${photos == null ? 'Legacy backup: it does not contain photos, so your existing photos will be kept.' : `${photos} photo${photos === 1 ? '' : 's'} included.`}</p>
-      <p class="text-sm muted"><strong>Merge</strong> keeps your current data and adds or updates items from the file. <strong>Replace</strong> erases what's here first and restores the file exactly.</p>`,
+      <p class="text-sm muted"><strong>Merge</strong> keeps your current data and adds or updates items from the file. <strong>Replace</strong> restores personal records and included photos. Device API keys and downloaded reference libraries are kept.</p>`,
       `<button type="button" class="btn" data-action="closeModal">Cancel</button><button type="button" class="btn" data-action="doImport" data-mode="merge">Merge</button><button type="button" class="btn btn-danger" data-action="doImport" data-mode="replace">Replace everything</button>`));
-  }),
+  }, BACKUP_LIMIT),
   doImport: async el => {
-    const d = ui.pendingImport, mode = el.dataset.mode; if (!d) return;
-    if (mode === 'replace' && !confirm('Replace ALL current data with this backup? This cannot be undone.')) return;
-    for (const k of Object.keys(COLLECTIONS)) {
-      const has = k in d.data, inc = d.data[k], cur = Store.data[k];
-      if (k === 'photoMeta' && !has && !(d.assets && Array.isArray(d.assets.photos))) continue;
-      if (mode === 'replace') { Store.data[k] = has ? inc : structuredClone(COLLECTIONS[k]); continue; }
-      if (!has || inc == null) continue;
-      if (k === 'activeWorkout') { if (!cur) Store.data[k] = inc; continue; }
-      if (cur == null) { Store.data[k] = inc; continue; }
-      if (Array.isArray(cur) && Array.isArray(inc)) {
-        if (inc.every(x => x && typeof x === 'object' && 'id' in x)) { const m = new Map(cur.map(x => [x.id, x])); inc.forEach(x => m.set(x.id, x)); Store.data[k] = [...m.values()]; }
-        else Store.data[k] = [...new Set([...cur, ...inc])];
-      } else if (k === 'nutrition') {
-        for (const [dt, v] of Object.entries(inc)) { const c = cur[dt]; if (!c) cur[dt] = v; else { const m = new Map((c.entries || []).map(x => [x.id, x])); (v.entries || []).forEach(x => m.set(x.id, x)); c.entries = [...m.values()]; if (v.weight != null) c.weight = v.weight; } }
-      } else if (typeof cur === 'object' && typeof inc === 'object') Object.assign(cur, inc);
-    }
-    if (d.assets && Array.isArray(d.assets.photos)) await restoreBackupPhotos(d.assets.photos, mode);
-    if (mode === 'replace' && d.settings) { const keep = { esvKey: S.esvKey, fdcKey: S.fdcKey, aiKey: S.aiKey, view: S.view, collapsed: S.collapsed }; S = { ...SETTINGS_DEFAULT, ...d.settings, ...keep, targets: { ...SETTINGS_DEFAULT.targets, ...(d.settings.targets || {}) } }; saveSettings(); applyTheme(); }
-    ensureSeeds(); sortWorkouts(); await Store.flushAll(); ui.pendingImport = null; Modal.close(); toast(mode === 'replace' ? 'Backup restored' : 'Backup merged'); render();
+    const d = ui.pendingImport, mode = el.dataset.mode; if (!d || ui.importing) return;
+    let plan; try { plan = planBackupImport(d, mode); } catch (e) { return toast('Import stopped: ' + e.message, 'error'); }
+    if (mode === 'replace' && !confirm('Replace current personal records and included photos with this backup? This cannot be undone.')) return;
+    ui.importing = true;
+    try { await commitBackupImport(plan); }
+    catch (e) { return toast('Import was not saved: ' + e.message, 'error'); }
+    finally { ui.importing = false; }
+    ensureSeeds(); sortWorkouts(); ui.pendingImport = null; Modal.close(); toast(mode === 'replace' ? 'Backup restored' : 'Backup merged'); render();
   },
   persistStorage: async () => { try { const ok = await navigator.storage.persist(); toast(ok ? 'Browser will keep your data ✓' : 'Browser declined — keep exporting backups', ok ? 'ok' : 'error'); } catch (e) { toast('Not supported in this browser', 'error'); } },
   enableNotifications: async () => { if (!('Notification' in window)) return toast('Notifications not supported here', 'error'); const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Notifications enabled' : 'Notifications blocked', p === 'granted' ? 'ok' : 'error'); },

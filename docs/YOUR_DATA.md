@@ -19,6 +19,10 @@ Everything you've entered lives in **Chrome's storage for the place the app is o
 
 Version 2 backups include all personal records and the photo files stored by Life Dashboard. API keys are intentionally excluded. Legacy version 1 backups did not contain photos; importing one preserves photos already stored in the destination browser.
 
+Imports accept Life Dashboard version 1 or 2 JSON files up to 256 MB. The app checks collection types, settings, photo payloads, duplicate identifiers and unsafe object keys before making changes. Missing older collections receive their defaults; unknown collection names are ignored.
+
+With IndexedDB available, records and photos are saved in one transaction. If that transaction fails, the previous records and photos remain in place and the app reports the failure. Browser-local API keys are preserved during restore. The localStorage fallback cannot restore photo files.
+
 ## What a backup does *not* include
 
 These live on the device. You redo them once on any new origin or device:
