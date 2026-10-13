@@ -161,3 +161,68 @@ test('one entry can add several tasks, dated from the first with + and −', asy
   expect(await page.evaluate(() => parseTaskBlocks('Start the project | First review +2').map(p => p.due && daysBetween(ymd(), p.due)))).toEqual([null, 2]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('the Repeat box beside Add makes every task in the entry repeat', async ({ page }) => {
+  const { errors } = await open(page);
+  await page.evaluate(() => { ui.taskTab = 'today'; go('tasks'); });
+  const form = page.locator('form[data-submit="taskAdd"]'), preview = page.locator('#nl-prev');
+  await expect(page.locator('#add-rep')).toBeHidden();
+
+  // Ticking it keeps what was typed and shows the choices.
+  await page.fill('#nl-in', 'Water the plants | Take out the trash +1 | Stretch every weekday');
+  await form.getByLabel('Repeat', { exact: true }).check();
+  await expect(page.locator('#nl-in')).toHaveValue('Water the plants | Take out the trash +1 | Stretch every weekday');
+  await expect(page.locator('#add-rep')).toBeVisible();
+  await expect(page.locator('#add-rep-custom')).toBeHidden();
+  await expect(preview).toContainText('weekly');
+  await form.locator('button.btn-primary').click();
+  let tasks = await page.evaluate(() => TK().map(t => [t.title, t.repeat, daysBetween(ymd(), t.due)]));
+  expect(tasks[0]).toEqual(['Water the plants', { freq: 'week', n: 1 }, 0]); // no date given, so it starts today
+  expect(tasks[1]).toEqual(['Take out the trash', { freq: 'week', n: 1 }, 1]);
+  expect(tasks[2][1]).toEqual({ freq: 'weekday', n: 1 }); // its own repeat wins
+  // The box clears after adding, so the next task does not repeat by accident.
+  await expect(form.getByLabel('Repeat', { exact: true })).not.toBeChecked();
+  await page.fill('#nl-in', 'One-off errand tomorrow');
+  await form.locator('button.btn-primary').click();
+  expect(await page.evaluate(() => TK().at(-1).repeat)).toBeUndefined();
+
+  // Custom: every 3 days.
+  await page.fill('#nl-in', 'Refill the feeder');
+  await form.getByLabel('Repeat', { exact: true }).check();
+  await form.locator('select[name="repKind"]').selectOption('custom');
+  await expect(page.locator('#add-rep-custom')).toBeVisible();
+  await form.locator('input[name="repN"]').fill('3');
+  await form.locator('select[name="repUnit"]').selectOption('day');
+  await expect(preview).toContainText('every 3 days');
+  await form.locator('button.btn-primary').click();
+  const feeder = await page.evaluate(() => { const t = TK().at(-1); return { id: t.id, repeat: t.repeat }; });
+  expect(feeder.repeat).toEqual({ freq: 'day', n: 3 });
+
+  // Opening and saving that task keeps the custom interval, and completing it schedules three days on.
+  await page.evaluate(id => taskModal(tFind(id)), feeder.id);
+  await expect(page.locator('#modal select[name="repeat"]')).toHaveValue('day:3');
+  await page.click('#modal button:has-text("Save")');
+  expect(await page.evaluate(id => tFind(id).repeat, feeder.id)).toEqual({ freq: 'day', n: 3 });
+  expect(await page.evaluate(id => { setTaskStatus(tFind(id), 'done'); return daysBetween(ymd(), TK().at(-1).due); }, feeder.id)).toBe(3);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('the rules for adding tasks can be shown under the box and stay shown', async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => { ui.taskTab = 'today'; go('tasks'); });
+  const rules = page.locator('#task-rules');
+  await expect(rules).toBeHidden();
+  await page.fill('#nl-in', 'Half-typed task');
+  await page.getByRole('button', { name: 'Show the rules for adding tasks' }).click();
+  await expect(rules).toBeVisible();
+  await expect(rules).toContainText('starts a new task');
+  await expect(rules).toContainText('is the day after the first task');
+  await expect(rules).toContainText('A task with no date goes to the Inbox');
+  await expect(page.locator('#nl-in')).toHaveValue('Half-typed task');
+  await page.reload();
+  await page.waitForFunction(() => typeof Store !== 'undefined' && Store.data && Array.isArray(Store.data.tasks));
+  await page.evaluate(() => { ui.taskTab = 'today'; go('tasks'); });
+  await expect(page.locator('#task-rules')).toBeVisible();
+  await page.getByRole('button', { name: 'Hide the rules for adding tasks' }).click();
+  await expect(page.locator('#task-rules')).toBeHidden();
+});

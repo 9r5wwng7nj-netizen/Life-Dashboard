@@ -161,7 +161,7 @@ const SETTINGS_DEFAULT = {
   name: '', theme: 'system', unit: 'lbs', restSeconds: 90, timerSound: true,
   targets: { cal: 2400, p: 180, c: 240, f: 75 },
   translation: 'web', esvKey: '', collapsed: false, view: 'dashboard', lastExport: null,
-  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: '', tour: '', newsSeen: ''
+  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: '', tour: '', newsSeen: '', taskHelp: false
 };
 let S = loadSettings();
 function loadSettings() {
@@ -5975,12 +5975,14 @@ const minToHm = m => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
 
 // recurrence
 const REPEAT_OPTS = [['', 'Doesn’t repeat'], ['day', 'Every day'], ['weekday', 'Every weekday'], ['week', 'Every week'], ['week2', 'Every 2 weeks'], ['month', 'Every month (same date)'], ['monthNth', 'Every month (same weekday, e.g. 2nd Tue)'], ['year', 'Every year']];
-const repeatKey = r => !r ? '' : r.freq === 'week' && r.n === 2 ? 'week2' : r.freq;
-const repeatFromKey = k => !k ? null : k === 'week2' ? { freq: 'week', n: 2 } : { freq: k, n: 1 };
+const repeatKey = r => !r ? '' : (r.n || 1) === 1 ? r.freq : r.freq === 'week' && r.n === 2 ? 'week2' : `${r.freq}:${r.n}`;
+const repeatFromKey = k => !k ? null : k === 'week2' ? { freq: 'week', n: 2 } : k.includes(':') ? { freq: k.split(':')[0], n: +k.split(':')[1] || 1 } : { freq: k, n: 1 };
+// Options for a repeat dropdown; a custom interval that is not in the list is shown so saving keeps it.
+const repeatOptions = (r, due, opts = REPEAT_OPTS) => { const key = repeatKey(r); return opts.map(([k, l]) => `<option value="${k}" ${key === k ? 'selected' : ''}>${l}</option>`).join('') + (key && !opts.some(([k]) => k === key) ? `<option value="${key}" selected>Custom: ${repeatLabel(r, due)}</option>` : ''); };
 const NTH = ['1st', '2nd', '3rd', '4th', 'last'], WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 function repeatLabel(r, due) {
   if (!r) return ''; const d = due ? parseYmd(due) : new Date(), n = r.n || 1;
-  return { day: n > 1 ? `every ${n} days` : 'daily', weekday: 'weekdays', week: n > 1 ? `every ${n} weeks${due ? ` (${WD[d.getDay()].slice(0, 3)})` : ''}` : `weekly${due ? ` on ${WD[d.getDay()].slice(0, 3)}` : ''}`, month: `monthly${due ? ` on the ${d.getDate()}${['th', 'st', 'nd', 'rd'][(d.getDate() % 100 > 10 && d.getDate() % 100 < 14) ? 0 : Math.min(d.getDate() % 10, 4) % 4] || 'th'}` : ''}`, monthNth: due ? `${NTH[Math.min(4, Math.ceil(d.getDate() / 7) - 1)]} ${WD[d.getDay()].slice(0, 3)} monthly` : 'monthly', year: 'yearly' }[r.freq] || '';
+  return { day: n > 1 ? `every ${n} days` : 'daily', weekday: 'weekdays', week: n > 1 ? `every ${n} weeks${due ? ` (${WD[d.getDay()].slice(0, 3)})` : ''}` : `weekly${due ? ` on ${WD[d.getDay()].slice(0, 3)}` : ''}`, month: n > 1 ? `every ${n} months` : `monthly${due ? ` on the ${d.getDate()}${['th', 'st', 'nd', 'rd'][(d.getDate() % 100 > 10 && d.getDate() % 100 < 14) ? 0 : Math.min(d.getDate() % 10, 4) % 4] || 'th'}` : ''}`, monthNth: due ? `${NTH[Math.min(4, Math.ceil(d.getDate() / 7) - 1)]} ${WD[d.getDay()].slice(0, 3)} monthly` : 'monthly', year: n > 1 ? `every ${n} years` : 'yearly' }[r.freq] || '';
 }
 function nthWeekday(y, m, wd, nth) { if (nth >= 5) { const last = new Date(y, m + 1, 0); return new Date(y, m, last.getDate() - ((last.getDay() - wd + 7) % 7)); } const first = new Date(y, m, 1); return new Date(y, m, 1 + ((wd - first.getDay() + 7) % 7) + (nth - 1) * 7); }
 function nextDue(r, from) {
@@ -6084,20 +6086,28 @@ function parseTaskBlocks(raw) {
     return p;
   })].filter(p => p.title);
 }
-function nlPreviewHtml(s) {
+function nlPreviewHtml(s, rep = null) {
   if (!s || !s.trim()) return '';
-  const blocks = parseTaskBlocks(s);
+  const blocks = parseTaskBlocks(s); if (blocks) blocks.forEach(p => applyRepeat(p, rep));
   if (blocks) return `<div class="w-full space-y-1"><div class="muted text-xs">${blocks.length} tasks${blocks[0].due ? '' : ' · the first has no date, so + and − count from today'}</div>${blocks.map((p, i) => `<div class="flex flex-wrap items-center gap-1"><span class="muted">${i + 1}.</span> <strong>${esc(p.title)}</strong> ${nlBits(p).map(b => `<span class="chip text-[11px]">${b}</span>`).join(' ')}${p.due || p.someday ? '' : '<span class="chip text-[11px] bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">No date · goes to the Inbox</span>'}</div>`).join('')}</div>`;
-  const p = parseTaskInput(s), bits = nlBits(p);
+  const p = applyRepeat(parseTaskInput(s), rep), bits = nlBits(p);
   return bits.length ? `<span class="muted">→</span> <strong>${esc(p.title)}</strong> ${bits.map(b => `<span class="chip text-[11px]">${b}</span>`).join(' ')}` : '';
 }
 function nlBits(p) {
   return [p.due ? `📅 ${daysBetween(ymd(), p.due) === 0 ? 'Today' : daysBetween(ymd(), p.due) === 1 ? 'Tomorrow' : fmtDate(p.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : '', p.time ? `🕒 ${fmtTime(p.time)}` : '', p.repeat ? `🔁 ${repeatLabel(p.repeat, p.due)}` : '', p.project ? `📁 ${esc(p.project)}${Store.get('projects').some(x => x.name.toLowerCase().replace(/\s+/g, '').startsWith(p.project.toLowerCase().replace(/\s+/g, ''))) ? '' : ' (new)'}` : '', p.person ? `👤 ${esc(p.person)}` : '', p.est ? `⏱ ${p.est}m` : '', p.someday ? '💭 Someday' : '', p.pri ? `! ${PRI[p.pri][0]}` : '', ...p.tags.map(t => `#${esc(t)}`)].filter(Boolean);
 }
 function findOrMakeProject(name, area) { if (!name) return null; const key = name.toLowerCase().replace(/\s+/g, ''), ps = Store.get('projects'); let p = ps.find(x => x.name.toLowerCase().replace(/\s+/g, '') === key) || ps.find(x => x.status !== 'done' && x.name.toLowerCase().replace(/\s+/g, '').startsWith(key)); if (!p) { p = { id: uid(), name: name.replace(/\b\w/g, c => c.toUpperCase()), area: area || null, status: 'active', notes: '', due: null, created: new Date().toISOString() }; ps.push(p); Store.save('projects'); } return p.id; }
-function addTask(raw, extra = {}) { return addParsedTask(parseTaskInput(raw), extra); }
+function addTask(raw, extra = {}) { return addParsedTask(applyRepeat(parseTaskInput(raw), extra.repeat), extra); }
 // One entry may hold several tasks (see parseTaskBlocks). Returns the tasks that were added.
-function addTasks(raw, extra = {}) { const blocks = parseTaskBlocks(raw); return (blocks ? blocks.map(p => addParsedTask(p, extra)) : [addTask(raw, extra)]).filter(Boolean); }
+function addTasks(raw, extra = {}) { const blocks = parseTaskBlocks(raw); return (blocks ? blocks.map(p => addParsedTask(applyRepeat(p, extra.repeat), extra)) : [addTask(raw, extra)]).filter(Boolean); }
+// The Repeat tick box beside Add: gives the repeat to every task that has none of its own. A repeat
+// needs a date to count from, so an undated task starts today.
+function applyRepeat(p, rep) { if (rep && !p.repeat && !p.someday) { p.repeat = { ...rep }; if (!p.due) p.due = ymd(); } return p; }
+function addRepeatFrom(f) {
+  if (!f || !f.rep || !f.rep.checked) return null;
+  if (f.repKind.value !== 'custom') return { freq: f.repKind.value, n: 1 };
+  return { freq: f.repUnit.value, n: Math.max(1, Math.min(365, Math.round(+f.repN.value) || 1)) };
+}
 function addParsedTask(p, extra = {}) {
   if (!p.title) return null;
   const tags = [...new Set([...p.tags, ...(extra.tags || [])])];
@@ -6242,9 +6252,24 @@ function taskRow(t, o = {}) {
 function renderTasks() {
   const nInbox = TK().filter(isInbox).length, notif = 'Notification' in window && Notification.permission !== 'granted';
   const view = { today: tasksToday, inbox: tasksInbox, upcoming: tasksUpcoming, all: tasksAll, projects: tasksProjects, people: tasksPeople, someday: tasksSomeday, plan: tasksPlan, templates: tasksTemplates, stats: tasksStats }[ui.taskTab] || tasksToday;
-  return `<form class="card mb-4" data-submit="taskAdd"><div class="flex gap-2"><input id="nl-in" name="title" class="input flex-1" placeholder="Add a task — try “Coffee with Jake fri at 9 ~Jake #ministry”" autocomplete="off" required data-input="nlPrev"><button class="btn btn-primary">${icon('plus')} Add</button></div>
+  return `<form class="card mb-4" data-submit="taskAdd"><div class="flex flex-wrap gap-2"><input id="nl-in" name="title" class="input flex-1 min-w-[12rem]" placeholder="Add a task — try “Coffee with Jake fri at 9 ~Jake #ministry”" autocomplete="off" required data-input="nlPrev">
+        <div class="flex items-center gap-3 ml-auto"><label class="flex items-center gap-1.5 text-sm whitespace-nowrap"><input type="checkbox" name="rep" value="1" class="w-4 h-4 accent-brand-600" data-change="addRep"> Repeat</label><button class="btn btn-primary">${icon('plus')} Add</button></div></div>
+      <div id="add-rep" class="hidden flex-wrap items-center gap-2 mt-2 text-sm"><select name="repKind" class="input w-auto" data-change="addRep" aria-label="How often it repeats"><option value="day">Daily</option><option value="week" selected>Weekly</option><option value="month">Monthly</option><option value="custom">Custom…</option></select>
+        <span id="add-rep-custom" class="hidden items-center gap-2">Every <input type="number" name="repN" min="1" max="365" value="2" class="input w-20" data-input="addRep" aria-label="Repeat every this many"><select name="repUnit" class="input w-auto" data-change="addRep" aria-label="Days, weeks, months or years"><option value="day">days</option><option value="week" selected>weeks</option><option value="month">months</option><option value="year">years</option></select></span>
+        <span class="text-xs muted">Every task in this entry will repeat.</span></div>
       <div id="nl-prev" class="text-sm mt-2 flex flex-wrap items-center gap-1 empty:hidden"></div>
-      <details class="text-xs muted mt-2"><summary class="cursor-pointer list-none">${icon('sparkles', 'w-3 h-3 inline -mt-0.5')} Type it the way you’d say it</summary><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code></span><span><code>for 45m</code> time estimate · <code>someday</code></span><span class="sm:col-span-2">Several at once: <code>Meet Sam wed at 3 | text Sam today | follow up +1 | check in +1w</code> — <code>|</code> starts a new task; <code>+1</code> and <code>-1</code> are days after or before the first task’s date.</span></div></details></form>
+      <button type="button" class="text-xs muted mt-2 inline-flex items-center gap-1 hover:underline" data-action="taskHelp" aria-expanded="${!!S.taskHelp}" aria-controls="task-rules">${icon('info', 'w-3 h-3')} <span id="task-rules-label">${S.taskHelp ? 'Hide' : 'Show'} the rules for adding tasks</span></button>
+      <div id="task-rules" class="text-xs muted mt-2 space-y-3 ${S.taskHelp ? '' : 'hidden'}">
+        <div><div class="font-semibold mb-1">One task: type it the way you’d say it</div><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code></span><span><code>for 45m</code> time estimate · <code>someday</code></span></div></div>
+        <div><div class="font-semibold mb-1">Several tasks in one entry</div><ul class="list-disc pl-5 space-y-1">
+          <li><code>|</code> starts a new task.</li>
+          <li>The first task sets the starting date.</li>
+          <li><code>+1</code> is the day after the first task and <code>-1</code> the day before. Any number works, and <code>+1w</code> is a week.</li>
+          <li>A later task can use its own date instead: <code>today</code>, <code>fri</code>, <code>12/20</code>.</li>
+          <li>Later tasks copy the first task’s <code>~Person</code>, <code>+Project</code> and <code>#tags</code> unless you give them their own.</li>
+          <li>A task with no date goes to the Inbox.</li>
+          <li>Tick <strong>Repeat</strong> to make every task in the entry repeat: daily, weekly, monthly, or a custom number of days, weeks, months or years.</li></ul>
+          <p class="mt-2">Example: <code>Meet Sam wed at 3pm ~Sam #work | Text Sam to confirm today | Follow up +1 | Check in +1w</code></p></div></div></form>
     <div class="flex flex-wrap items-center gap-1.5 mb-3"><button class="chip ${!ui.taskArea ? 'chip-on' : ''}" data-action="taskAreaSet" data-v="">All areas</button>${AREAS.map(([k, l, ic]) => `<button class="chip ${ui.taskArea === k ? 'chip-on' : ''}" data-action="taskAreaSet" data-v="${k}"><span class="w-2 h-2 rounded-full ${AREA_CLS[k]}"></span> ${l}</button>`).join('')}<span class="flex-1"></span>${notif ? `<button class="btn btn-sm btn-ghost" data-action="enableNotifications">${icon('bell', 'w-3.5 h-3.5')} Turn on reminders</button>` : ''}<button class="btn btn-sm ${ui.taskSel ? 'chip-on' : ''}" aria-pressed="${!!ui.taskSel}" data-action="selToggle">${icon('list-checks', 'w-3.5 h-3.5')} ${ui.taskSel ? 'Selecting' : 'Select'}</button></div>
     ${tabs('taskTab', [['today', 'Today', 'sun'], ['inbox', `Inbox${nInbox ? ` (${nInbox})` : ''}`, 'inbox'], ['upcoming', 'Upcoming', 'calendar-range'], ['all', 'All tasks', 'kanban'], ['projects', 'Projects', 'folder-kanban'], ['people', 'People', 'users'], ['someday', 'Someday', 'archive'], ['plan', 'Plan week', 'calendar-check'], ['templates', 'Templates', 'layout-template'], ['stats', 'Stats', 'chart-column']])}
     ${view()}${ui.taskSel ? taskBulkBar() : ''}`;
@@ -6312,7 +6337,7 @@ function projDetail(p) {
       ${dn.length ? `<details class="mt-3"><summary class="text-xs muted cursor-pointer list-none">Done · ${dn.length}</summary><div class="space-y-2 mt-2">${dn.map(x => taskRow(x)).join('')}</div></details>` : ''}</div></div>
     <div class="card space-y-3 h-fit"><div class="grid grid-cols-2 gap-2"><div><label class="label">Area</label><select class="input" data-change="projField" data-id="${p.id}" data-f="area"><option value="">None</option>${AREAS.map(([k, l]) => `<option value="${k}" ${p.area === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Status</label><select class="input" data-change="projField" data-id="${p.id}" data-f="status">${[['active', 'Active'], ['paused', 'Paused'], ['done', 'Done']].map(([k, l]) => `<option value="${k}" ${(p.status || 'active') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
       <div><label class="label">Due</label><input type="date" class="input" value="${p.due || ''}" data-change="projField" data-id="${p.id}" data-f="due"></div>
-      <div><label class="label">Repeat</label><select class="input" data-change="projRepeat" data-id="${p.id}">${PROJ_REPEATS.map(([k, l]) => `<option value="${k}" ${repeatKey(p.repeat) === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <div><label class="label">Repeat</label><select class="input" data-change="projRepeat" data-id="${p.id}">${repeatOptions(p.repeat, p.due, PROJ_REPEATS)}</select>
         <p class="text-xs muted mt-1">${p.repeat ? (p.nextMade && projFind(p.nextMade) ? `The next round is ready: <button type="button" class="underline" data-action="projOpen" data-id="${p.nextMade}">${esc(projFind(p.nextMade).name)}</button>.` : `Repeats ${repeatLabel(p.repeat, p.due)}. The next round appears on the due date, or sooner if you finish every task, with each task moved forward.`) : 'Turn this on for anything you do on a schedule. Each round copies every task and moves its date forward.'}</p></div>
       <div><label class="label">Notes</label><textarea class="input text-sm" rows="6" data-change="projField" data-id="${p.id}" data-f="notes" placeholder="Goal, key people, links…">${esc(p.notes || '')}</textarea></div>
       <p class="text-xs muted">${ts.length ? `${dn.length} of ${ts.length} done · ${Math.round(dn.length / ts.length * 100)}%` : 'No tasks yet'}</p></div></div>`;
@@ -6394,7 +6419,7 @@ function taskModal(t) {
   Modal.open(modalShell('Edit task', `<input type="hidden" name="id" value="${t.id}">
     <div><label class="label">Task</label><input name="title" class="input" value="${esc(t.title)}" required></div>
     <div><label class="label">Notes</label><textarea name="notes" class="input" rows="3">${esc(t.notes || '')}</textarea></div>
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Due</label><input type="date" name="due" class="input" value="${t.due || ''}"></div><div><label class="label">Time</label><input type="time" name="time" class="input" value="${t.time || ''}"></div><div><label class="label">Repeat</label><select name="repeat" class="input">${REPEAT_OPTS.map(([k, l]) => `<option value="${k}" ${repeatKey(t.repeat) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Reminder</label><select name="remind" class="input">${REMIND_OPTS.map(([k, l]) => `<option value="${k}" ${String(t.remind ?? '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Due</label><input type="date" name="due" class="input" value="${t.due || ''}"></div><div><label class="label">Time</label><input type="time" name="time" class="input" value="${t.time || ''}"></div><div><label class="label">Repeat</label><select name="repeat" class="input">${repeatOptions(t.repeat, t.due)}</select></div><div><label class="label">Reminder</label><select name="remind" class="input">${REMIND_OPTS.map(([k, l]) => `<option value="${k}" ${String(t.remind ?? '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Status</label><select name="status" class="input">${STATUSES.map(([k, l]) => `<option value="${k}" ${t.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Priority</label><select name="priority" class="input">${Object.entries(PRI).map(([k, [l]]) => `<option value="${k}" ${(t.priority || 'med') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Area</label><select name="area" class="input"><option value="">${!t.area && areaOf(t) ? `Auto (${areaLabel(areaOf(t))})` : 'None'}</option>${AREAS.map(([k, l]) => `<option value="${k}" ${t.area === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Estimate (min)</label><input type="number" name="est" min="0" step="5" class="input" value="${t.est || ''}"></div></div>
     <div class="grid grid-cols-2 gap-2"><div><label class="label">Project</label><select name="project" class="input"><option value="">None</option>${ps.map(p => `<option value="${p.id}" ${t.project === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div><div><label class="label">Person</label><input name="person" class="input" value="${esc(t.person || '')}" list="ppl-list-m" placeholder="Follow-up with…"><datalist id="ppl-list-m">${knownPeople().map(n => `<option value="${esc(n)}">`).join('')}</datalist></div></div>
     <div class="flex flex-wrap gap-4 text-sm"><label class="flex items-center gap-2"><input type="checkbox" name="waiting" value="1" class="accent-brand-600" ${t.waiting ? 'checked' : ''}> Waiting on them</label><label class="flex items-center gap-2"><input type="checkbox" name="someday" value="1" class="accent-brand-600" ${t.someday ? 'checked' : ''}> Someday</label></div>
@@ -6424,13 +6449,19 @@ function blkModal(b, d) {
 const nextHalfHour = () => { const n = new Date(), m = n.getHours() * 60 + n.getMinutes(); return Math.min(H1 * 60 - 30, Math.max(H0 * 60, Math.ceil(m / 30) * 30)); };
 const A_TASKS = {
   taskAdd: f => {
-    const v = fd(f), ctx = { area: ui.taskArea || undefined, project: ui.taskTab === 'projects' && ui.projOpen ? ui.projOpen : undefined, someday: ui.taskTab === 'someday' || undefined };
+    const v = fd(f), ctx = { area: ui.taskArea || undefined, project: ui.taskTab === 'projects' && ui.projOpen ? ui.projOpen : undefined, someday: ui.taskTab === 'someday' || undefined, repeat: addRepeatFrom(f) };
     const added = addTasks(v.title, ctx), t = added[0]; if (!t) return;
     if (added.length > 1) { const loose = added.filter(isInbox).length; toast(`Added ${added.length} tasks${loose ? ` · ${loose} in the Inbox` : ''}`); render(); setTimeout(() => $('#nl-in')?.focus(), 30); return; }
     toast(`Added “${t.title}”${t.due ? ` · ${daysBetween(ymd(), t.due) === 0 ? 'today' : daysBetween(ymd(), t.due) === 1 ? 'tomorrow' : fmtDate(t.due, { weekday: 'short', month: 'short', day: 'numeric' })}${t.time ? ` ${fmtTime(t.time)}` : ''}` : isInbox(t) ? ' · Inbox' : ''}`);
     render(); setTimeout(() => $('#nl-in')?.focus(), 30);
   },
-  nlPrev: el => { const p = $('#nl-prev'); if (p) p.innerHTML = nlPreviewHtml(el.value); },
+  nlPrev: el => { const p = $('#nl-prev'); if (p) p.innerHTML = nlPreviewHtml(el.value, addRepeatFrom(el.closest('form'))); },
+  // These change the form in place (no redraw), so what has been typed is never lost.
+  addRep: el => {
+    const f = el.closest('form'), on = f.rep.checked, show = (x, yes) => { x.classList.toggle('hidden', !yes); x.classList.toggle('flex', yes); };
+    show($('#add-rep'), on); show($('#add-rep-custom'), on && f.repKind.value === 'custom'); A.nlPrev($('#nl-in'));
+  },
+  taskHelp: el => { S.taskHelp = !S.taskHelp; saveSettings(); $('#task-rules').classList.toggle('hidden', !S.taskHelp); el.setAttribute('aria-expanded', String(S.taskHelp)); $('#task-rules-label').textContent = S.taskHelp ? 'Hide the rules for adding tasks' : 'Show the rules for adding tasks'; },
   goTaskTab: el => { ui.taskTab = el.dataset.tab; go('tasks'); },
   goWeekPlan: () => { ui.taskTab = 'plan'; ui.planWk = null; Modal.close(); go('tasks'); },
   taskAreaSet: el => { ui.taskArea = el.dataset.v || null; render(); },
@@ -6615,8 +6646,8 @@ const A_HOME = {
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
   { id: '2026-10-13', title: 'Several tasks from one entry, repeating projects and bulk changes', slides: [
-    { title: 'Add several tasks in one go', img: '2026-10-multi-task.png', alt: 'The add-task box with four tasks separated by bars, and a preview listing each with its date.',
-      body: '<p>In the add-task box, put <strong>|</strong> between tasks to add them together. The first task sets the starting date; on the others, <strong>+1</strong> means the day after it and <strong>-1</strong> the day before (<strong>+1w</strong> for a week). A preview shows each task and its date before you add them, and flags any without a date.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] },
+    { title: 'Add several tasks in one go', img: '2026-10-multi-task.png', alt: 'The add-task box with a Repeat tick box beside Add, and a preview listing four tasks with their dates.',
+      body: '<p>In the add-task box, put <strong>|</strong> between tasks to add them together. The first task sets the starting date; on the others, <strong>+1</strong> means the day after it and <strong>-1</strong> the day before (<strong>+1w</strong> for a week). A preview shows each task and its date before you add them, and flags any without a date. Tick <strong>Repeat</strong> beside Add to make them repeat, and tap <strong>Show the rules for adding tasks</strong> under the box for a reminder of how it all works.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] },
     { title: 'Projects can repeat', img: '2026-10-project-repeat.png', alt: 'A project’s settings with Repeat set to every week and a note about the next round.',
       body: '<p>Open a project and set <strong>Repeat</strong>. When its due date arrives, or sooner if you finish every task, the next round is created with each task moved forward. You can also choose a repeat when you use a template.</p>', go: ['tasks', 'taskTab', 'projects', 'Open Projects'] },
     { title: 'Change many tasks at once', img: '2026-10-task-select.png', alt: 'Two tasks ticked, with a bar offering To do, In progress, Done, Today, Tomorrow, Someday, Area and Delete.',
