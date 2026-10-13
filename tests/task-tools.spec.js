@@ -132,3 +132,32 @@ test('select mode works in the Inbox and ends when leaving Tasks', async ({ page
   await page.evaluate(() => go('dashboard'));
   expect(await page.evaluate(() => ui.taskSel)).toBeNull();
 });
+
+test('one entry can add several tasks, dated from the first with + and −', async ({ page }) => {
+  const { errors } = await open(page);
+  await page.evaluate(() => { ui.taskTab = 'today'; go('tasks'); });
+  const entry = 'Meeting with Zach 12/20 at 3:30pm ~Zach #work | Text Zach to confirm today | Bring the handout -1 | Follow up on next steps +1 at 9am | Check in on progress +1w | Send the recap 12/24 #home | Think about a gift';
+  await page.fill('#nl-in', entry);
+  const preview = page.locator('#nl-prev');
+  await expect(preview).toContainText('7 tasks');
+  await expect(preview).toContainText('No date · goes to the Inbox');
+  await page.click('form[data-submit="taskAdd"] button.btn-primary');
+
+  const year = await page.evaluate(() => { const now = new Date(), d = new Date(now.getFullYear(), 11, 20); return ymd(d) < ymd() ? now.getFullYear() + 1 : now.getFullYear(); });
+  const tasks = await page.evaluate(() => TK().map(t => ({ title: t.title, due: t.due, time: t.time || null, person: t.person || null, tags: t.tags, inbox: isInbox(t) })));
+  expect(tasks).toEqual([
+    { title: 'Meeting with Zach', due: `${year}-12-20`, time: '15:30', person: 'Zach', tags: ['work'], inbox: false },
+    { title: 'Text Zach to confirm', due: await page.evaluate(() => ymd()), time: null, person: 'Zach', tags: ['work'], inbox: false },
+    { title: 'Bring the handout', due: `${year}-12-19`, time: null, person: 'Zach', tags: ['work'], inbox: false },
+    { title: 'Follow up on next steps', due: `${year}-12-21`, time: '09:00', person: 'Zach', tags: ['work'], inbox: false },
+    { title: 'Check in on progress', due: `${year}-12-27`, time: null, person: 'Zach', tags: ['work'], inbox: false },
+    { title: 'Send the recap', due: `${year}-12-24`, time: null, person: 'Zach', tags: ['home'], inbox: false },
+    { title: 'Think about a gift', due: null, time: null, person: 'Zach', tags: ['work'], inbox: true },
+  ]);
+
+  // A single task is unaffected: + and − are plain text there, and nothing is split.
+  expect(await page.evaluate(() => [parseTaskBlocks('Buy milk tomorrow'), parseTaskInput('Score was +3 over par').title, parseTaskInput('Review -2 variance').title])).toEqual([null, 'Score was +3 over par', 'Review -2 variance']);
+  // With no date on the first task, offsets count from today.
+  expect(await page.evaluate(() => parseTaskBlocks('Start the project | First review +2').map(p => p.due && daysBetween(ymd(), p.due)))).toEqual([null, 2]);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
