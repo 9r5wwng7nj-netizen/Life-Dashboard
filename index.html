@@ -5978,7 +5978,15 @@ const REPEAT_OPTS = [['', 'Doesn’t repeat'], ['day', 'Every day'], ['weekday',
 const repeatKey = r => !r ? '' : r.freq === 'days' ? `days:${(r.days || []).join('.')}` : (r.n || 1) === 1 ? r.freq : r.freq === 'week' && r.n === 2 ? 'week2' : `${r.freq}:${r.n}`;
 const repeatFromKey = k => !k ? null : k === 'week2' ? { freq: 'week', n: 2 } : k.startsWith('days:') ? { freq: 'days', n: 1, days: k.slice(5).split('.').filter(Boolean).map(Number) } : k.includes(':') ? { freq: k.split(':')[0], n: +k.split(':')[1] || 1 } : { freq: k, n: 1 };
 // Options for a repeat dropdown; a custom interval that is not in the list is shown so saving keeps it.
-const repeatOptions = (r, due, opts = REPEAT_OPTS) => { const key = repeatKey(r); return opts.map(([k, l]) => `<option value="${k}" ${key === k ? 'selected' : ''}>${l}</option>`).join('') + (key && !opts.some(([k]) => k === key) ? `<option value="${key}" selected>Custom: ${repeatLabel(r, due)}</option>` : ''); };
+// With days = true the list also offers "Certain days…", which goes with a row of repeatDayBoxes().
+const repeatOptions = (r, due, opts = REPEAT_OPTS, days = false) => {
+  const key = days && r && r.freq === 'days' ? 'days' : repeatKey(r);
+  return opts.map(([k, l]) => `<option value="${k}" ${key === k ? 'selected' : ''}>${l}</option>`).join('') + (days ? `<option value="days" ${key === 'days' ? 'selected' : ''}>Certain days…</option>` : '')
+    + (key && key !== 'days' && !opts.some(([k]) => k === key) ? `<option value="${key}" selected>Custom: ${repeatLabel(r, due)}</option>` : '');
+};
+// Monday-first tick boxes for a "certain days" repeat; chosenDays() reads them back from the form.
+const repeatDayBoxes = (picked = [], change = '') => [1, 2, 3, 4, 5, 6, 0].map(d => `<label class="flex items-center gap-1 whitespace-nowrap"><input type="checkbox" name="repDay" value="${d}" class="w-4 h-4 accent-brand-600" ${picked.includes(d) ? 'checked' : ''} ${change ? `data-change="${change}"` : ''}> ${WD[d].slice(0, 3)}</label>`).join('');
+const chosenDays = f => [...f.querySelectorAll('input[name="repDay"]:checked')].map(x => +x.value);
 const NTH = ['1st', '2nd', '3rd', '4th', 'last'], WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 // Monday-first order for the days of a "certain days" repeat.
 const weekOrder = days => [...new Set(days || [])].sort((a, b) => (a + 6) % 7 - (b + 6) % 7);
@@ -6109,12 +6117,13 @@ function addTasks(raw, extra = {}) { const blocks = parseTaskBlocks(raw); return
 function applyRepeat(p, rep) {
   if (!rep || p.repeat || p.someday) return p;
   p.repeat = structuredClone(rep);
-  if (!p.due) { p.due = ymd(); if (rep.freq === 'days' && !rep.days.includes(new Date().getDay())) p.due = nextDue(rep, p.due); } // the first of the chosen days, today included
+  if (!p.due) p.due = ymd();
+  if (rep.freq === 'days' && !rep.days.includes(parseYmd(p.due).getDay())) p.due = nextDue(rep, p.due); // start on the first chosen day, not a day in between
   return p;
 }
 function addRepeatFrom(f) {
   if (!f || !f.rep || !f.rep.checked) return null;
-  if (f.repKind.value === 'days') { const days = [...f.querySelectorAll('input[name="repDay"]:checked')].map(x => +x.value); return days.length ? { freq: 'days', n: 1, days } : null; }
+  if (f.repKind.value === 'days') { const days = chosenDays(f); return days.length ? { freq: 'days', n: 1, days } : null; }
   if (f.repKind.value !== 'custom') return { freq: f.repKind.value, n: 1 };
   return { freq: f.repUnit.value, n: Math.max(1, Math.min(365, Math.round(+f.repN.value) || 1)) };
 }
@@ -6265,7 +6274,7 @@ function renderTasks() {
   return `<form class="card mb-4" data-submit="taskAdd"><div class="flex flex-wrap gap-2"><input id="nl-in" name="title" class="input flex-1 min-w-[12rem]" placeholder="Add a task — try “Coffee with Jake fri at 9 ~Jake #ministry”" autocomplete="off" required data-input="nlPrev">
         <div class="flex items-center gap-3 ml-auto"><label class="flex items-center gap-1.5 text-sm whitespace-nowrap"><input type="checkbox" name="rep" value="1" class="w-4 h-4 accent-brand-600" data-change="addRep"> Repeat</label><button class="btn btn-primary">${icon('plus')} Add</button></div></div>
       <div id="add-rep" class="hidden flex-wrap items-center gap-2 mt-2 text-sm"><select name="repKind" class="input w-auto" data-change="addRep" aria-label="How often it repeats"><option value="day">Daily</option><option value="week" selected>Weekly</option><option value="month">Monthly</option><option value="days">Certain days…</option><option value="custom">Custom…</option></select>
-        <span id="add-rep-days" class="hidden flex-wrap items-center gap-x-3 gap-y-1" role="group" aria-label="Days it repeats on">${[1, 2, 3, 4, 5, 6, 0].map(d => `<label class="flex items-center gap-1 whitespace-nowrap"><input type="checkbox" name="repDay" value="${d}" class="w-4 h-4 accent-brand-600" data-change="addRep"> ${WD[d].slice(0, 3)}</label>`).join('')}</span>
+        <span id="add-rep-days" class="hidden flex-wrap items-center gap-x-3 gap-y-1" role="group" aria-label="Days it repeats on">${repeatDayBoxes([], 'addRep')}</span>
         <span id="add-rep-custom" class="hidden items-center gap-2">Every <input type="number" name="repN" min="1" max="365" value="2" class="input w-20" data-input="addRep" aria-label="Repeat every this many"><select name="repUnit" class="input w-auto" data-change="addRep" aria-label="Days, weeks, months or years"><option value="day">days</option><option value="week" selected>weeks</option><option value="month">months</option><option value="year">years</option></select></span>
         <span class="text-xs muted">Every task in this entry will repeat.</span></div>
       <div id="nl-prev" class="text-sm mt-2 flex flex-wrap items-center gap-1 empty:hidden"></div>
@@ -6430,7 +6439,8 @@ function taskModal(t) {
   Modal.open(modalShell('Edit task', `<input type="hidden" name="id" value="${t.id}">
     <div><label class="label">Task</label><input name="title" class="input" value="${esc(t.title)}" required></div>
     <div><label class="label">Notes</label><textarea name="notes" class="input" rows="3">${esc(t.notes || '')}</textarea></div>
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Due</label><input type="date" name="due" class="input" value="${t.due || ''}"></div><div><label class="label">Time</label><input type="time" name="time" class="input" value="${t.time || ''}"></div><div><label class="label">Repeat</label><select name="repeat" class="input">${repeatOptions(t.repeat, t.due)}</select></div><div><label class="label">Reminder</label><select name="remind" class="input">${REMIND_OPTS.map(([k, l]) => `<option value="${k}" ${String(t.remind ?? '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Due</label><input type="date" name="due" class="input" value="${t.due || ''}"></div><div><label class="label">Time</label><input type="time" name="time" class="input" value="${t.time || ''}"></div><div><label class="label">Repeat</label><select name="repeat" class="input" data-change="taskRepKind">${repeatOptions(t.repeat, t.due, REPEAT_OPTS, true)}</select></div><div><label class="label">Reminder</label><select name="remind" class="input">${REMIND_OPTS.map(([k, l]) => `<option value="${k}" ${String(t.remind ?? '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+    <div id="task-rep-days" class="${t.repeat && t.repeat.freq === 'days' ? 'flex' : 'hidden'} flex-wrap items-center gap-x-3 gap-y-1 text-sm" role="group" aria-label="Days it repeats on"><span class="label mb-0">Repeat on</span>${repeatDayBoxes(t.repeat && t.repeat.freq === 'days' ? t.repeat.days : [])}</div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Status</label><select name="status" class="input">${STATUSES.map(([k, l]) => `<option value="${k}" ${t.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Priority</label><select name="priority" class="input">${Object.entries(PRI).map(([k, [l]]) => `<option value="${k}" ${(t.priority || 'med') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Area</label><select name="area" class="input"><option value="">${!t.area && areaOf(t) ? `Auto (${areaLabel(areaOf(t))})` : 'None'}</option>${AREAS.map(([k, l]) => `<option value="${k}" ${t.area === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Estimate (min)</label><input type="number" name="est" min="0" step="5" class="input" value="${t.est || ''}"></div></div>
     <div class="grid grid-cols-2 gap-2"><div><label class="label">Project</label><select name="project" class="input"><option value="">None</option>${ps.map(p => `<option value="${p.id}" ${t.project === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div><div><label class="label">Person</label><input name="person" class="input" value="${esc(t.person || '')}" list="ppl-list-m" placeholder="Follow-up with…"><datalist id="ppl-list-m">${knownPeople().map(n => `<option value="${esc(n)}">`).join('')}</datalist></div></div>
     <div class="flex flex-wrap gap-4 text-sm"><label class="flex items-center gap-2"><input type="checkbox" name="waiting" value="1" class="accent-brand-600" ${t.waiting ? 'checked' : ''}> Waiting on them</label><label class="flex items-center gap-2"><input type="checkbox" name="someday" value="1" class="accent-brand-600" ${t.someday ? 'checked' : ''}> Someday</label></div>
@@ -6473,14 +6483,16 @@ const A_TASKS = {
     const f = el.closest('form'), on = f.rep.checked, show = (x, yes) => { x.classList.toggle('hidden', !yes); x.classList.toggle('flex', yes); };
     show($('#add-rep'), on); show($('#add-rep-custom'), on && f.repKind.value === 'custom'); show($('#add-rep-days'), on && f.repKind.value === 'days'); A.nlPrev($('#nl-in'));
   },
+  taskRepKind: el => { const row = $('#task-rep-days'), on = el.value === 'days'; row.classList.toggle('hidden', !on); row.classList.toggle('flex', on); },
   taskHelp: el => { S.taskHelp = !S.taskHelp; saveSettings(); $('#task-rules').classList.toggle('hidden', !S.taskHelp); el.setAttribute('aria-expanded', String(S.taskHelp)); $('#task-rules-label').textContent = S.taskHelp ? 'Hide the rules for adding tasks' : 'Show the rules for adding tasks'; },
   goTaskTab: el => { ui.taskTab = el.dataset.tab; go('tasks'); },
   goWeekPlan: () => { ui.taskTab = 'plan'; ui.planWk = null; Modal.close(); go('tasks'); },
   taskAreaSet: el => { ui.taskArea = el.dataset.v || null; render(); },
   taskSave: f => {
     const v = fd(f), t = tFind(v.id); if (!t) return Modal.close();
+    const days = v.repeat === 'days' ? chosenDays(f) : null; if (days && !days.length) return toast('Tick at least one day for the repeat', 'error');
     const oldDue = t.due, oldTime = t.time, oldRem = t.remind;
-    Object.assign(t, { title: v.title.trim() || t.title, notes: v.notes.trim(), priority: v.priority, tags: parseTags(v.tags), time: v.time || null, repeat: repeatFromKey(v.repeat), remind: v.remind === '' ? null : (v.remind === 'am' || v.remind === 'pm1' ? v.remind : +v.remind), area: v.area || null, est: num(v.est) || null, project: v.project || null, person: v.person.trim() || null, someday: v.someday === '1', updated: new Date().toISOString() });
+    Object.assign(t, { title: v.title.trim() || t.title, notes: v.notes.trim(), priority: v.priority, tags: parseTags(v.tags), time: v.time || null, repeat: days ? { freq: 'days', n: 1, days } : repeatFromKey(v.repeat), remind: v.remind === '' ? null : (v.remind === 'am' || v.remind === 'pm1' ? v.remind : +v.remind), area: v.area || null, est: num(v.est) || null, project: v.project || null, person: v.person.trim() || null, someday: v.someday === '1', updated: new Date().toISOString() });
     if (v.waiting === '1' && !t.waiting) t.waitSince = ymd(); t.waiting = v.waiting === '1';
     if ((v.due || null) !== oldDue) setDue(t, v.due || null); if (t.time !== oldTime || t.remind !== oldRem) t.reminded = false;
     t.subtasks = [...f.querySelectorAll('[data-st]')].map(r => ({ id: r.dataset.st, text: (r.querySelector('[name^="sttext_"]').value || '').trim(), done: r.querySelector('[name^="stdone_"]').checked })).filter(s => s.text);

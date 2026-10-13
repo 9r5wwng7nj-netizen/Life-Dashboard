@@ -250,14 +250,40 @@ test('a repeat can be set for chosen days of the week', async ({ page }) => {
   expect(made.ahead).toBeGreaterThanOrEqual(0);
   expect(made.ahead).toBeLessThanOrEqual(2);
 
+  // A time or date that lands between chosen days still starts on a chosen day.
+  expect(await page.evaluate(() => ['Early run at 6am', 'Late run at 11:59pm', 'Dated run 2030-01-01'].map(x => parseYmd(applyRepeat(parseTaskInput(x.replace('2030-01-01', '@2030-01-01')), { freq: 'days', n: 1, days: [1, 4, 6] }).due).getDay()).every(d => [1, 4, 6].includes(d)))).toBe(true);
   // Each completion moves to the next chosen day: Mon → Thu → Sat → Mon.
   expect(await page.evaluate(() => ['2026-10-12', '2026-10-15', '2026-10-17'].map(d => nextDue({ freq: 'days', days: [1, 4, 6] }, d)))).toEqual(['2026-10-15', '2026-10-17', '2026-10-19']);
   expect(await page.evaluate(() => [repeatLabel({ freq: 'days', days: [6, 1, 4] }), repeatLabel({ freq: 'days', days: [1, 2, 3, 4, 5] }), repeatLabel({ freq: 'days', days: [0] })])).toEqual(['Mon, Thu & Sat', 'weekdays', 'Sun']);
 
-  // The task editor shows the days and keeps them on save.
+  // The task editor shows the days ticked, and they can be changed there.
   await page.evaluate(id => taskModal(tFind(id)), made.id);
-  await expect(page.locator('#modal select[name="repeat"] option:checked')).toHaveText('Custom: Mon, Thu & Sat');
+  const days = page.locator('#task-rep-days');
+  await expect(page.locator('#modal select[name="repeat"]')).toHaveValue('days');
+  await expect(days).toBeVisible();
+  for (const [day, on] of [['Mon', true], ['Tue', false], ['Thu', true], ['Sat', true], ['Sun', false]]) on ? await expect(days.getByLabel(day)).toBeChecked() : await expect(days.getByLabel(day)).not.toBeChecked();
+  await days.getByLabel('Thu').uncheck();
+  await days.getByLabel('Sun').check();
   await page.click('#modal button:has-text("Save")');
-  expect(await page.evaluate(id => tFind(id).repeat, made.id)).toEqual({ freq: 'days', n: 1, days: [1, 4, 6] });
+  expect(await page.evaluate(id => tFind(id).repeat, made.id)).toEqual({ freq: 'days', n: 1, days: [1, 6, 0] });
+
+  // Switching the dropdown hides or shows the days; saving with none ticked is refused and nothing changes.
+  await page.evaluate(id => taskModal(tFind(id)), made.id);
+  await page.selectOption('#modal select[name="repeat"]', 'week');
+  await expect(days).toBeHidden();
+  await page.selectOption('#modal select[name="repeat"]', 'days');
+  await expect(days).toBeVisible();
+  for (const day of ['Mon', 'Sat', 'Sun']) await days.getByLabel(day).uncheck();
+  await page.click('#modal button:has-text("Save")');
+  await expect(page.locator('#modal')).toBeVisible();
+  expect(await page.evaluate(id => tFind(id).repeat, made.id)).toEqual({ freq: 'days', n: 1, days: [1, 6, 0] });
+  await page.keyboard.press('Escape');
+
+  // A task that repeats another way can be switched to certain days.
+  await page.evaluate(() => { const t = addTask('Team sync weekly'); taskModal(t); });
+  await page.selectOption('#modal select[name="repeat"]', 'days');
+  await days.getByLabel('Wed').check();
+  await page.click('#modal button:has-text("Save")');
+  expect(await page.evaluate(() => TK().at(-1).repeat)).toEqual({ freq: 'days', n: 1, days: [3] });
   expect(errors, errors.join('\n')).toEqual([]);
 });
