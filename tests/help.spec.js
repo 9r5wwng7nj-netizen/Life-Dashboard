@@ -56,8 +56,9 @@ test('an existing user is told about the newest update once', async ({ page }) =
   await expect(dialog.locator('img')).toHaveJSProperty('complete', true);
   expect(await dialog.locator('img').evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
   await dialog.getByRole('button', { name: latest.slides[0].go[3] }).click();
-  await expect(page.locator('#view-title')).toHaveText('Scripture');
-  expect(await page.evaluate(() => [ui.scrTab, S.newsSeen])).toEqual(['memory', latest.id]);
+  const [view, key, tab] = latest.slides[0].go; // the shortcut lands on the page the slide is about
+  await expect(page.locator('#view-title')).toHaveText(await page.evaluate(v => VIEWS.find(x => x.id === v).label, view));
+  expect(await page.evaluate(k => [ui[k], S.newsSeen], key)).toEqual([tab, latest.id]);
 
   await page.evaluate(() => go('dashboard'));
   await expect(page.locator('#view')).not.toContainText(latest.title);
