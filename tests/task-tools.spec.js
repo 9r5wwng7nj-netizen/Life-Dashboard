@@ -287,3 +287,41 @@ test('a repeat can be set for chosen days of the week', async ({ page }) => {
   expect(await page.evaluate(() => TK().at(-1).repeat)).toEqual({ freq: 'days', n: 1, days: [3] });
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('text in parentheses goes to the notes, not the title', async ({ page }) => {
+  const { errors } = await open(page);
+  await page.evaluate(() => { ui.taskTab = 'today'; go('tasks'); });
+  const parsed = await page.evaluate(() => [
+    'Call the plumber fri (ask about the water heater and get a quote)',
+    'Plan the trip (check tomorrow’s forecast #home ~Sam) next week',
+    'Email Dana (budget) and Lee (timeline) today',
+    '(just a thought)',
+    'Smile :) and wave',
+    'Odd one (never closed',
+  ].map(x => { const p = parseTaskInput(x); return [p.title, p.notes, !!p.due, p.tags, p.person]; }));
+  expect(parsed[0]).toEqual(['Call the plumber', 'ask about the water heater and get a quote', true, [], null]);
+  // Nothing inside a note is read as a date, tag or person.
+  expect(parsed[1]).toEqual(['Plan the trip', 'check tomorrow’s forecast #home ~Sam', true, [], null]);
+  expect(parsed[2].slice(0, 2)).toEqual(['Email Dana and Lee', 'budget\ntimeline']);
+  expect(parsed[3].slice(0, 2)).toEqual(['', 'just a thought']);
+  expect(parsed[4].slice(0, 2)).toEqual(['Smile :) and wave', '']);
+  expect(parsed[5].slice(0, 2)).toEqual(['Odd one (never closed', '']);
+
+  // In the box: the preview shows the note, each task of a | entry keeps its own, and a bar inside a note does not split.
+  await page.fill('#nl-in', 'Meet Sam 12/20 at 2pm (bring the contract | and a pen) ~Sam | Send the recap +1 (include action items) | Book a room -2');
+  const preview = page.locator('#nl-prev');
+  await expect(preview).toContainText('3 tasks');
+  await expect(preview).toContainText('📝 bring the contract | and a pen');
+  await page.click('form[data-submit="taskAdd"] button.btn-primary');
+  expect(await page.evaluate(() => TK().map(t => [t.title, t.notes]))).toEqual([['Meet Sam', 'bring the contract | and a pen'], ['Send the recap', 'include action items'], ['Book a room', '']]);
+
+  // An entry that is only a note adds nothing.
+  await page.fill('#nl-in', '(only a note)');
+  await page.click('form[data-submit="taskAdd"] button.btn-primary');
+  expect(await page.evaluate(() => TK().length)).toBe(3);
+
+  // The note shows in the editor's Notes field.
+  await page.evaluate(() => taskModal(TK()[0]));
+  await expect(page.locator('#modal textarea[name="notes"]')).toHaveValue('bring the contract | and a pen');
+  expect(errors, errors.join('\n')).toEqual([]);
+});

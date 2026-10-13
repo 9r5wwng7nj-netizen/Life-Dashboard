@@ -6053,6 +6053,8 @@ const nextWd = (i, strictNext) => { const today = new Date().getDay(); let k = (
 function parseTaskInput(s, relative = false) {
   let tags = [], pri = null, due = null, time = null, repeat = null, project = null, person = null, someday = false, est = null, offset = null, src = ` ${s} `;
   const cut = (re, fn) => { src = src.replace(re, (...m) => { const r = fn(...m); return r == null ? ' ' : r; }); };
+  // Anything in (parentheses) is a note: it leaves the title and is not read for dates or tags.
+  const notes = []; for (let prev; prev !== src;) { prev = src; src = src.replace(/\(([^()]*)\)/, (m, n) => { if (n.trim()) notes.push(n.trim().replace(/\s+/g, ' ')); return ' '; }); }
   if (relative) cut(/(^|\s)([+-]\d{1,3})(w|d)?(?=\s)/i, (m, a, n, u) => { offset = +n * (/w/i.test(u || '') ? 7 : 1); return a; });
   cut(/(^|\s)#([\w-]+)/g, (m, a, t) => { tags.push(t.toLowerCase()); return a; });
   cut(/(^|\s)!(high|medium|med|low|h|m|l)\b/i, (m, a, p) => { pri = { h: 'high', high: 'high', m: 'med', med: 'med', medium: 'med', l: 'low', low: 'low' }[p.toLowerCase()]; return a; });
@@ -6083,15 +6085,17 @@ function parseTaskInput(s, relative = false) {
   if (time && !due && !repeat && offset == null) { const nm = new Date().getHours() * 60 + new Date().getMinutes(); due = hmToMin(time) > nm ? ymd() : addDays(ymd(), 1); }
   if (repeat && !due) due = repeat.freq === 'weekday' ? ([0, 6].includes(new Date().getDay()) ? nextWd(1) : ymd()) : ymd();
   const title = src.replace(/\s+/g, ' ').trim().replace(/\s+(on|at|by|due|in|for|every)$/i, '').trim();
-  return { title, tags, pri, due, time, repeat, project, person, someday, est, offset };
+  return { title, tags, pri, due, time, repeat, project, person, someday, est, offset, notes: notes.join('\n') };
 }
 // Several tasks in one entry, separated by "|". The first sets the starting date. A later one can
 // say +2 or -1 (days; +1w for a week) to be dated from it, or give its own date. Later tasks also
 // take the first one's person, project and tags unless they name their own. Returns null for a single task.
 function parseTaskBlocks(raw) {
-  const parts = String(raw || '').split('|').map(x => x.trim()).filter(Boolean); if (parts.length < 2) return null;
-  const first = parseTaskInput(parts[0]), base = first.due || ymd();
-  return [first, ...parts.slice(1).map(x => {
+  const parts = ['']; let depth = 0; // a bar inside (a note) is part of the note
+  for (const ch of String(raw || '')) { if (ch === '(') depth++; else if (ch === ')' && depth) depth--; if (ch === '|' && !depth) parts.push(''); else parts[parts.length - 1] += ch; }
+  if (parts.filter(x => x.trim()).length < 2) return null;
+  const list = parts.map(x => x.trim()).filter(Boolean), first = parseTaskInput(list[0]), base = first.due || ymd();
+  return [first, ...list.slice(1).map(x => {
     const p = parseTaskInput(x, true);
     if (!p.due && p.offset != null) p.due = addDays(base, p.offset);
     if (!p.person) p.person = first.person; if (!p.project) p.project = first.project; if (!p.tags.length) p.tags = [...first.tags];
@@ -6106,7 +6110,7 @@ function nlPreviewHtml(s, rep = null) {
   return bits.length ? `<span class="muted">→</span> <strong>${esc(p.title)}</strong> ${bits.map(b => `<span class="chip text-[11px]">${b}</span>`).join(' ')}` : '';
 }
 function nlBits(p) {
-  return [p.due ? `📅 ${daysBetween(ymd(), p.due) === 0 ? 'Today' : daysBetween(ymd(), p.due) === 1 ? 'Tomorrow' : fmtDate(p.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : '', p.time ? `🕒 ${fmtTime(p.time)}` : '', p.repeat ? `🔁 ${repeatLabel(p.repeat, p.due)}` : '', p.project ? `📁 ${esc(p.project)}${Store.get('projects').some(x => x.name.toLowerCase().replace(/\s+/g, '').startsWith(p.project.toLowerCase().replace(/\s+/g, ''))) ? '' : ' (new)'}` : '', p.person ? `👤 ${esc(p.person)}` : '', p.est ? `⏱ ${p.est}m` : '', p.someday ? '💭 Someday' : '', p.pri ? `! ${PRI[p.pri][0]}` : '', ...p.tags.map(t => `#${esc(t)}`)].filter(Boolean);
+  return [p.due ? `📅 ${daysBetween(ymd(), p.due) === 0 ? 'Today' : daysBetween(ymd(), p.due) === 1 ? 'Tomorrow' : fmtDate(p.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : '', p.time ? `🕒 ${fmtTime(p.time)}` : '', p.repeat ? `🔁 ${repeatLabel(p.repeat, p.due)}` : '', p.project ? `📁 ${esc(p.project)}${Store.get('projects').some(x => x.name.toLowerCase().replace(/\s+/g, '').startsWith(p.project.toLowerCase().replace(/\s+/g, ''))) ? '' : ' (new)'}` : '', p.person ? `👤 ${esc(p.person)}` : '', p.est ? `⏱ ${p.est}m` : '', p.someday ? '💭 Someday' : '', p.pri ? `! ${PRI[p.pri][0]}` : '', ...p.tags.map(t => `#${esc(t)}`), p.notes ? `📝 ${esc(p.notes.length > 48 ? p.notes.slice(0, 48) + '…' : p.notes)}` : ''].filter(Boolean);
 }
 function findOrMakeProject(name, area) { if (!name) return null; const key = name.toLowerCase().replace(/\s+/g, ''), ps = Store.get('projects'); let p = ps.find(x => x.name.toLowerCase().replace(/\s+/g, '') === key) || ps.find(x => x.status !== 'done' && x.name.toLowerCase().replace(/\s+/g, '').startsWith(key)); if (!p) { p = { id: uid(), name: name.replace(/\b\w/g, c => c.toUpperCase()), area: area || null, status: 'active', notes: '', due: null, created: new Date().toISOString() }; ps.push(p); Store.save('projects'); } return p.id; }
 function addTask(raw, extra = {}) { return addParsedTask(applyRepeat(parseTaskInput(raw), extra.repeat), extra); }
@@ -6130,7 +6134,7 @@ function addRepeatFrom(f) {
 function addParsedTask(p, extra = {}) {
   if (!p.title) return null;
   const tags = [...new Set([...p.tags, ...(extra.tags || [])])];
-  const t = { id: uid(), title: p.title, notes: '', status: 'todo', priority: extra.priority || p.pri || 'med', due: extra.due || p.due || null, tags, created: new Date().toISOString(), completedAt: null };
+  const t = { id: uid(), title: p.title, notes: p.notes || '', status: 'todo', priority: extra.priority || p.pri || 'med', due: extra.due || p.due || null, tags, created: new Date().toISOString(), completedAt: null };
   if (p.time || extra.time) t.time = extra.time || p.time;
   if (p.repeat) t.repeat = p.repeat; if (p.est) t.est = p.est; if (p.someday || extra.someday) t.someday = true;
   if (p.person || extra.person) t.person = extra.person || p.person;
@@ -6280,7 +6284,7 @@ function renderTasks() {
       <div id="nl-prev" class="text-sm mt-2 flex flex-wrap items-center gap-1 empty:hidden"></div>
       <button type="button" class="text-xs muted mt-2 inline-flex items-center gap-1 hover:underline" data-action="taskHelp" aria-expanded="${!!S.taskHelp}" aria-controls="task-rules">${icon('info', 'w-3 h-3')} <span id="task-rules-label">${S.taskHelp ? 'Hide' : 'Show'} the rules for adding tasks</span></button>
       <div id="task-rules" class="text-xs muted mt-2 space-y-3 ${S.taskHelp ? '' : 'hidden'}">
-        <div><div class="font-semibold mb-1">One task: type it the way you’d say it</div><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code></span><span><code>for 45m</code> time estimate · <code>someday</code></span></div></div>
+        <div><div class="font-semibold mb-1">One task: type it the way you’d say it</div><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code></span><span><code>for 45m</code> time estimate · <code>someday</code></span><span class="sm:col-span-2"><code>(anything in parentheses)</code> is left out of the title and saved in the task’s notes.</span></div></div>
         <div><div class="font-semibold mb-1">Several tasks in one entry</div><ul class="list-disc pl-5 space-y-1">
           <li><code>|</code> starts a new task.</li>
           <li>The first task sets the starting date.</li>
@@ -6669,6 +6673,10 @@ const A_HOME = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-13b', title: 'Notes in parentheses when adding a task', slides: [
+    { title: 'Put notes in (parentheses)', img: '2026-10-task-notes.png', alt: 'The add-task box with a note in parentheses, and a preview showing a short title with the note listed separately.',
+      body: '<p>When you add a task, anything you type in <strong>(parentheses)</strong> is left out of the title and saved in the task’s notes. It works in every task of a <strong>|</strong> entry too.</p><p>Example: <em>Call the plumber fri (ask about the water heater and get a quote)</em> becomes the task “Call the plumber”, due Friday, with the rest in its notes.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] }
+  ] },
   { id: '2026-10-13', title: 'Several tasks from one entry, repeating projects and bulk changes', slides: [
     { title: 'Add several tasks in one go', img: '2026-10-multi-task.png', alt: 'The add-task box with a Repeat tick box beside Add, and a preview listing four tasks with their dates.',
       body: '<p>In the add-task box, put <strong>|</strong> between tasks to add them together. The first task sets the starting date; on the others, <strong>+1</strong> means the day after it and <strong>-1</strong> the day before (<strong>+1w</strong> for a week). A preview shows each task and its date before you add them, and flags any without a date. Tick <strong>Repeat</strong> beside Add to make them repeat (daily, weekly, monthly, on chosen days of the week, or a custom interval), and tap <strong>Show the rules for adding tasks</strong> under the box for a reminder of how it all works.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] },
