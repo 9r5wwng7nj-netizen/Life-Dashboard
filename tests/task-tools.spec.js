@@ -226,3 +226,38 @@ test('the rules for adding tasks can be shown under the box and stay shown', asy
   await page.getByRole('button', { name: 'Hide the rules for adding tasks' }).click();
   await expect(page.locator('#task-rules')).toBeHidden();
 });
+
+test('a repeat can be set for chosen days of the week', async ({ page }) => {
+  const { errors } = await open(page);
+  await page.evaluate(() => { ui.taskTab = 'today'; go('tasks'); });
+  const form = page.locator('form[data-submit="taskAdd"]');
+  await page.fill('#nl-in', 'Go for a run');
+  await form.getByLabel('Repeat', { exact: true }).check();
+  await form.locator('select[name="repKind"]').selectOption('days');
+  await expect(page.locator('#add-rep-days')).toBeVisible();
+
+  // With no day ticked, nothing is added and the entry is kept.
+  await form.locator('button.btn-primary').click();
+  expect(await page.evaluate(() => TK().length)).toBe(0);
+  await expect(page.locator('#nl-in')).toHaveValue('Go for a run');
+
+  for (const day of ['Mon', 'Thu', 'Sat']) await page.locator('#add-rep-days').getByLabel(day).check();
+  await expect(page.locator('#nl-prev')).toContainText('Mon, Thu & Sat');
+  await form.locator('button.btn-primary').click();
+  const made = await page.evaluate(() => { const t = TK()[0]; return { id: t.id, repeat: t.repeat, weekday: parseYmd(t.due).getDay(), ahead: daysBetween(ymd(), t.due) }; });
+  expect(made.repeat).toEqual({ freq: 'days', n: 1, days: [1, 4, 6] });
+  expect([1, 4, 6]).toContain(made.weekday); // starts on the first chosen day, today included
+  expect(made.ahead).toBeGreaterThanOrEqual(0);
+  expect(made.ahead).toBeLessThanOrEqual(2);
+
+  // Each completion moves to the next chosen day: Mon → Thu → Sat → Mon.
+  expect(await page.evaluate(() => ['2026-10-12', '2026-10-15', '2026-10-17'].map(d => nextDue({ freq: 'days', days: [1, 4, 6] }, d)))).toEqual(['2026-10-15', '2026-10-17', '2026-10-19']);
+  expect(await page.evaluate(() => [repeatLabel({ freq: 'days', days: [6, 1, 4] }), repeatLabel({ freq: 'days', days: [1, 2, 3, 4, 5] }), repeatLabel({ freq: 'days', days: [0] })])).toEqual(['Mon, Thu & Sat', 'weekdays', 'Sun']);
+
+  // The task editor shows the days and keeps them on save.
+  await page.evaluate(id => taskModal(tFind(id)), made.id);
+  await expect(page.locator('#modal select[name="repeat"] option:checked')).toHaveText('Custom: Mon, Thu & Sat');
+  await page.click('#modal button:has-text("Save")');
+  expect(await page.evaluate(id => tFind(id).repeat, made.id)).toEqual({ freq: 'days', n: 1, days: [1, 4, 6] });
+  expect(errors, errors.join('\n')).toEqual([]);
+});

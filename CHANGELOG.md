@@ -3,7 +3,7 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
-- The add-task box can add several tasks from one entry: `|` separates tasks, and `+1` / `-1` (or `+1w`) date a task relative to the first one. Later tasks inherit the first task's person, project and tags. Undated tasks are flagged in the preview and land in the Inbox. A Repeat tick box beside Add (daily, weekly, monthly or a custom interval) applies to every task in the entry, and the rules can be shown under the box.
+- The add-task box can add several tasks from one entry: `|` separates tasks, and `+1` / `-1` (or `+1w`) date a task relative to the first one. Later tasks inherit the first task's person, project and tags. Undated tasks are flagged in the preview and land in the Inbox. A Repeat tick box beside Add (daily, weekly, monthly, chosen days of the week, or a custom interval) applies to every task in the entry, and the rules can be shown under the box.
 - Task and project editors keep a custom repeat interval (such as every 3 days) when saved; before, saving reset it to every day.
 - Projects can repeat (weekly, every 2 weeks, monthly, yearly). The next round is created once, when the due date arrives or every task is finished, with each task's date moved forward. A repeat can also be chosen when using a template.
 - Tasks has a Select mode for changing many tasks at once: status, due today/tomorrow, Someday, area, project, or delete.
