@@ -161,7 +161,7 @@ const SETTINGS_DEFAULT = {
   name: '', theme: 'system', unit: 'lbs', restSeconds: 90, timerSound: true,
   targets: { cal: 2400, p: 180, c: 240, f: 75 },
   translation: 'web', esvKey: '', collapsed: false, view: 'dashboard', lastExport: null,
-  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: '', tour: '', newsSeen: ''
+  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: '', tour: '', newsSeen: '', taskHelp: false
 };
 let S = loadSettings();
 function loadSettings() {
@@ -525,6 +525,7 @@ function renderNow() {
   const focused = focusSnapshot(), previousView = lastRendered;
   _trC = null; _expC = null;
   try { autoCheckin(); } catch (e) { console.warn(e); }
+  try { projRepeatTick(); } catch (e) { console.warn(e); }
   const v = VIEWS.find(x => x.id === S.view) || VIEWS[0];
   const main = $('#view'), keep = lastRendered === v.id ? main.scrollTop : 0;
   $('#view-title').textContent = v.label;
@@ -549,7 +550,7 @@ function afterRender(focused) {
   hydratePhotos();
   mpAttach(); if ($('#m-yt')) ytListen();
 }
-function go(view) { S.view = view; saveSettings(); closeSidebar(); lastRendered = null; render(); if (!Modal.isOpen()) $('#view-title').focus({ preventScroll: true }); }
+function go(view) { S.view = view; ui.taskSel = null; saveSettings(); closeSidebar(); lastRendered = null; render(); if (!Modal.isOpen()) $('#view-title').focus({ preventScroll: true }); }
 function openSidebar() { $('#sidebar').classList.add('open'); $('#sidebar-backdrop').classList.remove('hidden'); syncSidebarAccessibility(); $('#nav button')?.focus(); }
 function closeSidebar() { const focused = $('#sidebar').contains(document.activeElement); $('#sidebar').classList.remove('open'); $('#sidebar-backdrop').classList.add('hidden'); syncSidebarAccessibility(); if (focused && !matchMedia('(min-width: 768px)').matches) $('[data-action="openSidebar"]').focus(); }
 function applyTheme() {
@@ -5919,8 +5920,8 @@ function dueChip(t) {
 const taskRowMini = t => `<label class="flex items-center gap-2 text-sm py-1 cursor-pointer"><input type="checkbox" class="accent-brand-600 w-4 h-4" data-change="taskToggle" data-id="${t.id}"><span class="w-1.5 h-1.5 rounded-full ${PRI[t.priority || 'med'][1]}"></span><span class="flex-1 truncate">${esc(t.title)}</span>${dueChip(t)}</label>`;
 function taskCard(t) {
   const done = t.status === 'done', idx = STATUSES.findIndex(s => s[0] === t.status);
-  return `<div class="card p-3 cursor-pointer hover:border-brand-400" draggable="true" data-drag-task="${t.id}" data-action="taskEdit" data-id="${t.id}">
-    <div class="flex items-start gap-2"><input type="checkbox" class="mt-0.5 w-4 h-4 accent-brand-600 shrink-0" data-change="taskToggle" data-id="${t.id}" ${done ? 'checked' : ''} aria-label="Complete">
+  return `<div class="card p-3 cursor-pointer hover:border-brand-400${taskPicked(t)}" draggable="true" data-drag-task="${t.id}" data-action="taskEdit" data-id="${t.id}">
+    <div class="flex items-start gap-2">${taskTick(t)}
       <div class="flex-1 min-w-0"><button class="text-left text-sm font-medium break-words hover:underline ${done ? 'line-through muted' : ''}" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button>${t.notes ? `<div class="text-xs muted line-clamp-2 mt-0.5">${esc(t.notes)}</div>` : ''}
         <div class="flex flex-wrap items-center gap-1 mt-2"><span class="w-2 h-2 rounded-full ${PRI[t.priority || 'med'][1]}" title="${PRI[t.priority || 'med'][0]} priority"></span>${taskMeta(t)}${(t.tags || []).map(tagChip).join('')}</div></div>
       <div class="flex flex-col -mr-1"><button class="btn btn-ghost btn-sm px-1" data-action="taskMove" data-id="${t.id}" data-d="-1" ${idx === 0 ? 'disabled' : ''} title="Move left">${icon('chevron-left', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1" data-action="taskMove" data-id="${t.id}" data-d="1" ${idx === 2 ? 'disabled' : ''} title="Move right">${icon('chevron-right', 'w-3.5 h-3.5')}</button></div></div></div>`;
@@ -5974,16 +5975,30 @@ const minToHm = m => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
 
 // recurrence
 const REPEAT_OPTS = [['', 'Doesn’t repeat'], ['day', 'Every day'], ['weekday', 'Every weekday'], ['week', 'Every week'], ['week2', 'Every 2 weeks'], ['month', 'Every month (same date)'], ['monthNth', 'Every month (same weekday, e.g. 2nd Tue)'], ['year', 'Every year']];
-const repeatKey = r => !r ? '' : r.freq === 'week' && r.n === 2 ? 'week2' : r.freq;
-const repeatFromKey = k => !k ? null : k === 'week2' ? { freq: 'week', n: 2 } : { freq: k, n: 1 };
+const repeatKey = r => !r ? '' : r.freq === 'days' ? `days:${(r.days || []).join('.')}` : (r.n || 1) === 1 ? r.freq : r.freq === 'week' && r.n === 2 ? 'week2' : `${r.freq}:${r.n}`;
+const repeatFromKey = k => !k ? null : k === 'week2' ? { freq: 'week', n: 2 } : k.startsWith('days:') ? { freq: 'days', n: 1, days: k.slice(5).split('.').filter(Boolean).map(Number) } : k.includes(':') ? { freq: k.split(':')[0], n: +k.split(':')[1] || 1 } : { freq: k, n: 1 };
+// Options for a repeat dropdown; a custom interval that is not in the list is shown so saving keeps it.
+// With days = true the list also offers "Certain days…", which goes with a row of repeatDayBoxes().
+const repeatOptions = (r, due, opts = REPEAT_OPTS, days = false) => {
+  const key = days && r && r.freq === 'days' ? 'days' : repeatKey(r);
+  return opts.map(([k, l]) => `<option value="${k}" ${key === k ? 'selected' : ''}>${l}</option>`).join('') + (days ? `<option value="days" ${key === 'days' ? 'selected' : ''}>Certain days…</option>` : '')
+    + (key && key !== 'days' && !opts.some(([k]) => k === key) ? `<option value="${key}" selected>Custom: ${repeatLabel(r, due)}</option>` : '');
+};
+// Monday-first tick boxes for a "certain days" repeat; chosenDays() reads them back from the form.
+const repeatDayBoxes = (picked = [], change = '') => [1, 2, 3, 4, 5, 6, 0].map(d => `<label class="flex items-center gap-1 whitespace-nowrap"><input type="checkbox" name="repDay" value="${d}" class="w-4 h-4 accent-brand-600" ${picked.includes(d) ? 'checked' : ''} ${change ? `data-change="${change}"` : ''}> ${WD[d].slice(0, 3)}</label>`).join('');
+const chosenDays = f => [...f.querySelectorAll('input[name="repDay"]:checked')].map(x => +x.value);
 const NTH = ['1st', '2nd', '3rd', '4th', 'last'], WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// Monday-first order for the days of a "certain days" repeat.
+const weekOrder = days => [...new Set(days || [])].sort((a, b) => (a + 6) % 7 - (b + 6) % 7);
 function repeatLabel(r, due) {
   if (!r) return ''; const d = due ? parseYmd(due) : new Date(), n = r.n || 1;
-  return { day: n > 1 ? `every ${n} days` : 'daily', weekday: 'weekdays', week: n > 1 ? `every ${n} weeks${due ? ` (${WD[d.getDay()].slice(0, 3)})` : ''}` : `weekly${due ? ` on ${WD[d.getDay()].slice(0, 3)}` : ''}`, month: `monthly${due ? ` on the ${d.getDate()}${['th', 'st', 'nd', 'rd'][(d.getDate() % 100 > 10 && d.getDate() % 100 < 14) ? 0 : Math.min(d.getDate() % 10, 4) % 4] || 'th'}` : ''}`, monthNth: due ? `${NTH[Math.min(4, Math.ceil(d.getDate() / 7) - 1)]} ${WD[d.getDay()].slice(0, 3)} monthly` : 'monthly', year: 'yearly' }[r.freq] || '';
+  if (r.freq === 'days') { const ds = weekOrder(r.days), names = ds.map(x => WD[x].slice(0, 3)); return ds.length >= 7 ? 'daily' : ds.join() === '1,2,3,4,5' ? 'weekdays' : names.length > 1 ? `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}` : names[0] || ''; }
+  return { day: n > 1 ? `every ${n} days` : 'daily', weekday: 'weekdays', week: n > 1 ? `every ${n} weeks${due ? ` (${WD[d.getDay()].slice(0, 3)})` : ''}` : `weekly${due ? ` on ${WD[d.getDay()].slice(0, 3)}` : ''}`, month: n > 1 ? `every ${n} months` : `monthly${due ? ` on the ${d.getDate()}${['th', 'st', 'nd', 'rd'][(d.getDate() % 100 > 10 && d.getDate() % 100 < 14) ? 0 : Math.min(d.getDate() % 10, 4) % 4] || 'th'}` : ''}`, monthNth: due ? `${NTH[Math.min(4, Math.ceil(d.getDate() / 7) - 1)]} ${WD[d.getDay()].slice(0, 3)} monthly` : 'monthly', year: n > 1 ? `every ${n} years` : 'yearly' }[r.freq] || '';
 }
 function nthWeekday(y, m, wd, nth) { if (nth >= 5) { const last = new Date(y, m + 1, 0); return new Date(y, m, last.getDate() - ((last.getDay() - wd + 7) % 7)); } const first = new Date(y, m, 1); return new Date(y, m, 1 + ((wd - first.getDay() + 7) % 7) + (nth - 1) * 7); }
 function nextDue(r, from) {
   const d = parseYmd(from), n = r.n || 1;
+  if (r.freq === 'days' && (r.days || []).length) { let x = addDays(from, 1); while (!r.days.includes(parseYmd(x).getDay())) x = addDays(x, 1); return x; }
   if (r.freq === 'day') return addDays(from, n);
   if (r.freq === 'weekday') { let x = addDays(from, 1); while ([0, 6].includes(parseYmd(x).getDay())) x = addDays(x, 1); return x; }
   if (r.freq === 'week') return addDays(from, 7 * n);
@@ -5997,15 +6012,48 @@ function spawnRepeat(t) {
   const c = { ...JSON.parse(JSON.stringify(t)), id: uid(), status: 'todo', completedAt: null, due: nd, reminded: false, pushed: 0, nextMade: null, created: new Date().toISOString(), series: t.series || t.id };
   c.subtasks = (c.subtasks || []).map(s => ({ ...s, done: false })); t.nextMade = c.id; TK().push(c); return c;
 }
+// ---------- Repeating projects ----------
+// A project with a repeat makes its next round once: when it is finished, or when its due date arrives.
+// The copy and its tasks get ids built from the originals and the new date, so two synced devices that
+// both make the next round end up with the same records instead of duplicates.
+const PROJ_REPEATS = REPEAT_OPTS.filter(([k]) => !['day', 'weekday'].includes(k));
+const roundId = (id, date) => `${String(id).replace(/\.r\d{4}-\d{2}-\d{2}$/, '')}.r${date}`;
+function spawnProject(p) {
+  if (!p.repeat || p.nextMade || !p.due) return null;
+  const today = ymd(); let nd = nextDue(p.repeat, p.due); while (nd < today) nd = nextDue(p.repeat, nd);
+  const shift = daysBetween(p.due, nd), label = d => fmtDate(d, { month: 'short', day: 'numeric' }), stamp = ` · ${label(p.due)}`;
+  const c = { ...JSON.parse(JSON.stringify(p)), id: roundId(p.id, nd), name: p.name.endsWith(stamp) ? p.name.slice(0, -stamp.length) + ` · ${label(nd)}` : p.name, due: nd, status: 'active', nextMade: null, series: p.series || p.id, created: new Date().toISOString() };
+  if (projFind(c.id)) { p.nextMade = c.id; return null; }
+  // A task that repeats on its own has already left its next copy in the project; carry only the latest of each.
+  TK().filter(t => t.project === p.id && !t.nextMade).forEach(t => {
+    const due = t.due ? addDays(t.due, shift) : null;
+    TK().push({ ...JSON.parse(JSON.stringify(t)), id: roundId(t.id, nd), project: c.id, status: 'todo', completedAt: null, due: due && due < today ? today : due, reminded: false, pushed: 0, nextMade: null, subtasks: (t.subtasks || []).map(x => ({ ...x, done: false })), created: new Date().toISOString() });
+  });
+  Store.get('projects').push(c); p.nextMade = c.id;
+  return c;
+}
+// Runs with every render: finishes a repeating project whose tasks are all done, and makes the next round when due.
+function projRepeatTick() {
+  const today = ymd(); let made = null, changed = false;
+  for (const p of [...Store.get('projects')]) {
+    if (!p.repeat || !p.due) continue;
+    const ts = TK().filter(t => t.project === p.id);
+    if (p.status !== 'done' && ts.length && ts.every(t => !tOpen(t))) { p.status = 'done'; changed = true; }
+    if (!p.nextMade && (p.status === 'done' || p.due <= today)) { made = spawnProject(p) || made; changed = true; }
+  }
+  if (changed) { Store.save('projects'); Store.save('tasks'); }
+  if (made) setTimeout(() => toast(`🔁 Next round ready: ${made.name}`), 50);
+}
 function setDue(t, d) { if (t.due && d && d > t.due && tOpen(t)) t.pushed = (t.pushed || 0) + 1; t.due = d || null; t.reminded = false; t.updated = new Date().toISOString(); }
 
 // natural-language capture
 const WDS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const WD_RE = '(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?)';
 const nextWd = (i, strictNext) => { const today = new Date().getDay(); let k = (i - today + 7) % 7; if (k === 0 && strictNext) k = 7; return addDays(ymd(), k); };
-function parseTaskInput(s) {
-  let tags = [], pri = null, due = null, time = null, repeat = null, project = null, person = null, someday = false, est = null, src = ` ${s} `;
+function parseTaskInput(s, relative = false) {
+  let tags = [], pri = null, due = null, time = null, repeat = null, project = null, person = null, someday = false, est = null, offset = null, src = ` ${s} `;
   const cut = (re, fn) => { src = src.replace(re, (...m) => { const r = fn(...m); return r == null ? ' ' : r; }); };
+  if (relative) cut(/(^|\s)([+-]\d{1,3})(w|d)?(?=\s)/i, (m, a, n, u) => { offset = +n * (/w/i.test(u || '') ? 7 : 1); return a; });
   cut(/(^|\s)#([\w-]+)/g, (m, a, t) => { tags.push(t.toLowerCase()); return a; });
   cut(/(^|\s)!(high|medium|med|low|h|m|l)\b/i, (m, a, p) => { pri = { h: 'high', high: 'high', m: 'med', med: 'med', medium: 'med', l: 'low', low: 'low' }[p.toLowerCase()]; return a; });
   cut(/(^|\s)\+([A-Za-z][\w-]*)/, (m, a, p) => { project = p.replace(/[-_]/g, ' '); return a; });
@@ -6032,19 +6080,55 @@ function parseTaskInput(s) {
   cut(new RegExp(`\\s(?:on\\s+|by\\s+|due\\s+|before\\s+)?(next\\s+|this\\s+)?${WD_RE}(?=\\s*$)|\\s(?:on|by|due|before|next|this)\\s+(next\\s+)?${WD_RE}(?=\\s)`, 'i'), (m, nx1, wd1, nx2, wd2) => { const wd = wd1 || wd2, nx = nx1 || nx2, i = WDS.indexOf(wd.slice(0, 3).toLowerCase()); if (i < 0) return m; due = due || nextWd(i, !!nx || /next/i.test(m)); });
   cut(new RegExp(`\\s(?:on\\s+|by\\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?(?=\\s)`, 'i'), (m, mo, dd, yy) => { const now = new Date(), mi = MONTHS.indexOf(mo.slice(0, 3).toLowerCase()); let d = new Date(yy ? +yy : now.getFullYear(), mi, +dd); if (!yy && ymd(d) < ymd()) d = new Date(now.getFullYear() + 1, mi, +dd); due = due || ymd(d); });
   cut(/\s(?:on\s+|by\s+)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?=\s)/, (m, mo, dd, yy) => { if (+mo > 12 || +dd > 31) return m; const now = new Date(); let y = yy ? (+yy < 100 ? 2000 + +yy : +yy) : now.getFullYear(), d = new Date(y, +mo - 1, +dd); if (!yy && ymd(d) < ymd()) d = new Date(y + 1, +mo - 1, +dd); due = due || ymd(d); });
-  if (time && !due && !repeat) { const nm = new Date().getHours() * 60 + new Date().getMinutes(); due = hmToMin(time) > nm ? ymd() : addDays(ymd(), 1); }
+  if (time && !due && !repeat && offset == null) { const nm = new Date().getHours() * 60 + new Date().getMinutes(); due = hmToMin(time) > nm ? ymd() : addDays(ymd(), 1); }
   if (repeat && !due) due = repeat.freq === 'weekday' ? ([0, 6].includes(new Date().getDay()) ? nextWd(1) : ymd()) : ymd();
   const title = src.replace(/\s+/g, ' ').trim().replace(/\s+(on|at|by|due|in|for|every)$/i, '').trim();
-  return { title, tags, pri, due, time, repeat, project, person, someday, est };
+  return { title, tags, pri, due, time, repeat, project, person, someday, est, offset };
 }
-function nlPreviewHtml(s) {
-  const p = parseTaskInput(s || ''); if (!s || !s.trim()) return '';
-  const bits = [p.due ? `📅 ${daysBetween(ymd(), p.due) === 0 ? 'Today' : daysBetween(ymd(), p.due) === 1 ? 'Tomorrow' : fmtDate(p.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : '', p.time ? `🕒 ${fmtTime(p.time)}` : '', p.repeat ? `🔁 ${repeatLabel(p.repeat, p.due)}` : '', p.project ? `📁 ${esc(p.project)}${Store.get('projects').some(x => x.name.toLowerCase().replace(/\s+/g, '').startsWith(p.project.toLowerCase().replace(/\s+/g, ''))) ? '' : ' (new)'}` : '', p.person ? `👤 ${esc(p.person)}` : '', p.est ? `⏱ ${p.est}m` : '', p.someday ? '💭 Someday' : '', p.pri ? `! ${PRI[p.pri][0]}` : '', ...p.tags.map(t => `#${esc(t)}`)].filter(Boolean);
+// Several tasks in one entry, separated by "|". The first sets the starting date. A later one can
+// say +2 or -1 (days; +1w for a week) to be dated from it, or give its own date. Later tasks also
+// take the first one's person, project and tags unless they name their own. Returns null for a single task.
+function parseTaskBlocks(raw) {
+  const parts = String(raw || '').split('|').map(x => x.trim()).filter(Boolean); if (parts.length < 2) return null;
+  const first = parseTaskInput(parts[0]), base = first.due || ymd();
+  return [first, ...parts.slice(1).map(x => {
+    const p = parseTaskInput(x, true);
+    if (!p.due && p.offset != null) p.due = addDays(base, p.offset);
+    if (!p.person) p.person = first.person; if (!p.project) p.project = first.project; if (!p.tags.length) p.tags = [...first.tags];
+    return p;
+  })].filter(p => p.title);
+}
+function nlPreviewHtml(s, rep = null) {
+  if (!s || !s.trim()) return '';
+  const blocks = parseTaskBlocks(s); if (blocks) blocks.forEach(p => applyRepeat(p, rep));
+  if (blocks) return `<div class="w-full space-y-1"><div class="muted text-xs">${blocks.length} tasks${blocks[0].due ? '' : ' · the first has no date, so + and − count from today'}</div>${blocks.map((p, i) => `<div class="flex flex-wrap items-center gap-1"><span class="muted">${i + 1}.</span> <strong>${esc(p.title)}</strong> ${nlBits(p).map(b => `<span class="chip text-[11px]">${b}</span>`).join(' ')}${p.due || p.someday ? '' : '<span class="chip text-[11px] bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">No date · goes to the Inbox</span>'}</div>`).join('')}</div>`;
+  const p = applyRepeat(parseTaskInput(s), rep), bits = nlBits(p);
   return bits.length ? `<span class="muted">→</span> <strong>${esc(p.title)}</strong> ${bits.map(b => `<span class="chip text-[11px]">${b}</span>`).join(' ')}` : '';
 }
+function nlBits(p) {
+  return [p.due ? `📅 ${daysBetween(ymd(), p.due) === 0 ? 'Today' : daysBetween(ymd(), p.due) === 1 ? 'Tomorrow' : fmtDate(p.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : '', p.time ? `🕒 ${fmtTime(p.time)}` : '', p.repeat ? `🔁 ${repeatLabel(p.repeat, p.due)}` : '', p.project ? `📁 ${esc(p.project)}${Store.get('projects').some(x => x.name.toLowerCase().replace(/\s+/g, '').startsWith(p.project.toLowerCase().replace(/\s+/g, ''))) ? '' : ' (new)'}` : '', p.person ? `👤 ${esc(p.person)}` : '', p.est ? `⏱ ${p.est}m` : '', p.someday ? '💭 Someday' : '', p.pri ? `! ${PRI[p.pri][0]}` : '', ...p.tags.map(t => `#${esc(t)}`)].filter(Boolean);
+}
 function findOrMakeProject(name, area) { if (!name) return null; const key = name.toLowerCase().replace(/\s+/g, ''), ps = Store.get('projects'); let p = ps.find(x => x.name.toLowerCase().replace(/\s+/g, '') === key) || ps.find(x => x.status !== 'done' && x.name.toLowerCase().replace(/\s+/g, '').startsWith(key)); if (!p) { p = { id: uid(), name: name.replace(/\b\w/g, c => c.toUpperCase()), area: area || null, status: 'active', notes: '', due: null, created: new Date().toISOString() }; ps.push(p); Store.save('projects'); } return p.id; }
-function addTask(raw, extra = {}) {
-  const p = parseTaskInput(raw); if (!p.title) return null;
+function addTask(raw, extra = {}) { return addParsedTask(applyRepeat(parseTaskInput(raw), extra.repeat), extra); }
+// One entry may hold several tasks (see parseTaskBlocks). Returns the tasks that were added.
+function addTasks(raw, extra = {}) { const blocks = parseTaskBlocks(raw); return (blocks ? blocks.map(p => addParsedTask(applyRepeat(p, extra.repeat), extra)) : [addTask(raw, extra)]).filter(Boolean); }
+// The Repeat tick box beside Add: gives the repeat to every task that has none of its own. A repeat
+// needs a date to count from, so an undated task starts today.
+function applyRepeat(p, rep) {
+  if (!rep || p.repeat || p.someday) return p;
+  p.repeat = structuredClone(rep);
+  if (!p.due) p.due = ymd();
+  if (rep.freq === 'days' && !rep.days.includes(parseYmd(p.due).getDay())) p.due = nextDue(rep, p.due); // start on the first chosen day, not a day in between
+  return p;
+}
+function addRepeatFrom(f) {
+  if (!f || !f.rep || !f.rep.checked) return null;
+  if (f.repKind.value === 'days') { const days = chosenDays(f); return days.length ? { freq: 'days', n: 1, days } : null; }
+  if (f.repKind.value !== 'custom') return { freq: f.repKind.value, n: 1 };
+  return { freq: f.repUnit.value, n: Math.max(1, Math.min(365, Math.round(+f.repN.value) || 1)) };
+}
+function addParsedTask(p, extra = {}) {
+  if (!p.title) return null;
   const tags = [...new Set([...p.tags, ...(extra.tags || [])])];
   const t = { id: uid(), title: p.title, notes: '', status: 'todo', priority: extra.priority || p.pri || 'med', due: extra.due || p.due || null, tags, created: new Date().toISOString(), completedAt: null };
   if (p.time || extra.time) t.time = extra.time || p.time;
@@ -6163,21 +6247,52 @@ function taskMeta(t, { noDue } = {}) {
   const p = t.project && projFind(t.project), a = areaOf(t), st = t.subtasks || [], sd = st.filter(s => s.done).length;
   return `${a ? `<span class="chip text-[11px]"><span class="w-1.5 h-1.5 rounded-full ${AREA_CLS[a]}"></span>${areaLabel(a)}</span>` : ''}${!noDue ? dueChip(t) : t.time ? `<span class="chip">${icon('clock', 'w-3 h-3')} ${fmtTime(t.time)}</span>` : ''}${t.repeat ? `<span class="chip" title="Repeats ${repeatLabel(t.repeat, t.due)}">${icon('repeat', 'w-3 h-3')} ${repeatLabel(t.repeat, t.due)}</span>` : ''}${p ? `<button class="chip hover:ring-1 ring-brand-400" data-action="projOpen" data-id="${p.id}">${icon('folder', 'w-3 h-3')} ${esc(p.name)}</button>` : ''}${t.person ? `<span class="chip">${icon('user', 'w-3 h-3')} ${esc(t.person)}</span>` : ''}${t.waiting ? `<span class="chip bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">⏳ waiting ${daysBetween(t.waitSince || ymd(new Date(t.created)), ymd())}d</span>` : ''}${st.length ? `<span class="chip">${icon('list-todo', 'w-3 h-3')} ${sd}/${st.length}</span>` : ''}${t.est ? `<span class="chip">⏱ ${t.est}m</span>` : ''}${(t.pushed || 0) >= 2 && tOpen(t) ? `<span class="chip" title="Pushed back ${t.pushed} times">↻ ${t.pushed}×</span>` : ''}`;
 }
+// Select mode (ui.taskSel is a Set of task ids): the tick box on every task picks it instead of completing it.
+const taskTick = (t, cls = 'mt-0.5 w-4 h-4 accent-brand-600 shrink-0') => ui.taskSel
+  ? `<input type="checkbox" class="${cls}" data-change="selPick" data-sel="${t.id}" ${ui.taskSel.has(t.id) ? 'checked' : ''} aria-label="Select ${esc(t.title)}">`
+  : `<input type="checkbox" class="${cls}" data-change="taskToggle" data-id="${t.id}" ${tOpen(t) ? '' : 'checked'} aria-label="Complete">`;
+const taskPicked = t => ui.taskSel && ui.taskSel.has(t.id) ? ' ring-2 ring-brand-500' : '';
+function taskBulkBar() {
+  const n = ui.taskSel.size, ps = Store.get('projects').filter(p => p.status !== 'done'), act = (v, label, ic, cls = '') => `<button type="button" class="btn btn-sm ${cls}" data-action="selApply" data-do="${v}" ${n ? '' : 'disabled'}>${ic ? icon(ic, 'w-3.5 h-3.5') : ''} ${label}</button>`;
+  return `<div class="sticky bottom-3 z-20 mt-4 card p-3 shadow-lg border-brand-300 dark:border-brand-700" role="region" aria-label="Change selected tasks"><div class="flex flex-wrap items-center gap-1.5">
+    <span class="text-sm font-semibold mr-1" role="status">${n} selected</span><button type="button" class="btn btn-sm" data-action="selAll">Select all shown</button><span class="flex-1"></span><button type="button" class="btn btn-sm" data-action="selToggle">Finish</button></div>
+    <div class="flex flex-wrap items-center gap-1.5 mt-2">${act('status:todo', 'To do')}${act('status:doing', 'In progress', 'play')}${act('status:done', 'Done', 'check')}<span class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5"></span>${act('due:today', 'Today')}${act('due:tomorrow', 'Tomorrow')}${act('someday', 'Someday')}
+      <select class="input w-auto py-1 text-xs" data-change="selApply" data-do="area" aria-label="Move selected to an area" ${n ? '' : 'disabled'}><option value="">Area…</option>${AREAS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+      ${ps.length ? `<select class="input w-auto py-1 text-xs" data-change="selApply" data-do="project" aria-label="Move selected to a project" ${n ? '' : 'disabled'}><option value="">Project…</option>${ps.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}
+      <span class="flex-1"></span>${act('delete', 'Delete', 'trash-2', 'btn-danger')}</div></div>`;
+}
 function taskRow(t, o = {}) {
   const done = !tOpen(t), isB3 = big3().includes(t);
-  return `<div class="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5" ${o.drag ? `draggable="true" data-drag-task="${t.id}"` : ''}><input type="checkbox" class="mt-0.5 w-4 h-4 accent-brand-600 shrink-0" data-change="taskToggle" data-id="${t.id}" ${done ? 'checked' : ''} aria-label="Complete">
+  if (ui.taskSel) o = { ...o, today: false };
+  return `<div class="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5${taskPicked(t)}" ${o.drag ? `draggable="true" data-drag-task="${t.id}"` : ''}>${taskTick(t)}
     <div class="flex-1 min-w-0"><button class="text-left text-sm font-medium break-words hover:underline ${done ? 'line-through' : ''}" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><div class="flex flex-wrap items-center gap-1 mt-1 empty:hidden"><span class="w-1.5 h-1.5 rounded-full ${PRI[t.priority || 'med'][1]}" title="${PRI[t.priority || 'med'][0]} priority"></span>${taskMeta(t, o)}</div>${o.extra || ''}</div>
-    <div class="flex items-center gap-0.5 shrink-0">${o.today ? `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="today">Today</button>` : ''}${tOpen(t) ? `<button class="btn btn-ghost btn-sm px-1.5 ${isB3 ? 'text-amber-500' : 'opacity-50 hover:opacity-100'}" data-action="big3Toggle" data-id="${t.id}" title="${isB3 ? 'Remove from' : 'Add to'} this week’s Big 3" aria-label="Big 3">${icon('star', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="blkNew" data-task="${t.id}" title="Block time" aria-label="Block time">${icon('calendar-clock', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="ftStartA" data-id="${t.id}" title="Focus 25 min" aria-label="Focus">${icon('target', 'w-3.5 h-3.5')}</button>` : ''}</div></div>`;
+    <div class="flex items-center gap-0.5 shrink-0">${o.today ? `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="today">Today</button>` : ''}${tOpen(t) && !ui.taskSel ? `<button class="btn btn-ghost btn-sm px-1.5 ${isB3 ? 'text-amber-500' : 'opacity-50 hover:opacity-100'}" data-action="big3Toggle" data-id="${t.id}" title="${isB3 ? 'Remove from' : 'Add to'} this week’s Big 3" aria-label="Big 3">${icon('star', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="blkNew" data-task="${t.id}" title="Block time" aria-label="Block time">${icon('calendar-clock', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="ftStartA" data-id="${t.id}" title="Focus 25 min" aria-label="Focus">${icon('target', 'w-3.5 h-3.5')}</button>` : ''}</div></div>`;
 }
 function renderTasks() {
   const nInbox = TK().filter(isInbox).length, notif = 'Notification' in window && Notification.permission !== 'granted';
   const view = { today: tasksToday, inbox: tasksInbox, upcoming: tasksUpcoming, all: tasksAll, projects: tasksProjects, people: tasksPeople, someday: tasksSomeday, plan: tasksPlan, templates: tasksTemplates, stats: tasksStats }[ui.taskTab] || tasksToday;
-  return `<form class="card mb-4" data-submit="taskAdd"><div class="flex gap-2"><input id="nl-in" name="title" class="input flex-1" placeholder="Add a task — try “Coffee with Jake fri at 9 ~Jake #ministry”" autocomplete="off" required data-input="nlPrev"><button class="btn btn-primary">${icon('plus')} Add</button></div>
+  return `<form class="card mb-4" data-submit="taskAdd"><div class="flex flex-wrap gap-2"><input id="nl-in" name="title" class="input flex-1 min-w-[12rem]" placeholder="Add a task — try “Coffee with Jake fri at 9 ~Jake #ministry”" autocomplete="off" required data-input="nlPrev">
+        <div class="flex items-center gap-3 ml-auto"><label class="flex items-center gap-1.5 text-sm whitespace-nowrap"><input type="checkbox" name="rep" value="1" class="w-4 h-4 accent-brand-600" data-change="addRep"> Repeat</label><button class="btn btn-primary">${icon('plus')} Add</button></div></div>
+      <div id="add-rep" class="hidden flex-wrap items-center gap-2 mt-2 text-sm"><select name="repKind" class="input w-auto" data-change="addRep" aria-label="How often it repeats"><option value="day">Daily</option><option value="week" selected>Weekly</option><option value="month">Monthly</option><option value="days">Certain days…</option><option value="custom">Custom…</option></select>
+        <span id="add-rep-days" class="hidden flex-wrap items-center gap-x-3 gap-y-1" role="group" aria-label="Days it repeats on">${repeatDayBoxes([], 'addRep')}</span>
+        <span id="add-rep-custom" class="hidden items-center gap-2">Every <input type="number" name="repN" min="1" max="365" value="2" class="input w-20" data-input="addRep" aria-label="Repeat every this many"><select name="repUnit" class="input w-auto" data-change="addRep" aria-label="Days, weeks, months or years"><option value="day">days</option><option value="week" selected>weeks</option><option value="month">months</option><option value="year">years</option></select></span>
+        <span class="text-xs muted">Every task in this entry will repeat.</span></div>
       <div id="nl-prev" class="text-sm mt-2 flex flex-wrap items-center gap-1 empty:hidden"></div>
-      <details class="text-xs muted mt-2"><summary class="cursor-pointer list-none">${icon('sparkles', 'w-3 h-3 inline -mt-0.5')} Type it the way you’d say it</summary><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code></span><span><code>for 45m</code> time estimate · <code>someday</code></span></div></details></form>
-    <div class="flex flex-wrap items-center gap-1.5 mb-3"><button class="chip ${!ui.taskArea ? 'chip-on' : ''}" data-action="taskAreaSet" data-v="">All areas</button>${AREAS.map(([k, l, ic]) => `<button class="chip ${ui.taskArea === k ? 'chip-on' : ''}" data-action="taskAreaSet" data-v="${k}"><span class="w-2 h-2 rounded-full ${AREA_CLS[k]}"></span> ${l}</button>`).join('')}<span class="flex-1"></span>${notif ? `<button class="btn btn-sm btn-ghost" data-action="enableNotifications">${icon('bell', 'w-3.5 h-3.5')} Turn on reminders</button>` : ''}</div>
+      <button type="button" class="text-xs muted mt-2 inline-flex items-center gap-1 hover:underline" data-action="taskHelp" aria-expanded="${!!S.taskHelp}" aria-controls="task-rules">${icon('info', 'w-3 h-3')} <span id="task-rules-label">${S.taskHelp ? 'Hide' : 'Show'} the rules for adding tasks</span></button>
+      <div id="task-rules" class="text-xs muted mt-2 space-y-3 ${S.taskHelp ? '' : 'hidden'}">
+        <div><div class="font-semibold mb-1">One task: type it the way you’d say it</div><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code></span><span><code>for 45m</code> time estimate · <code>someday</code></span></div></div>
+        <div><div class="font-semibold mb-1">Several tasks in one entry</div><ul class="list-disc pl-5 space-y-1">
+          <li><code>|</code> starts a new task.</li>
+          <li>The first task sets the starting date.</li>
+          <li><code>+1</code> is the day after the first task and <code>-1</code> the day before. Any number works, and <code>+1w</code> is a week.</li>
+          <li>A later task can use its own date instead: <code>today</code>, <code>fri</code>, <code>12/20</code>.</li>
+          <li>Later tasks copy the first task’s <code>~Person</code>, <code>+Project</code> and <code>#tags</code> unless you give them their own.</li>
+          <li>A task with no date goes to the Inbox.</li>
+          <li>Tick <strong>Repeat</strong> to make every task in the entry repeat: daily, weekly, monthly, on certain days of the week (such as Mon, Thu and Sat), or a custom number of days, weeks, months or years.</li></ul>
+          <p class="mt-2">Example: <code>Meet Sam wed at 3pm ~Sam #work | Text Sam to confirm today | Follow up +1 | Check in +1w</code></p></div></div></form>
+    <div class="flex flex-wrap items-center gap-1.5 mb-3"><button class="chip ${!ui.taskArea ? 'chip-on' : ''}" data-action="taskAreaSet" data-v="">All areas</button>${AREAS.map(([k, l, ic]) => `<button class="chip ${ui.taskArea === k ? 'chip-on' : ''}" data-action="taskAreaSet" data-v="${k}"><span class="w-2 h-2 rounded-full ${AREA_CLS[k]}"></span> ${l}</button>`).join('')}<span class="flex-1"></span>${notif ? `<button class="btn btn-sm btn-ghost" data-action="enableNotifications">${icon('bell', 'w-3.5 h-3.5')} Turn on reminders</button>` : ''}<button class="btn btn-sm ${ui.taskSel ? 'chip-on' : ''}" aria-pressed="${!!ui.taskSel}" data-action="selToggle">${icon('list-checks', 'w-3.5 h-3.5')} ${ui.taskSel ? 'Selecting' : 'Select'}</button></div>
     ${tabs('taskTab', [['today', 'Today', 'sun'], ['inbox', `Inbox${nInbox ? ` (${nInbox})` : ''}`, 'inbox'], ['upcoming', 'Upcoming', 'calendar-range'], ['all', 'All tasks', 'kanban'], ['projects', 'Projects', 'folder-kanban'], ['people', 'People', 'users'], ['someday', 'Someday', 'archive'], ['plan', 'Plan week', 'calendar-check'], ['templates', 'Templates', 'layout-template'], ['stats', 'Stats', 'chart-column']])}
-    ${view()}`;
+    ${view()}${ui.taskSel ? taskBulkBar() : ''}`;
 }
 // Today + day planner
 function tasksToday() {
@@ -6208,7 +6323,7 @@ function tasksInbox() {
   const items = TK().filter(isInbox).sort((a, b) => (a.created || '').localeCompare(b.created || '')), ps = Store.get('projects').filter(p => p.status !== 'done');
   if (!items.length) return emptyState('inbox', 'Inbox zero 🎉', 'A task stays here until it has both a due date and an area or project, so nothing slips. Sort it when you have a minute.', '');
   const needs = t => [t.due ? '' : 'a due date', t.project || areaOf(t) ? '' : 'an area or project'].filter(Boolean).join(' and ');
-  return `<p class="text-sm muted mb-3">A task leaves the Inbox once it has both a due date and an area or project — or move it to Someday.</p><div class="space-y-2">${items.map(t => `<div class="card p-3"><div class="flex items-start gap-2"><input type="checkbox" class="mt-0.5 w-4 h-4 accent-brand-600" data-change="taskToggle" data-id="${t.id}" aria-label="Complete"><button class="flex-1 text-left text-sm font-medium hover:underline" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><span class="text-xs muted">${daysBetween(ymd(new Date(t.created || Date.now())), ymd())}d</span><button class="btn btn-ghost btn-sm" data-action="tdDel" data-id="${t.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div>
+  return `<p class="text-sm muted mb-3">A task leaves the Inbox once it has both a due date and an area or project — or move it to Someday.</p><div class="space-y-2">${items.map(t => `<div class="card p-3${taskPicked(t)}"><div class="flex items-start gap-2">${taskTick(t, 'mt-0.5 w-4 h-4 accent-brand-600')}<button class="flex-1 text-left text-sm font-medium hover:underline" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><span class="text-xs muted">${daysBetween(ymd(new Date(t.created || Date.now())), ymd())}d</span><button class="btn btn-ghost btn-sm" data-action="tdDel" data-id="${t.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div>
     <div class="flex flex-wrap items-center gap-1.5 mt-1.5 pl-6 text-xs"><span class="chip bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">Needs ${needs(t)}</span>${t.due ? `<span class="muted">Due ${fmtDate(t.due, { weekday: 'short', month: 'short', day: 'numeric' })}</span>` : ''}${t.project && projFind(t.project) ? `<span class="muted">${esc(projFind(t.project).name)}</span>` : ''}</div>
     <div class="flex flex-wrap items-center gap-1.5 mt-2 pl-6">${[['today', 'Today'], ['tomorrow', 'Tomorrow'], ['fri', 'Friday'], ['nextweek', 'Next week'], ['someday', 'Someday']].map(([v, l]) => `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="${v}">${l}</button>`).join('')}<span class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1"></span>${AREAS.map(([k, l]) => `<button class="chip ${areaOf(t) === k ? 'chip-on' : ''}" aria-pressed="${areaOf(t) === k}" data-action="tdArea" data-id="${t.id}" data-v="${k}"><span class="w-2 h-2 rounded-full ${AREA_CLS[k]}"></span> ${l}</button>`).join('')}${ps.length ? `<select class="input w-auto py-1 text-xs" data-change="tdProject" data-id="${t.id}" aria-label="Move to project"><option value="">Project…</option>${ps.map(p => `<option value="${p.id}" ${t.project === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : ''}</div></div>`).join('')}</div>`;
 }
@@ -6218,7 +6333,7 @@ function tasksUpcoming() {
   const later = open.filter(x => x.due && x.due > end).sort((a, b) => a.due.localeCompare(b.due)), undated = open.filter(x => !x.due && !isInbox(x)).length;
   return `<div class="flex flex-wrap items-center gap-2 mb-3"><button class="btn" data-action="upNav" data-d="-7" aria-label="Previous week">${icon('chevron-left')}</button><div class="font-semibold">${fmtDate(st, { month: 'short', day: 'numeric' })} – ${fmtDate(end, { month: 'short', day: 'numeric' })}</div><button class="btn" data-action="upNav" data-d="7" aria-label="Next week">${icon('chevron-right')}</button>${st !== t ? `<button class="btn btn-sm" data-action="upNav" data-d="0">Today</button>` : ''}<span class="text-xs muted ml-auto">Drag a task to another day to reschedule</span></div>
     <div class="grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">${days.map(d => { const items = open.filter(x => x.due === d || (d === t && x.due && x.due < t)).sort((a, b) => (a.time || '99').localeCompare(b.time || '99') || priRank(a) - priRank(b)), nb = blocksOn(d).length; return `<div class="rounded-2xl bg-slate-100/80 dark:bg-slate-900/60 p-2.5 min-h-[10rem] transition" data-day="${d}"><div class="flex items-baseline gap-1 mb-2 px-0.5"><span class="text-xs font-semibold uppercase tracking-wide ${d === t ? 'text-brand-600' : 'muted'}">${parseYmd(d).toLocaleDateString(undefined, { weekday: 'short' })}</span><span class="text-xs muted">${fmtDate(d, { month: 'short', day: 'numeric' })}</span>${nb ? `<span class="ml-auto text-[10px] muted" title="Time blocks">${icon('calendar-clock', 'w-3 h-3 inline -mt-0.5')} ${nb}</span>` : ''}</div>
-      <div class="space-y-1.5">${items.map(x => `<div class="card p-2 text-xs cursor-pointer hover:border-brand-400 ${x.due < t ? 'border-rose-300 dark:border-rose-800' : ''}" draggable="true" data-drag-task="${x.id}" data-action="taskEdit" data-id="${x.id}"><div class="flex items-start gap-1.5"><input type="checkbox" class="mt-0.5 accent-brand-600" data-change="taskToggle" data-id="${x.id}" aria-label="Complete"><span class="flex-1 break-words font-medium">${esc(x.title)}</span></div><div class="flex flex-wrap gap-1 mt-1 pl-5 empty:hidden">${x.time ? `<span class="muted">${fmtTime(x.time)}</span>` : ''}${x.due < t ? '<span class="text-rose-600 dark:text-rose-400">overdue</span>' : ''}${x.repeat ? icon('repeat', 'w-3 h-3 muted') : ''}${areaOf(x) ? `<span class="w-2 h-2 rounded-full mt-1 ${AREA_CLS[areaOf(x)]}"></span>` : ''}</div></div>`).join('') || '<p class="text-[11px] muted px-0.5">—</p>'}</div></div>`; }).join('')}</div>
+      <div class="space-y-1.5">${items.map(x => `<div class="card p-2 text-xs cursor-pointer hover:border-brand-400 ${x.due < t ? 'border-rose-300 dark:border-rose-800' : ''}${taskPicked(x)}" draggable="true" data-drag-task="${x.id}" data-action="taskEdit" data-id="${x.id}"><div class="flex items-start gap-1.5">${taskTick(x, 'mt-0.5 accent-brand-600')}<span class="flex-1 break-words font-medium">${esc(x.title)}</span></div><div class="flex flex-wrap gap-1 mt-1 pl-5 empty:hidden">${x.time ? `<span class="muted">${fmtTime(x.time)}</span>` : ''}${x.due < t ? '<span class="text-rose-600 dark:text-rose-400">overdue</span>' : ''}${x.repeat ? icon('repeat', 'w-3 h-3 muted') : ''}${areaOf(x) ? `<span class="w-2 h-2 rounded-full mt-1 ${AREA_CLS[areaOf(x)]}"></span>` : ''}</div></div>`).join('') || '<p class="text-[11px] muted px-0.5">—</p>'}</div></div>`; }).join('')}</div>
     ${later.length ? `<div class="card mt-4">${cardHead('calendar', `Later · ${later.length}`)}<div class="space-y-1">${later.slice(0, 40).map(taskRowMini).join('')}</div></div>` : ''}${undated ? `<p class="text-xs muted mt-3">${undated} open task${undated === 1 ? '' : 's'} without a date — see All tasks or Projects.</p>` : ''}`;
 }
 // Projects
@@ -6226,7 +6341,7 @@ function tasksProjects() {
   const op = ui.projOpen && projFind(ui.projOpen); if (op) return projDetail(op);
   const ps = Store.get('projects').filter(p => !ui.taskArea || p.area === ui.taskArea), act = ps.filter(p => p.status !== 'done'), done = ps.filter(p => p.status === 'done');
   const byProject = groupBy(TK(), x => x.project);
-  const card = p => { const ts = byProject.get(p.id) || [], dn = ts.filter(x => !tOpen(x)).length, nx = ts.filter(tOpen).sort(sortT)[0], pct = ts.length ? Math.round(dn / ts.length * 100) : 0; return `<button class="card text-left hover:border-brand-400 flex flex-col gap-2" data-action="projOpen" data-id="${p.id}"><div class="flex items-start gap-2"><span class="font-semibold flex-1">${esc(p.name)}</span>${p.status === 'paused' ? '<span class="chip text-[10px]">Paused</span>' : ''}${p.due ? `<span class="chip text-[10px] ${p.status !== 'done' && p.due < ymd() ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200' : ''}">${fmtDate(p.due, { month: 'short', day: 'numeric' })}</span>` : ''}</div>
+  const card = p => { const ts = byProject.get(p.id) || [], dn = ts.filter(x => !tOpen(x)).length, nx = ts.filter(tOpen).sort(sortT)[0], pct = ts.length ? Math.round(dn / ts.length * 100) : 0; return `<button class="card text-left hover:border-brand-400 flex flex-col gap-2" data-action="projOpen" data-id="${p.id}"><div class="flex items-start gap-2"><span class="font-semibold flex-1">${esc(p.name)}</span>${p.status === 'paused' ? '<span class="chip text-[10px]">Paused</span>' : ''}${p.repeat ? `<span class="chip text-[10px]" title="Repeats ${repeatLabel(p.repeat, p.due)}">${icon('repeat', 'w-3 h-3')}<span class="sr-only">Repeats ${repeatLabel(p.repeat, p.due)}</span></span>` : ''}${p.due ? `<span class="chip text-[10px] ${p.status !== 'done' && p.due < ymd() ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200' : ''}">${fmtDate(p.due, { month: 'short', day: 'numeric' })}</span>` : ''}</div>
       <div class="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"><div class="h-full bg-brand-600" style="width:${pct}%"></div></div><div class="text-xs muted">${dn}/${ts.length} done${nx ? ` · next: ${esc(nx.title)}` : ts.length ? ' · all done ✓' : ''}</div></button>`; };
   const groups = [...AREAS.map(([k, l, ic]) => [l, ic, act.filter(p => p.area === k)]), ['No area', 'folder', act.filter(p => !p.area)]].filter(g => g[2].length);
   return `<form class="card mb-4 grid grid-cols-2 sm:grid-cols-6 gap-2" data-submit="projNew"><input name="name" class="input col-span-2 sm:col-span-3" placeholder="New project — e.g. Spring retreat" required autocomplete="off"><select name="area" class="input">${AREAS.map(([k, l]) => `<option value="${k}" ${ui.taskArea === k ? 'selected' : ''}>${l}</option>`).join('')}<option value="">No area</option></select><input type="date" name="due" class="input" aria-label="Due"><button class="btn btn-primary">${icon('folder-plus')} Add</button></form>
@@ -6242,6 +6357,8 @@ function projDetail(p) {
       ${dn.length ? `<details class="mt-3"><summary class="text-xs muted cursor-pointer list-none">Done · ${dn.length}</summary><div class="space-y-2 mt-2">${dn.map(x => taskRow(x)).join('')}</div></details>` : ''}</div></div>
     <div class="card space-y-3 h-fit"><div class="grid grid-cols-2 gap-2"><div><label class="label">Area</label><select class="input" data-change="projField" data-id="${p.id}" data-f="area"><option value="">None</option>${AREAS.map(([k, l]) => `<option value="${k}" ${p.area === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Status</label><select class="input" data-change="projField" data-id="${p.id}" data-f="status">${[['active', 'Active'], ['paused', 'Paused'], ['done', 'Done']].map(([k, l]) => `<option value="${k}" ${(p.status || 'active') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
       <div><label class="label">Due</label><input type="date" class="input" value="${p.due || ''}" data-change="projField" data-id="${p.id}" data-f="due"></div>
+      <div><label class="label">Repeat</label><select class="input" data-change="projRepeat" data-id="${p.id}">${repeatOptions(p.repeat, p.due, PROJ_REPEATS)}</select>
+        <p class="text-xs muted mt-1">${p.repeat ? (p.nextMade && projFind(p.nextMade) ? `The next round is ready: <button type="button" class="underline" data-action="projOpen" data-id="${p.nextMade}">${esc(projFind(p.nextMade).name)}</button>.` : `Repeats ${repeatLabel(p.repeat, p.due)}. The next round appears on the due date, or sooner if you finish every task, with each task moved forward.`) : 'Turn this on for anything you do on a schedule. Each round copies every task and moves its date forward.'}</p></div>
       <div><label class="label">Notes</label><textarea class="input text-sm" rows="6" data-change="projField" data-id="${p.id}" data-f="notes" placeholder="Goal, key people, links…">${esc(p.notes || '')}</textarea></div>
       <p class="text-xs muted">${ts.length ? `${dn.length} of ${ts.length} done · ${Math.round(dn.length / ts.length * 100)}%` : 'No tasks yet'}</p></div></div>`;
 }
@@ -6293,7 +6410,7 @@ function tplModal(tp) {
 }
 function tplUseModal(tp) {
   Modal.open(modalShell(`Use “${esc(tp.name)}”`, `<input type="hidden" name="id" value="${tp.id}"><div><label class="label">Event date (day 0)</label><input type="date" name="date" class="input" value="${addDays(ymd(), 7)}" required></div>
-    <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="asProj" value="1" checked class="accent-brand-600"> Create a project for it</label><div><label class="label">Project name</label><input name="pname" class="input" value="${esc(tp.name)}"></div><p class="text-xs muted">${tp.items.length} task${tp.items.length === 1 ? '' : 's'} will be added. Any that land in the past are set to today.</p>`,
+    <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="asProj" value="1" checked class="accent-brand-600"> Create a project for it</label><div><label class="label">Project name</label><input name="pname" class="input" value="${esc(tp.name)}"></div><div><label class="label">Repeat the project</label><select name="repeat" class="input">${PROJ_REPEATS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div><p class="text-xs muted">${tp.items.length} task${tp.items.length === 1 ? '' : 's'} will be added. Any that land in the past are set to today.</p>`,
     `<button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn btn-primary">${icon('play')} Add tasks</button>`, 'tplApply'));
 }
 // Stats
@@ -6322,7 +6439,8 @@ function taskModal(t) {
   Modal.open(modalShell('Edit task', `<input type="hidden" name="id" value="${t.id}">
     <div><label class="label">Task</label><input name="title" class="input" value="${esc(t.title)}" required></div>
     <div><label class="label">Notes</label><textarea name="notes" class="input" rows="3">${esc(t.notes || '')}</textarea></div>
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Due</label><input type="date" name="due" class="input" value="${t.due || ''}"></div><div><label class="label">Time</label><input type="time" name="time" class="input" value="${t.time || ''}"></div><div><label class="label">Repeat</label><select name="repeat" class="input">${REPEAT_OPTS.map(([k, l]) => `<option value="${k}" ${repeatKey(t.repeat) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Reminder</label><select name="remind" class="input">${REMIND_OPTS.map(([k, l]) => `<option value="${k}" ${String(t.remind ?? '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Due</label><input type="date" name="due" class="input" value="${t.due || ''}"></div><div><label class="label">Time</label><input type="time" name="time" class="input" value="${t.time || ''}"></div><div><label class="label">Repeat</label><select name="repeat" class="input" data-change="taskRepKind">${repeatOptions(t.repeat, t.due, REPEAT_OPTS, true)}</select></div><div><label class="label">Reminder</label><select name="remind" class="input">${REMIND_OPTS.map(([k, l]) => `<option value="${k}" ${String(t.remind ?? '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+    <div id="task-rep-days" class="${t.repeat && t.repeat.freq === 'days' ? 'flex' : 'hidden'} flex-wrap items-center gap-x-3 gap-y-1 text-sm" role="group" aria-label="Days it repeats on"><span class="label mb-0">Repeat on</span>${repeatDayBoxes(t.repeat && t.repeat.freq === 'days' ? t.repeat.days : [])}</div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Status</label><select name="status" class="input">${STATUSES.map(([k, l]) => `<option value="${k}" ${t.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Priority</label><select name="priority" class="input">${Object.entries(PRI).map(([k, [l]]) => `<option value="${k}" ${(t.priority || 'med') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Area</label><select name="area" class="input"><option value="">${!t.area && areaOf(t) ? `Auto (${areaLabel(areaOf(t))})` : 'None'}</option>${AREAS.map(([k, l]) => `<option value="${k}" ${t.area === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Estimate (min)</label><input type="number" name="est" min="0" step="5" class="input" value="${t.est || ''}"></div></div>
     <div class="grid grid-cols-2 gap-2"><div><label class="label">Project</label><select name="project" class="input"><option value="">None</option>${ps.map(p => `<option value="${p.id}" ${t.project === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div><div><label class="label">Person</label><input name="person" class="input" value="${esc(t.person || '')}" list="ppl-list-m" placeholder="Follow-up with…"><datalist id="ppl-list-m">${knownPeople().map(n => `<option value="${esc(n)}">`).join('')}</datalist></div></div>
     <div class="flex flex-wrap gap-4 text-sm"><label class="flex items-center gap-2"><input type="checkbox" name="waiting" value="1" class="accent-brand-600" ${t.waiting ? 'checked' : ''}> Waiting on them</label><label class="flex items-center gap-2"><input type="checkbox" name="someday" value="1" class="accent-brand-600" ${t.someday ? 'checked' : ''}> Someday</label></div>
@@ -6352,19 +6470,29 @@ function blkModal(b, d) {
 const nextHalfHour = () => { const n = new Date(), m = n.getHours() * 60 + n.getMinutes(); return Math.min(H1 * 60 - 30, Math.max(H0 * 60, Math.ceil(m / 30) * 30)); };
 const A_TASKS = {
   taskAdd: f => {
-    const v = fd(f), ctx = { area: ui.taskArea || undefined, project: ui.taskTab === 'projects' && ui.projOpen ? ui.projOpen : undefined, someday: ui.taskTab === 'someday' || undefined };
-    const t = addTask(v.title, ctx); if (!t) return;
+    const v = fd(f), ctx = { area: ui.taskArea || undefined, project: ui.taskTab === 'projects' && ui.projOpen ? ui.projOpen : undefined, someday: ui.taskTab === 'someday' || undefined, repeat: addRepeatFrom(f) };
+    if (f.rep && f.rep.checked && !ctx.repeat) return toast('Tick at least one day for the repeat', 'error');
+    const added = addTasks(v.title, ctx), t = added[0]; if (!t) return;
+    if (added.length > 1) { const loose = added.filter(isInbox).length; toast(`Added ${added.length} tasks${loose ? ` · ${loose} in the Inbox` : ''}`); render(); setTimeout(() => $('#nl-in')?.focus(), 30); return; }
     toast(`Added “${t.title}”${t.due ? ` · ${daysBetween(ymd(), t.due) === 0 ? 'today' : daysBetween(ymd(), t.due) === 1 ? 'tomorrow' : fmtDate(t.due, { weekday: 'short', month: 'short', day: 'numeric' })}${t.time ? ` ${fmtTime(t.time)}` : ''}` : isInbox(t) ? ' · Inbox' : ''}`);
     render(); setTimeout(() => $('#nl-in')?.focus(), 30);
   },
-  nlPrev: el => { const p = $('#nl-prev'); if (p) p.innerHTML = nlPreviewHtml(el.value); },
+  nlPrev: el => { const p = $('#nl-prev'); if (p) p.innerHTML = nlPreviewHtml(el.value, addRepeatFrom(el.closest('form'))); },
+  // These change the form in place (no redraw), so what has been typed is never lost.
+  addRep: el => {
+    const f = el.closest('form'), on = f.rep.checked, show = (x, yes) => { x.classList.toggle('hidden', !yes); x.classList.toggle('flex', yes); };
+    show($('#add-rep'), on); show($('#add-rep-custom'), on && f.repKind.value === 'custom'); show($('#add-rep-days'), on && f.repKind.value === 'days'); A.nlPrev($('#nl-in'));
+  },
+  taskRepKind: el => { const row = $('#task-rep-days'), on = el.value === 'days'; row.classList.toggle('hidden', !on); row.classList.toggle('flex', on); },
+  taskHelp: el => { S.taskHelp = !S.taskHelp; saveSettings(); $('#task-rules').classList.toggle('hidden', !S.taskHelp); el.setAttribute('aria-expanded', String(S.taskHelp)); $('#task-rules-label').textContent = S.taskHelp ? 'Hide the rules for adding tasks' : 'Show the rules for adding tasks'; },
   goTaskTab: el => { ui.taskTab = el.dataset.tab; go('tasks'); },
   goWeekPlan: () => { ui.taskTab = 'plan'; ui.planWk = null; Modal.close(); go('tasks'); },
   taskAreaSet: el => { ui.taskArea = el.dataset.v || null; render(); },
   taskSave: f => {
     const v = fd(f), t = tFind(v.id); if (!t) return Modal.close();
+    const days = v.repeat === 'days' ? chosenDays(f) : null; if (days && !days.length) return toast('Tick at least one day for the repeat', 'error');
     const oldDue = t.due, oldTime = t.time, oldRem = t.remind;
-    Object.assign(t, { title: v.title.trim() || t.title, notes: v.notes.trim(), priority: v.priority, tags: parseTags(v.tags), time: v.time || null, repeat: repeatFromKey(v.repeat), remind: v.remind === '' ? null : (v.remind === 'am' || v.remind === 'pm1' ? v.remind : +v.remind), area: v.area || null, est: num(v.est) || null, project: v.project || null, person: v.person.trim() || null, someday: v.someday === '1', updated: new Date().toISOString() });
+    Object.assign(t, { title: v.title.trim() || t.title, notes: v.notes.trim(), priority: v.priority, tags: parseTags(v.tags), time: v.time || null, repeat: days ? { freq: 'days', n: 1, days } : repeatFromKey(v.repeat), remind: v.remind === '' ? null : (v.remind === 'am' || v.remind === 'pm1' ? v.remind : +v.remind), area: v.area || null, est: num(v.est) || null, project: v.project || null, person: v.person.trim() || null, someday: v.someday === '1', updated: new Date().toISOString() });
     if (v.waiting === '1' && !t.waiting) t.waitSince = ymd(); t.waiting = v.waiting === '1';
     if ((v.due || null) !== oldDue) setDue(t, v.due || null); if (t.time !== oldTime || t.remind !== oldRem) t.reminded = false;
     t.subtasks = [...f.querySelectorAll('[data-st]')].map(r => ({ id: r.dataset.st, text: (r.querySelector('[name^="sttext_"]').value || '').trim(), done: r.querySelector('[name^="stdone_"]').checked })).filter(s => s.text);
@@ -6417,6 +6545,12 @@ const A_TASKS = {
   projOpen: el => { ui.projOpen = el.dataset.id; ui.taskTab = 'projects'; if (Modal.isOpen()) Modal.close(); if (S.view !== 'tasks') go('tasks'); else render(); },
   projBack: () => { ui.projOpen = null; render(); },
   projField: el => { const p = projFind(el.dataset.id); if (!p) return; p[el.dataset.f] = el.value || (el.dataset.f === 'name' ? p.name : null); p.updated = new Date().toISOString(); Store.save('projects'); if (el.tagName === 'SELECT' || el.type === 'date') render(); },
+  // Repeating needs a due date to count from: use the project's, else its last task's, else today.
+  projRepeat: el => {
+    const p = projFind(el.dataset.id); if (!p) return; p.repeat = repeatFromKey(el.value); p.updated = new Date().toISOString();
+    if (p.repeat && !p.due) p.due = TK().filter(t => t.project === p.id && t.due).map(t => t.due).sort().pop() || ymd();
+    Store.save('projects'); toast(p.repeat ? `Repeats ${repeatLabel(p.repeat, p.due)}` : 'No longer repeats'); render();
+  },
   projDel: el => { const p = projFind(el.dataset.id); if (!p) return; const ts = TK().filter(x => x.project === p.id); if (!confirm(`Delete “${p.name}”?${ts.length ? ` Its ${ts.length} task${ts.length === 1 ? '' : 's'} stay (unlinked).` : ''}`)) return; ts.forEach(x => { x.project = null; if (!x.area && p.area) x.area = p.area; }); Store.set('projects', Store.get('projects').filter(x => x.id !== p.id)); Store.save('tasks'); ui.projOpen = null; render(); },
   projTaskAdd: f => { const p = projFind(f.dataset.id); if (!p) return; const t = addTask(fd(f).title, { project: p.id, area: p.area || undefined }); if (t) { render(); setTimeout(() => $('form[data-submit="projTaskAdd"] input')?.focus(), 30); } },
   projToTpl: el => { const p = projFind(el.dataset.id); if (!p) return; const ts = TK().filter(x => x.project === p.id), anchor = p.due || ts.map(x => x.due).filter(Boolean).sort().pop() || ymd(); const tp = { id: uid(), name: p.name, area: p.area || null, items: ts.sort((a, b) => (a.due || anchor).localeCompare(b.due || anchor)).map(x => ({ off: x.due ? daysBetween(anchor, x.due) : 0, text: x.title + (x.priority === 'high' ? ' !high' : '') })), created: new Date().toISOString() }; Store.get('ttemplates').push(tp); Store.save('ttemplates'); toast(`Saved as template (${tp.items.length} tasks, relative to ${fmtDate(anchor, { month: 'short', day: 'numeric' })})`); },
@@ -6432,7 +6566,7 @@ const A_TASKS = {
   libUse: el => { const tp = libAdd(el.dataset.key); if (tp) { render(); tplUseModal(tp); } },
   tplApply: f => {
     const v = fd(f), tp = Store.get('ttemplates').find(x => x.id === v.id); if (!tp || !v.date) return; const today = ymd(); let pid = null;
-    if (v.asProj === '1') { const p = { id: uid(), name: `${(v.pname || tp.name).trim()} · ${fmtDate(v.date, { month: 'short', day: 'numeric' })}`, area: tp.area || null, due: v.date, status: 'active', notes: `From the “${tp.name}” template`, created: new Date().toISOString() }; Store.get('projects').push(p); Store.save('projects'); pid = p.id; }
+    if (v.asProj === '1') { const p = { id: uid(), name: `${(v.pname || tp.name).trim()} · ${fmtDate(v.date, { month: 'short', day: 'numeric' })}`, area: tp.area || null, due: v.date, status: 'active', notes: `From the “${tp.name}” template`, created: new Date().toISOString() }; if (v.repeat) p.repeat = repeatFromKey(v.repeat); Store.get('projects').push(p); Store.save('projects'); pid = p.id; }
     let n = 0; tp.items.forEach(i => { const d = addDays(v.date, +i.off || 0), t = addTask(i.text, { due: d < today ? today : d, project: pid || undefined, area: tp.area || undefined }); if (t) n++; });
     Modal.close(); toast(`Added ${n} task${n === 1 ? '' : 's'}${pid ? ' as a project' : ''}`); if (pid) { ui.taskTab = 'projects'; ui.projOpen = pid; } render();
   }
@@ -6494,10 +6628,31 @@ const A_HOME = {
   grocClearAll: () => { if (!confirm('Clear the whole grocery list?')) return; Store.set('grocery', []); render(); },
   // tasks
   taskAdd: f => { const v = fd(f), t = addTask(v.title, { priority: v.priority || null, due: v.due || null, tags: ui.taskTag !== 'all' ? [ui.taskTag] : [] }); if (!t) return; render(); setTimeout(() => $('form[data-submit="taskAdd"] input[name="title"]')?.focus(), 30); },
-  taskQuickAdd: f => { const t = addTask(fd(f).title); if (t) { toast('Task added'); render(); } },
+  taskQuickAdd: f => { const n = addTasks(fd(f).title).length; if (n) { toast(n > 1 ? `Added ${n} tasks` : 'Task added'); render(); } },
   taskToggle: el => { const t = Store.get('tasks').find(x => x.id === el.dataset.id); if (!t) return; setTaskStatus(t, el.checked ? 'done' : 'todo'); Store.save('tasks'); if (el.checked) toast('Done ✓'); render(); },
   taskMove: el => { const t = Store.get('tasks').find(x => x.id === el.dataset.id); if (!t) return; const i = STATUSES.findIndex(s => s[0] === t.status), j = Math.max(0, Math.min(2, i + +el.dataset.d)); setTaskStatus(t, STATUSES[j][0]); Store.save('tasks'); render(); },
-  taskEdit: el => { const t = Store.get('tasks').find(x => x.id === el.dataset.id); if (t) taskModal(t); },
+  taskEdit: el => { const t = Store.get('tasks').find(x => x.id === el.dataset.id); if (!t) return; if (ui.taskSel) { ui.taskSel.has(t.id) ? ui.taskSel.delete(t.id) : ui.taskSel.add(t.id); return render(); } taskModal(t); },
+  // select many
+  selToggle: () => { ui.taskSel = ui.taskSel ? null : new Set(); render(); },
+  selPick: el => { if (!ui.taskSel) return; el.checked ? ui.taskSel.add(el.dataset.sel) : ui.taskSel.delete(el.dataset.sel); render(); },
+  selAll: () => { if (!ui.taskSel) return; const shown = $$('#view [data-sel]').map(x => x.dataset.sel); ui.taskSel = new Set(shown.every(id => ui.taskSel.has(id)) ? [] : shown); render(); },
+  selApply: el => {
+    if (!ui.taskSel) return; const [what, v] = (el.dataset.do || '').split(':'), value = v || el.value, ts = TK().filter(t => ui.taskSel.has(t.id)), n = ts.length, s = n === 1 ? '' : 's';
+    if (!n || (el.tagName === 'SELECT' && !value)) return;
+    if (what === 'delete') { if (!confirm(`Delete ${n} task${s}? This cannot be undone.`)) return; Store.set('tasks', TK().filter(t => !ui.taskSel.has(t.id))); toast(`Deleted ${n} task${s}`); }
+    else {
+      if (what === 'status') ts.forEach(t => setTaskStatus(t, value));
+      if (what === 'due') ts.forEach(t => { t.someday = false; setDue(t, value === 'today' ? ymd() : addDays(ymd(), 1)); });
+      if (what === 'someday') ts.forEach(t => { t.someday = true; t.due = null; });
+      if (what === 'area') ts.forEach(t => { t.area = value; });
+      if (what === 'project') ts.forEach(t => { t.project = value; });
+      Store.save('tasks');
+      toast(`${n} task${s} ${{ status: `marked ${(STATUSES.find(x => x[0] === value) || [, ''])[1].toLowerCase()}`, due: `set for ${value}`, someday: 'moved to Someday', area: `moved to ${areaLabel(value)}`, project: `moved to ${projFind(value)?.name || 'the project'}` }[what]}`);
+    }
+    // Keep what is still on screen selected, so a second change can follow the first.
+    render(); const shown = new Set($$('#view [data-sel]').map(x => x.dataset.sel)), kept = [...ui.taskSel].filter(id => shown.has(id));
+    if (kept.length !== ui.taskSel.size) { ui.taskSel = new Set(kept); render(); }
+  },
   taskSave: f => { const v = fd(f), t = Store.get('tasks').find(x => x.id === v.id); if (!t) return; Object.assign(t, { title: v.title.trim(), notes: v.notes.trim(), priority: v.priority, due: v.due || null, tags: parseTags(v.tags) }); setTaskStatus(t, v.status); Store.save('tasks'); Modal.close(); render(); },
   taskDelete: el => { if (!confirm('Delete this task?')) return; Store.set('tasks', Store.get('tasks').filter(x => x.id !== el.dataset.id)); Modal.close(); render(); },
   taskTagToggle: el => { const inp = $('#task-tags'), v = el.dataset.v; let tags = parseTags(inp.value); tags = tags.includes(v) ? tags.filter(x => x !== v) : [...tags, v]; inp.value = tags.join(', '); el.classList.toggle('chip-on'); },
@@ -6514,6 +6669,14 @@ const A_HOME = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-13', title: 'Several tasks from one entry, repeating projects and bulk changes', slides: [
+    { title: 'Add several tasks in one go', img: '2026-10-multi-task.png', alt: 'The add-task box with a Repeat tick box beside Add, and a preview listing four tasks with their dates.',
+      body: '<p>In the add-task box, put <strong>|</strong> between tasks to add them together. The first task sets the starting date; on the others, <strong>+1</strong> means the day after it and <strong>-1</strong> the day before (<strong>+1w</strong> for a week). A preview shows each task and its date before you add them, and flags any without a date. Tick <strong>Repeat</strong> beside Add to make them repeat (daily, weekly, monthly, on chosen days of the week, or a custom interval), and tap <strong>Show the rules for adding tasks</strong> under the box for a reminder of how it all works.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] },
+    { title: 'Projects can repeat', img: '2026-10-project-repeat.png', alt: 'A project’s settings with Repeat set to every week and a note about the next round.',
+      body: '<p>Open a project and set <strong>Repeat</strong>. When its due date arrives, or sooner if you finish every task, the next round is created with each task moved forward. You can also choose a repeat when you use a template.</p>', go: ['tasks', 'taskTab', 'projects', 'Open Projects'] },
+    { title: 'Change many tasks at once', img: '2026-10-task-select.png', alt: 'Two tasks ticked, with a bar offering To do, In progress, Done, Today, Tomorrow, Someday, Area and Delete.',
+      body: '<p>In Tasks, tap <strong>Select</strong>, tick the tasks you want, then move them to In progress, mark them done, set a date, an area or a project, or delete them. Tap <strong>Finish</strong> when you are done.</p>', go: ['tasks', 'taskTab', 'all', 'Open All tasks'] }
+  ] },
   { id: '2026-10-12', title: 'Memory practice, task templates, menu reminders and a stricter Inbox', slides: [
     { title: 'Memorize Scripture by typing', img: '2026-10-memory-practice.png', alt: 'A verse with some words shown and others as blanks, above a box for typing first letters.',
       body: '<p>Scripture → Memory now has typing practice. Type the first letter of each word through three steps: Read, Recall and Master.</p>', go: ['scripture', 'scrTab', 'memory', 'Open Memory'] },

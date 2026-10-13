@@ -3,6 +3,10 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- The add-task box can add several tasks from one entry: `|` separates tasks, and `+1` / `-1` (or `+1w`) date a task relative to the first one. Later tasks inherit the first task's person, project and tags. Undated tasks are flagged in the preview and land in the Inbox. A Repeat tick box beside Add (daily, weekly, monthly, chosen days of the week, or a custom interval; the days can also be changed in the task editor) applies to every task in the entry, and the rules can be shown under the box.
+- Task and project editors keep a custom repeat interval (such as every 3 days) when saved; before, saving reset it to every day.
+- Projects can repeat (weekly, every 2 weeks, monthly, yearly). The next round is created once, when the due date arrives or every task is finished, with each task's date moved forward. A repeat can also be chosen when using a template.
+- Tasks has a Select mode for changing many tasks at once: status, due today/tomorrow, Someday, area, project, or delete.
 - Start-here tour for new users (a card on the dashboard, and under Help & what’s new in the menu), and a what’s-new message with slides after each update, driven by the `RELEASES` list.
 - Menu items show a count for what needs attention today (tasks due or overdue; Scripture reading and memory verses; no food logged or weigh-in; no journal entry; no dinner planned; the weekly family review). Daily checks look at today only and stay quiet until that part of the app has been used, with a dot on the menu button on phones. Counts live in one `NAV_COUNTS` registry with an entry for every menu item.
 - Tasks → Templates includes a built-in library of 25 templates that any user can use or copy into their own list. New installs no longer start with three ministry templates; existing template lists are unchanged.

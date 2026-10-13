@@ -52,10 +52,11 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 
 **Tasks**
 - `tasks`: `{ id, title, notes, status: todo|doing|done, priority: high|med|low, due, tags[], created, completedAt }` with optional fields:
-  - `time`, `repeat {freq, n}`, `remind` (minutes, `am` or `pm1`), `reminded`
+  - `time`, `repeat {freq, n}` (`freq` is `day`, `weekday`, `week`, `month`, `monthNth`, `year`, or `days` with a `days` list of weekday numbers, 0 = Sunday), `remind` (minutes, `am` or `pm1`), `reminded`
   - `area`, `project`, `person`, `waiting`, `waitSince`, `nudged`, `someday`, `est`, `pushed`
   - `subtasks [{id,text,done}]`, `series`, `nextMade`
-- `projects`, `ttemplates` (the user's own checklist templates: `items [{off, text}]`, optional `lib` when copied from the built-in `TEMPLATE_LIBRARY`)
+- `projects`: `{ id, name, area, due, status: active|paused|done, notes, created }` with optional `repeat {freq, n}`, `nextMade` (id of the next round) and `series`. The next round and its tasks get ids of the form `<original id>.r<YYYY-MM-DD>`, so two synced devices create the same records.
+- `ttemplates` (the user's own checklist templates: `items [{off, text}]`, optional `lib` when copied from the built-in `TEMPLATE_LIBRARY`)
 - `tkit`: `{ weeks: { 'YYYY-MM-DD (Mon)': { big3[], notes, planned } }, focus[], seeded }`
 - `tblocks`: a `{ 'YYYY-MM-DD': [{ id, start 'HH:MM', mins, taskId?, label? }] }` map
 
