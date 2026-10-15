@@ -8,6 +8,7 @@ The app executes its core runtime dependencies from files committed to this repo
 |---|---|---|---|
 | Tailwind CSS | `assets/app.css` | 4.3.0 | Precompiled from `src/app.css`; there is no Tailwind runtime in the browser. |
 | Lucide icons | `vendor/lucide/lucide-1.55.0.min.js` | 1.55.0 | Pinned UMD browser bundle copied from the npm package. |
+| ZXing for JavaScript | `vendor/zxing/zxing-library-0.23.0.min.js` | 0.23.0 | Pinned UMD build of `@zxing/library`; loaded only when the camera barcode scanner starts in a browser without its own `BarcodeDetector` (Safari, Firefox). |
 | SheetJS Community Edition | `vendor/sheetjs/xlsx-0.20.3.full.min.js` | 0.20.3 | Pinned standalone browser build from SheetJS's authoritative distribution; loaded only for spreadsheet imports. |
 
 Licenses and SHA-256 hashes are recorded in `THIRD_PARTY_NOTICES.md`. To change Tailwind classes or component styles, run `npm run build:css` and commit the regenerated `assets/app.css`. The app opens with its normal styles and icons without contacting a dependency CDN.
