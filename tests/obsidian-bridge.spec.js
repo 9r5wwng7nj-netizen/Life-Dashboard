@@ -121,3 +121,23 @@ test('action items picked in a meeting note become tasks linked to it, once', as
   await expect(page.locator('#toasts')).toContainText('Those are already in Tasks');
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('the plugin can ask for a person’s follow-ups, add one, and complete one', async ({ page }) => {
+  const errors = await open(page, { obsidian: true });
+  const r = await page.evaluate(() => {
+    const t = (title, extra) => ({ id: title, title, notes: '', status: 'todo', priority: 'med', tags: [], created: new Date().toISOString(), ...extra });
+    Store.set('tasks', [t('Coffee', { person: 'Sam', due: addDays(ymd(), -1) }), t('Budget reply', { person: 'sam rivera', waiting: true, waitSince: ymd() }), t('From the note', { note: 'Sam Rivera' }),
+      t('Old chat', { person: 'Sam', status: 'done', completedAt: new Date(2026, 8, 1).toISOString() }), t('Someone else', { person: 'Jo' })]);
+    const ask = () => LD_QUERY({ personTasks: { names: ['Sam Rivera', 'Sam'], note: 'Sam Rivera' } });
+    const before = ask();
+    LD_FROM_OBSIDIAN({ addTasks: { source: 'Sam Rivera', items: [{ title: 'Pray with him tomorrow', person: 'Sam Rivera' }] } });
+    LD_FROM_OBSIDIAN({ completeTask: 'Coffee' });
+    return { before, after: ask(), added: TK().find(x => x.title === 'Pray with him')?.person };
+  });
+  expect(r.before.open.map(t => [t.title, t.overdue, t.waiting])).toEqual([['Coffee', true, false], ['Budget reply', false, true], ['From the note', false, false]]);
+  expect(r.before.last).toBe('2026-09-01');
+  expect(r.after.open.map(t => t.title)).toEqual(['Pray with him', 'Budget reply', 'From the note']); // dated first
+  expect(r.added).toBe('Sam Rivera');
+  expect(await page.evaluate(() => { obsInbox.ready = false; const a = LD_QUERY({ personTasks: { names: ['Sam'] } }); obsInbox.ready = true; return a; })).toBeNull();
+  expect(errors, errors.join('\n')).toEqual([]);
+});

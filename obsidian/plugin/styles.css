@@ -115,3 +115,14 @@
 
 .ldl-done { opacity: .55; }
 .ldl-form .ldl-kicker { margin-top: 6px; }
+
+/* People: follow-ups under a person's title card */
+.ldl-followups { margin: -6px 0 18px; padding: 12px 14px; border-radius: 16px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); display: flex; flex-direction: column; gap: 8px; font-family: var(--font-interface); }
+.ldl-fu-list { display: flex; flex-direction: column; gap: 6px; }
+.ldl-fu-row { display: flex; align-items: flex-start; gap: 10px; font-size: 15px; cursor: pointer; }
+.ldl-fu-row input { margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0; }
+.ldl-fu-text { display: flex; flex-direction: column; gap: 1px; }
+.ldl-overdue { color: var(--text-error); }
+.ldl-fu-add { display: flex; gap: 8px; }
+.ldl-fu-add input { flex: 1; height: 36px; }
+.ldl-followups button.ldl-btn { margin-top: 0; height: 36px; }

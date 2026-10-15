@@ -210,12 +210,17 @@ const core = (() => {
     close();
     return out;
   }
+  // The names a person note answers to in the dashboard: the title, the first name, and any aliases.
+  function personNames(title, fm) {
+    const t = String(title || '').trim(), out = [t, t.split(/\s+/)[0], ...[].concat((fm && fm.aliases) || []).map(String)];
+    return [...new Set(out.map(x => x.trim()).filter(Boolean))];
+  }
   const meetingTasksMessage = (source, items, area) => ({ addTasks: { source, area: plain(area) || '', items: items.map(it => ({ title: it.text, waiting: !!it.waiting })) } });
 
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -333,7 +338,32 @@ const render = (() => {
     c.append(cover(doc, n), txt);
     return c;
   }
-  return { home, hub, shelf, titleCard };
+  // Follow-ups with a person, from the dashboard. data: { open: [...], last, today } or null when the dashboard isn't open.
+  function followUps(doc, data, on) {
+    const box = el(doc, 'section', 'ldl-followups'); box.setAttribute('aria-label', 'Follow-ups');
+    const head = el(doc, 'div', 'ldl-section-head'); head.append(el(doc, 'div', 'ldl-kicker', 'Follow-ups from the Life Dashboard'));
+    if (data && data.last) head.append(el(doc, 'span', 'ldl-muted ldl-small', `Last finished ${core.fmtDate(data.last, data.today)}`));
+    box.append(head);
+    if (!data) {
+      const b = el(doc, 'button', 'ldl-link', 'Open the dashboard to see follow-ups'); b.type = 'button'; b.addEventListener('click', () => on.openDashboard()); box.append(b); return box;
+    }
+    const list = el(doc, 'div', 'ldl-fu-list');
+    if (!data.open.length) list.append(el(doc, 'p', 'ldl-muted ldl-small', 'Nothing open with them.'));
+    for (const t of data.open) {
+      const row = el(doc, 'label', 'ldl-fu-row');
+      const box2 = el(doc, 'input'); box2.type = 'checkbox'; box2.setAttribute('aria-label', `Done: ${t.title}`); box2.addEventListener('change', () => on.complete(t.id));
+      const txt = el(doc, 'span', 'ldl-fu-text'); txt.append(el(doc, 'span', '', t.title));
+      const bits = [t.waiting ? `Waiting${t.waitSince ? ` since ${core.fmtDate(t.waitSince, data.today)}` : ''}` : '', t.due ? (t.overdue ? `Overdue · ${core.fmtDate(t.due, data.today)}` : core.fmtDate(t.due, data.today)) : ''].filter(Boolean).join(' · ');
+      if (bits) txt.append(el(doc, 'span', 'ldl-muted ldl-small' + (t.overdue ? ' ldl-overdue' : ''), bits));
+      row.append(box2, txt); list.append(row);
+    }
+    const form = el(doc, 'form', 'ldl-fu-add'); const input = el(doc, 'input'); input.type = 'text'; input.placeholder = 'Add a follow-up… (dates work: fri, next week)'; input.setAttribute('aria-label', 'Add a follow-up');
+    const add = el(doc, 'button', 'ldl-btn ldl-btn-primary', 'Add'); add.type = 'submit';
+    form.addEventListener('submit', e => { e.preventDefault(); const v = input.value.trim(); if (v) { input.value = ''; on.addFollowUp(v); } });
+    form.append(input, add); box.append(list, form);
+    return box;
+  }
+  return { home, hub, shelf, titleCard, followUps };
 })();
 
 /* =============================== 3. plugin =============================== */
@@ -561,8 +591,28 @@ class LifeDashboardPlugin extends Plugin {
     const card = render.titleCard(root.ownerDocument, self, hubNote, this.handlers(null));
     const title = header.querySelector('.inline-title'); title ? title.after(card) : header.prepend(card);
     if (this.settings.hideProperties) root.classList.add('ldl-carded');
+    if (n.family === 'person' && Platform.isDesktopApp) this.fillFollowUps(card, view.file);
   }
 
+  // People: open follow-ups from the dashboard under the person's title card (Mac only, with the dashboard docked).
+  async fillFollowUps(card, file) {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {}, names = core.personNames(file.basename, fm);
+    const data = await this.queryDashboard({ personTasks: { names, note: file.basename } });
+    if (!card.isConnected) return;
+    card.parentElement?.querySelectorAll('.ldl-followups').forEach(e => e.remove());
+    const refresh = () => setTimeout(() => { if (card.isConnected) this.fillFollowUps(card, file); }, 600);
+    card.after(render.followUps(card.ownerDocument, data, {
+      openDashboard: async () => { await this.openDashboard(); setTimeout(() => this.fillFollowUps(card, file), 2500); },
+      complete: async id => { await this.sendToDashboard({ completeTask: id }); refresh(); },
+      addFollowUp: async text => { await this.sendToDashboard({ addTasks: { source: file.basename, items: [{ title: text, person: file.basename }] } }); refresh(); }
+    }));
+  }
+  // Ask the docked dashboard a question; null when it isn't open or hasn't loaded yet.
+  async queryDashboard(q) {
+    const view = this.app.workspace.getLeavesOfType(VIEW_DASH)[0]?.view, wv = view?.webview;
+    if (!wv || wv.isLoading?.()) return null;
+    try { return await wv.executeJavaScript(`window.LD_QUERY ? window.LD_QUERY(${JSON.stringify(q)}) : null`); } catch (e) { return null; }
+  }
   // --- Bridge with the docked dashboard
   async onBridge(url, wv) {
     const msg = core.readBridge(url, this.settings.dashboardUrl); if (!msg) return;
