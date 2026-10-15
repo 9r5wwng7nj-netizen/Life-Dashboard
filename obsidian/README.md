@@ -53,6 +53,7 @@ Statuses are read loosely and shown the same way everywhere: Idea (idea, planned
 | 2 ✅ | **New sermon** also adds the prep tasks (think, pray, write; one a day for up to 21 days before the date, then the preaching) through `window.LD_FROM_OBSIDIAN`, each linked to its note. | both |
 | 3 ✅ | **Meetings to tasks:** a meeting note's title card offers *Send action items to Tasks*; the person ticks their own items: top-level bullets (plain or unticked `- [ ]`; not ticked ones or callouts) under Action items / Follow-ups / Next steps / To-do headings, with a bullet's indented lines added to the task's notes. Follow-ups become waiting tasks; sent items are remembered in `tasks_sent`. | plugin + bridge |
 | 3 ✅ | **People:** a person's note shows open follow-ups from the docked dashboard (by name, first name, aliases or note link), with complete and add. Read on demand through `window.LD_QUERY`; nothing is written to the note. | plugin + bridge |
+| 3 ✅ | **@Name in tasks:** links the task to a person; inside Obsidian the plugin creates a missing profile in the People folder from the Person template (settings: *Folder for new people*, *Template for new people*). | app + plugin |
 | 3 | **Taught record:** when and to whom each sermon or lesson was given; "taught before?" on the title card. | plugin |
 | 4 | **Scripture in notes:** hover a reference to see the verse; open it in the dashboard's reader. | plugin + bridge |
 | 4 | **Weekly review** that pulls dashboard numbers into one note alongside Plan week and the family review. | plugin + bridge |

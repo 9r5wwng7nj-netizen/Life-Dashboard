@@ -185,3 +185,12 @@ test('a person’s names and their follow-ups box', async ({ page }) => {
   expect(out.text).toContain('Overdue');
   expect(out.text).toContain('Waiting since');
 });
+
+test('new people: the bridge message and the profile made from the Person template', () => {
+  const dash = 'https://example.github.io/Life-Dashboard/', msg = m => `${dash}${core.BRIDGE_PREFIX}${encodeURIComponent(JSON.stringify(m))}`;
+  expect(core.readBridge(msg({ people: ['Jo', 'Sam: Rivera', '', 'Jo'] }), dash)).toEqual({ people: ['Jo', 'Sam Rivera'] });
+  expect(core.readBridge(msg({ people: [] }), dash)).toBeNull();
+  const tpl = '---\ntype: person\ncreated: "{{date:YYYY-MM-DD}}"\nroles: []\n---\n\n# {{title}}\n\n## Follow-up\n';
+  expect(core.personNote('Jo Park', tpl, '2026-10-15')).toBe('---\ntype: person\ncreated: "2026-10-15"\nroles: []\n---\n\n# Jo Park\n\n## Follow-up\n');
+  expect(core.personNote('Jo Park', '', '2026-10-15')).toContain('type: person');
+});
