@@ -3113,7 +3113,19 @@ const obsNoteList = () => inObsidian() && Array.isArray(window.LD_OBSIDIAN.notes
 const obsInbox = { ready: false, queue: [] };
 window.LD_FROM_OBSIDIAN = msg => { obsInbox.queue.push(msg); if (obsInbox.ready) obsDrain(); return true; };
 function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.sermonPrep) sermonPrep(m.sermonPrep); if (m && m.addTasks) obsAddTasks(m.addTasks); if (m && m.completeTask) obsComplete(m.completeTask); } catch (e) { console.warn('Obsidian message', e); } } }
-window.addEventListener('ld-obsidian', () => render());
+window.addEventListener('ld-obsidian', () => { render(); obsSyncPeople(); });
+// Tasks added with @Name whose person has no Obsidian profile yet: ask the plugin to create them, once.
+let _obsPeopleT = null;
+function obsSyncPeople() {
+  clearTimeout(_obsPeopleT);
+  _obsPeopleT = setTimeout(() => {
+    if (!inObsidian() || !obsInbox.ready) return;
+    const have = new Set(obsPeople().map(n => n.toLowerCase())), flagged = TK().filter(t => t.personAt && t.person);
+    const names = [...new Map(flagged.filter(t => !have.has(t.person.toLowerCase())).map(t => [t.person.toLowerCase(), t.person])).values()].slice(0, 20);
+    flagged.forEach(t => { delete t.personAt; }); if (flagged.length) Store.save('tasks');
+    if (names.length) obsBridge({ people: names });
+  }, 300);
+}
 // Action items picked in a meeting note → tasks linked to that note. Dates and tags in the text are read as
 // usual; follow-ups become "waiting on" tasks. A task already open from the same note and text is not added again.
 function obsAddTasks(m) {
@@ -6497,8 +6509,18 @@ function setDue(t, d) { if (t.due && d && d > t.due && tOpen(t)) t.pushed = (t.p
 const WDS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const WD_RE = '(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?)';
 const nextWd = (i, strictNext) => { const today = new Date().getDay(); let k = (i - today + 7) % 7; if (k === 0 && strictNext) k = 7; return addDays(ymd(), k); };
+// Words after @ that mean a date, not a person.
+const AT_DATE_RE = /^(today|tonight|tomorrow|tmrw|tmr|\d.*|mon|monday|tue|tues|tuesday|wed|weds|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday|jan\w*|feb\w*|mar|march|apr\w*|may|june?|july?|aug\w*|sept?\w*|oct\w*|nov\w*|dec\w*|noon|midnight|next|this|every)$/i;
+// The name a typed person resolves to: an Obsidian person profile first (a unique first-name match counts), then
+// anyone already on a task or in Family, else the name as typed with capitals.
+function personCanon(typed) {
+  const t = String(typed || '').trim().replace(/\s+/g, ' '), lo = t.toLowerCase(), first = lo.split(' ')[0];
+  const pick = list => { const exact = list.find(n => n.toLowerCase() === lo); if (exact) return exact; if (lo.includes(' ')) return null; const byFirst = list.filter(n => n.toLowerCase().split(/\s+/)[0] === first); return byFirst.length === 1 ? byFirst[0] : null; };
+  return pick(obsPeople()) || pick(knownPeople()) || t.replace(/(^|\s)([a-z])/g, (m, a, c) => a + c.toUpperCase());
+}
+const obsPeople = () => inObsidian() && Array.isArray(window.LD_OBSIDIAN.people) ? window.LD_OBSIDIAN.people : [];
 function parseTaskInput(s, relative = false) {
-  let tags = [], pri = null, due = null, time = null, repeat = null, project = null, person = null, someday = false, est = null, offset = null, note = null, src = ` ${s} `;
+  let tags = [], pri = null, due = null, time = null, repeat = null, project = null, person = null, someday = false, est = null, offset = null, note = null, atPerson = false, src = ` ${s} `;
   const cut = (re, fn) => { src = src.replace(re, (...m) => { const r = fn(...m); return r == null ? ' ' : r; }); };
   // Anything in (parentheses) is a note: it leaves the title and is not read for dates or tags.
   const notes = []; for (let prev; prev !== src;) { prev = src; src = src.replace(/\(([^()]*)\)/, (m, n) => { if (n.trim()) notes.push(n.trim().replace(/\s+/g, ' ')); return ' '; }); }
@@ -6509,6 +6531,14 @@ function parseTaskInput(s, relative = false) {
   cut(/(^|\s)!(high|medium|med|low|h|m|l)\b/i, (m, a, p) => { pri = { h: 'high', high: 'high', m: 'med', med: 'med', medium: 'med', l: 'low', low: 'low' }[p.toLowerCase()]; return a; });
   cut(/(^|\s)\+([A-Za-z][\w-]*)/, (m, a, p) => { project = p.replace(/[-_]/g, ' '); return a; });
   cut(/(^|\s)~([A-Za-z][\w'-]*)/, (m, a, p) => { person = p; return a; });
+  // @Name (or @First Last) links the task to that person's profile; @fri, @today and the like stay dates.
+  cut(/(^|\s)@([A-Za-z][\w'-]*)(\s+[A-Za-z][\w'-]*)?/, (m, a, first, last = '') => {
+    if (AT_DATE_RE.test(first) || person) return m;
+    // A second word is the surname when it is capitalised or the two words name someone already known; a day stays a date.
+    const full = (first + last).toLowerCase(), known = last && [...obsPeople(), ...knownPeople()].some(n => n.toLowerCase() === full);
+    let keep = ''; if (last && (AT_DATE_RE.test(last.trim()) || !(/^\s+[A-Z]/.test(last) || known))) { keep = last; last = ''; }
+    person = personCanon(first + last); atPerson = true; return a + keep;
+  });
   cut(/(^|\s)(?:due:|@)(today|tomorrow|tmrw|\d{4}-\d{2}-\d{2}|mon\w*|tue\w*|wed\w*|thu\w*|fri\w*|sat\w*|sun\w*)/i, (m, a, d) => { due = resolveDue(d); return a; });
   cut(/\sfor\s+(\d+(?:\.\d+)?)\s*(m|min|mins|minutes|h|hr|hrs|hour|hours)(?=\s)/i, (m, n, u) => { est = Math.round(+n * (/^h/i.test(u) ? 60 : 1)); });
   cut(/\s(?:every\s+(other\s+)?(\d+\s+)?(day|days|weekday|weekdays|week|weeks|month|months|year|years)|daily|weekly|monthly|yearly|annually|biweekly)(?=\s)/i, (m, other, num_, unit) => {
@@ -6534,7 +6564,7 @@ function parseTaskInput(s, relative = false) {
   if (time && !due && !repeat && offset == null) { const nm = new Date().getHours() * 60 + new Date().getMinutes(); due = hmToMin(time) > nm ? ymd() : addDays(ymd(), 1); }
   if (repeat && !due) due = repeat.freq === 'weekday' ? ([0, 6].includes(new Date().getDay()) ? nextWd(1) : ymd()) : ymd();
   const title = src.replace(/\s+/g, ' ').trim().replace(/\s+(on|at|by|due|in|for|every)$/i, '').trim();
-  return { title, tags, pri, due, time, repeat, project, person, someday, est, offset, note, notes: notes.join('\n') };
+  return { title, tags, pri, due, time, repeat, project, person, atPerson, someday, est, offset, note, notes: notes.join('\n') };
 }
 // Several tasks in one entry, separated by "|". The first sets the starting date. A later one can
 // say +2 or -1 (days; +1w for a week) to be dated from it, or give its own date. Later tasks also
@@ -6547,7 +6577,7 @@ function parseTaskBlocks(raw) {
   return [first, ...list.slice(1).map(x => {
     const p = parseTaskInput(x, true);
     if (!p.due && p.offset != null) p.due = addDays(base, p.offset);
-    if (!p.person) p.person = first.person; if (!p.project) p.project = first.project; if (!p.note) p.note = first.note; if (!p.tags.length) p.tags = [...first.tags];
+    if (!p.person) { p.person = first.person; p.atPerson = first.atPerson; } if (!p.project) p.project = first.project; if (!p.note) p.note = first.note; if (!p.tags.length) p.tags = [...first.tags];
     return p;
   })].filter(p => p.title);
 }
@@ -6559,7 +6589,7 @@ function nlPreviewHtml(s, rep = null) {
   return bits.length ? `<span class="muted">→</span> <strong>${esc(p.title)}</strong> ${bits.map(b => `<span class="chip text-[11px]">${b}</span>`).join(' ')}` : '';
 }
 function nlBits(p) {
-  return [p.due ? `📅 ${daysBetween(ymd(), p.due) === 0 ? 'Today' : daysBetween(ymd(), p.due) === 1 ? 'Tomorrow' : fmtDate(p.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : '', p.time ? `🕒 ${fmtTime(p.time)}` : '', p.repeat ? `🔁 ${repeatLabel(p.repeat, p.due)}` : '', p.project ? `📁 ${esc(p.project)}${Store.get('projects').some(x => x.name.toLowerCase().replace(/\s+/g, '').startsWith(p.project.toLowerCase().replace(/\s+/g, ''))) ? '' : ' (new)'}` : '', p.person ? `👤 ${esc(p.person)}` : '', p.note ? `📓 ${esc(p.note)}` : '', p.est ? `⏱ ${p.est}m` : '', p.someday ? '💭 Someday' : '', p.pri ? `! ${PRI[p.pri][0]}` : '', ...p.tags.map(t => `#${esc(t)}`), p.notes ? `📝 ${esc(p.notes.length > 48 ? p.notes.slice(0, 48) + '…' : p.notes)}` : ''].filter(Boolean);
+  return [p.due ? `📅 ${daysBetween(ymd(), p.due) === 0 ? 'Today' : daysBetween(ymd(), p.due) === 1 ? 'Tomorrow' : fmtDate(p.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : '', p.time ? `🕒 ${fmtTime(p.time)}` : '', p.repeat ? `🔁 ${repeatLabel(p.repeat, p.due)}` : '', p.project ? `📁 ${esc(p.project)}${Store.get('projects').some(x => x.name.toLowerCase().replace(/\s+/g, '').startsWith(p.project.toLowerCase().replace(/\s+/g, ''))) ? '' : ' (new)'}` : '', p.person ? `👤 ${esc(p.person)}${p.atPerson && inObsidian() && !obsPeople().some(n => n.toLowerCase() === p.person.toLowerCase()) ? ' (new profile)' : ''}` : '', p.note ? `📓 ${esc(p.note)}` : '', p.est ? `⏱ ${p.est}m` : '', p.someday ? '💭 Someday' : '', p.pri ? `! ${PRI[p.pri][0]}` : '', ...p.tags.map(t => `#${esc(t)}`), p.notes ? `📝 ${esc(p.notes.length > 48 ? p.notes.slice(0, 48) + '…' : p.notes)}` : ''].filter(Boolean);
 }
 function findOrMakeProject(name, area) { if (!name) return null; const key = name.toLowerCase().replace(/\s+/g, ''), ps = Store.get('projects'); let p = ps.find(x => x.name.toLowerCase().replace(/\s+/g, '') === key) || ps.find(x => x.status !== 'done' && x.name.toLowerCase().replace(/\s+/g, '').startsWith(key)); if (!p) { p = { id: uid(), name: name.replace(/\b\w/g, c => c.toUpperCase()), area: area || null, status: 'active', notes: '', due: null, created: new Date().toISOString() }; ps.push(p); Store.save('projects'); } return p.id; }
 function addTask(raw, extra = {}) { return addParsedTask(applyRepeat(parseTaskInput(raw), extra.repeat), extra); }
@@ -6587,6 +6617,7 @@ function addParsedTask(p, extra = {}) {
   if (p.time || extra.time) t.time = extra.time || p.time;
   if (p.repeat) t.repeat = p.repeat; if (p.est) t.est = p.est; if (p.someday || extra.someday) t.someday = true;
   if (p.person || extra.person) t.person = extra.person || p.person;
+  if (p.atPerson && !extra.person) { t.personAt = true; obsSyncPeople(); } // may need an Obsidian profile
   if (p.note || extra.note) t.note = extra.note || p.note;
   if (extra.area) t.area = extra.area;
   const pid = extra.project || (p.project ? findOrMakeProject(p.project, extra.area) : null); if (pid) t.project = pid;
@@ -6737,7 +6768,7 @@ function renderTasks() {
       <div id="nl-prev" class="text-sm mt-2 flex flex-wrap items-center gap-1 empty:hidden"></div>
       <button type="button" class="text-xs muted mt-2 inline-flex items-center gap-1 hover:underline" data-action="taskHelp" aria-expanded="${!!S.taskHelp}" aria-controls="task-rules">${icon('info', 'w-3 h-3')} <span id="task-rules-label">${S.taskHelp ? 'Hide' : 'Show'} the rules for adding tasks</span></button>
       <div id="task-rules" class="text-xs muted mt-2 space-y-3 ${S.taskHelp ? '' : 'hidden'}">
-        <div><div class="font-semibold mb-1">One task: type it the way you’d say it</div><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code></span><span><code>for 45m</code> time estimate · <code>someday</code></span><span class="sm:col-span-2"><code>(anything in parentheses)</code> is left out of the title and saved in the task’s notes.</span><span class="sm:col-span-2"><code>[[Note name]]</code> links the task to that Obsidian note.</span></div></div>
+        <div><div class="font-semibold mb-1">One task: type it the way you’d say it</div><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code> · <code>@Name</code> person (makes their profile in Obsidian)</span><span><code>for 45m</code> time estimate · <code>someday</code></span><span class="sm:col-span-2"><code>(anything in parentheses)</code> is left out of the title and saved in the task’s notes.</span><span class="sm:col-span-2"><code>[[Note name]]</code> links the task to that Obsidian note.</span></div></div>
         <div><div class="font-semibold mb-1">Several tasks in one entry</div><ul class="list-disc pl-5 space-y-1">
           <li><code>|</code> starts a new task.</li>
           <li>The first task sets the starting date.</li>
@@ -7238,6 +7269,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16i', title: '@ a person', slides: [
+    { title: 'Type @ and a name', body: '<p>When you add a task, <strong>@Sam</strong> (or <strong>@Sam Rivera</strong>) links it to that person, so it shows on their page in Obsidian. If they don’t have a profile yet, Obsidian makes one from your Person template, right away inside Obsidian or the next time the dashboard opens there. <strong>@fri</strong>, <strong>@today</strong> and other days still set the date.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] }
+  ] },
   { id: '2026-10-16h', title: 'Follow-ups on people’s notes', slides: [
     { title: 'People in Obsidian', body: '<p>With the dashboard docked in Obsidian on the Mac, a person’s note shows your open follow-ups with them: overdue ones, things you’re waiting on, and when you last finished one. Tick one off or add a new one right there; dates work as usual (“fri”, “next week”).</p>' }
   ] },

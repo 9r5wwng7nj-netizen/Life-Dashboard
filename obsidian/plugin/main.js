@@ -157,6 +157,7 @@ const core = (() => {
     let msg; try { msg = JSON.parse(decodeURIComponent(String(url).slice(i + BRIDGE_PREFIX.length))); } catch (e) { return null; }
     if (!msg || typeof msg !== 'object') return null;
     if (typeof msg.open === 'string' && msg.open.trim() && msg.open.length < 500) return { open: msg.open.trim() };
+    if (Array.isArray(msg.people)) { const people = [...new Set(msg.people.slice(0, 20).map(n => safeName(n)).filter(Boolean))]; return people.length ? { people } : null; }
     const c = msg.create;
     if (c && typeof c === 'object' && typeof c.name === 'string' && typeof (c.content ?? '') === 'string' && String(c.content || '').length <= 200000) {
       const folder = safeFolder(c.folder || ''), name = safeName(c.name);
@@ -215,12 +216,16 @@ const core = (() => {
     const t = String(title || '').trim(), out = [t, t.split(/\s+/)[0], ...[].concat((fm && fm.aliases) || []).map(String)];
     return [...new Set(out.map(x => x.trim()).filter(Boolean))];
   }
+  function personNote(name, template, today) {
+    const fill = t => String(t).replace(/\{\{\s*title\s*\}\}/gi, name).replace(/\{\{\s*date(?::[^}]*)?\s*\}\}/gi, today);
+    return template ? fill(template) : `---\ntype: person\ncreated: "${today}"\n---\n\n# ${name}\n`;
+  }
   const meetingTasksMessage = (source, items, area) => ({ addTasks: { source, area: plain(area) || '', items: items.map(it => ({ title: it.text, waiting: !!it.waiting })) } });
 
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -374,6 +379,9 @@ const DEFAULTS = {
   ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
   shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'classic', 'article', 'person'],
   sermonFolder: '',
+  peopleFolder: '', // where profiles made from @Name in the dashboard go
+  personTemplate: '', // a note whose text new profiles start from
+
   titleCards: true,
   hideProperties: true,
   openOnStartup: false
@@ -622,6 +630,20 @@ class LifeDashboardPlugin extends Plugin {
       if (f instanceof TFile) return this.app.workspace.getLeaf(false).openFile(f);
       return new Notice(`No note called “${msg.open}”`);
     }
+    if (msg.people) {
+      const have = new Set(this.notes().filter(n => n.family === 'person').map(n => n.title.toLowerCase()));
+      const folder = core.safeFolder(this.settings.peopleFolder || '') || '', today = core.ymd(new Date());
+      const tf = this.settings.personTemplate && this.app.vault.getAbstractFileByPath(normalizePath(this.settings.personTemplate.replace(/(\.md)?$/, '.md')));
+      const template = tf instanceof TFile ? await this.app.vault.cachedRead(tf) : '';
+      const made = [];
+      for (const name of msg.people) {
+        if (have.has(name.toLowerCase()) || this.app.metadataCache.getFirstLinkpathDest(name, '')) continue;
+        if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+        await this.createUnique(folder, name, core.personNote(name, template, today)); made.push(name);
+      }
+      if (made.length) { new Notice(`New profile${made.length === 1 ? '' : 's'}: ${made.join(', ')}`); this._notes = null; setTimeout(() => this.greetDashboard(wv), 800); }
+      return;
+    }
     if (msg.create) {
       const { folder, name, content } = msg.create;
       if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
@@ -632,7 +654,8 @@ class LifeDashboardPlugin extends Plugin {
   // Tell the dashboard it is inside Obsidian, with the note names it can link a task to; then deliver waiting messages.
   greetDashboard(wv) {
     const names = this.notes().filter(n => n.family && !core.inFolder(n.path, this.ignored())).map(n => n.title).slice(0, 5000);
-    const info = { vault: this.app.vault.getName(), notes: names, prefix: core.BRIDGE_PREFIX };
+    const people = this.notes().filter(n => n.family === 'person').map(n => n.title);
+    const info = { vault: this.app.vault.getName(), notes: names, people, prefix: core.BRIDGE_PREFIX };
     wv.executeJavaScript(`window.LD_OBSIDIAN = ${JSON.stringify(info)}; window.dispatchEvent(new Event('ld-obsidian'));`).catch(() => { });
     const waiting = this.pending || []; this.pending = [];
     waiting.forEach(msg => this.deliver(wv, msg));
@@ -664,6 +687,10 @@ class LibrarySettings extends PluginSettingTab {
       .addText(t => t.setValue(s.shelves.join(', ')).onChange(v => { s.shelves = v.split(',').map(x => x.trim()).filter(x => core.FAMILIES[x]); save(); }));
     new Setting(containerEl).setName('Folder for new sermons').setDesc('Each new sermon gets its own folder inside this one.')
       .addText(t => t.setValue(s.sermonFolder).setPlaceholder('e.g. 02 Projects').onChange(v => { s.sermonFolder = v.trim(); save(); }));
+    new Setting(containerEl).setName('Folder for new people').setDesc('Where a profile goes when you type @Name in a dashboard task and they have none.')
+      .addText(t => t.setValue(s.peopleFolder).setPlaceholder('e.g. 04 People').onChange(v => { s.peopleFolder = v.trim(); save(); }));
+    new Setting(containerEl).setName('Template for new people').setDesc('A note new profiles start from. {{title}} and {{date}} are filled in.')
+      .addText(t => t.setValue(s.personTemplate).setPlaceholder('e.g. Templates/Person').onChange(v => { s.personTemplate = v.trim(); save(); }));
     new Setting(containerEl).setName('Title cards').setDesc('Show a card with the passage, date and status at the top of notes in reading view.')
       .addToggle(t => t.setValue(s.titleCards).onChange(v => { s.titleCards = v; save(); }));
     new Setting(containerEl).setName('Hide the properties box under title cards')
