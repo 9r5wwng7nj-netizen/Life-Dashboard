@@ -48,7 +48,8 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 - `mealPlan`: a `{ 'YYYY-MM-DD': [{ id, recipeId|null, text?, slot?, portions?, left?, from?, freezerId?, made?, logged?, batch?, host? }] }` map. Items without `slot` mean dinner.
 - `grocery`: `[{ id, name, qty, unit, checked, source, section?, store?, price?, note? }]`
 - `pantry`, `freezer`, `hosting`
-- `gkit`: `{ stores[], staples[], sectionMap{}, spend[], budget, basics[], tableShift, prayShift }`
+- `gkit`: `{ stores[], staples[], sectionMap{}, spend[], budget, basics[], tableShift, prayShift, planPrefs? }`; `planPrefs` holds the last Plan my week choices `{ people, budget, slots[], maxTime, library }`
+- Recipes copied from the ready-made `RECIPE_LIBRARY` carry an optional `lib` key
 
 **Tasks**
 - `tasks`: `{ id, title, notes, status: todo|doing|done, priority: high|med|low, due, tags[], created, completedAt }` with optional fields:
