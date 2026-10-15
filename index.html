@@ -3112,7 +3112,7 @@ const obsNoteList = () => inObsidian() && Array.isArray(window.LD_OBSIDIAN.notes
 // Messages from the plugin (it calls window.LD_FROM_OBSIDIAN). They wait until saved data has loaded.
 const obsInbox = { ready: false, queue: [] };
 window.LD_FROM_OBSIDIAN = msg => { obsInbox.queue.push(msg); if (obsInbox.ready) obsDrain(); return true; };
-function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.sermonPrep) sermonPrep(m.sermonPrep); if (m && m.addTasks) obsAddTasks(m.addTasks); } catch (e) { console.warn('Obsidian message', e); } } }
+function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.sermonPrep) sermonPrep(m.sermonPrep); if (m && m.addTasks) obsAddTasks(m.addTasks); if (m && m.completeTask) obsComplete(m.completeTask); } catch (e) { console.warn('Obsidian message', e); } } }
 window.addEventListener('ld-obsidian', () => render());
 // Action items picked in a meeting note → tasks linked to that note. Dates and tags in the text are read as
 // usual; follow-ups become "waiting on" tasks. A task already open from the same note and text is not added again.
@@ -3126,11 +3126,26 @@ function obsAddTasks(m) {
     if (TK().some(t => tOpen(t) && t.note === source && t.title === p.title)) continue;
     const t = addParsedTask(p, { note: source || undefined, area }); if (!t) continue;
     if (it.waiting) { t.waiting = true; t.waitSince = ymd(); }
+    if (it.person && !t.person) t.person = String(it.person).slice(0, 80);
     n++;
   }
   if (n) { Store.save('tasks'); render(); }
   toast(n ? `Added ${n} task${n === 1 ? '' : 's'} from ${source || 'Obsidian'}` : 'Those are already in Tasks');
 }
+function obsComplete(id) { const t = tFind(String(id)); if (!t || !tOpen(t)) return; setTaskStatus(t, 'done'); Store.save('tasks'); render(); toast(`Done: ${t.title}`); }
+// Questions from the plugin, answered straight away (null until saved data has loaded).
+// personTasks: open tasks with this person (by any of their names) or linked to their note, and when one was last finished.
+window.LD_QUERY = q => {
+  if (!obsInbox.ready || !q || typeof q !== 'object') return null;
+  if (q.personTasks) {
+    const names = new Set([].concat(q.personTasks.names || []).map(n => String(n).trim().toLowerCase()).filter(Boolean)), note = String(q.personTasks.note || '');
+    const mine = TK().filter(t => (t.person && names.has(String(t.person).trim().toLowerCase())) || (note && t.note === note));
+    const open = mine.filter(tOpen).sort(sortT).slice(0, 50).map(t => ({ id: t.id, title: t.title, due: t.due || null, waiting: !!t.waiting, waitSince: t.waitSince || null, overdue: !!(t.due && t.due < ymd()) }));
+    const last = mine.filter(t => !tOpen(t)).map(doneOn).filter(Boolean).sort().pop() || null;
+    return { open, last, today: ymd() };
+  }
+  return null;
+};
 // New sermon in Obsidian → a dashboard project with a "think, pray, write" task each day until the
 // preaching date (up to 21 days) and the preaching itself, each linked to its note.
 function sermonPrep(m) {
@@ -7223,6 +7238,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16h', title: 'Follow-ups on people’s notes', slides: [
+    { title: 'People in Obsidian', body: '<p>With the dashboard docked in Obsidian on the Mac, a person’s note shows your open follow-ups with them: overdue ones, things you’re waiting on, and when you last finished one. Tick one off or add a new one right there; dates work as usual (“fri”, “next week”).</p>' }
+  ] },
   { id: '2026-10-16g', title: 'Find a video: bigger, and no Shorts', slides: [
     { title: 'Bigger pictures, no Shorts', body: '<p>Find a video now shows results as large cards with a sharper picture and a bigger title. Shorts (videos of 3 minutes or less) are hidden. Tap <strong>Show Shorts</strong> above the results if you ever want them back.</p>', go: ['media', '', '', 'Open Media library'] }
   ] },

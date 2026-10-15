@@ -161,3 +161,27 @@ test('plain bullets, Granola’s bold items with details, and review callouts ar
     { text: 'Hear back about the date ~ soon', section: 'Follow-ups and waiting items', waiting: true }
   ]);
 });
+
+test('a person’s names and their follow-ups box', async ({ page }) => {
+  expect(core.personNames('Sam Rivera', { aliases: ['Sammy'] })).toEqual(['Sam Rivera', 'Sam', 'Sammy']);
+  const code = fs.readFileSync(MAIN, 'utf8');
+  await page.setContent('<!doctype html><html><body><div id="v"></div></body></html>');
+  const out = await page.evaluate(code => {
+    const module = { exports: {} }; class Base { }
+    const fake = { Plugin: Base, ItemView: Base, PluginSettingTab: Base, Setting: Base, Modal: Base, SuggestModal: Base, Notice: Base, Platform: {}, TFile: Base, MarkdownView: Base, normalizePath: p => p, debounce: f => f };
+    new Function('module', 'exports', 'require', code)(module, module.exports, n => (n === 'obsidian' ? fake : null));
+    const { render } = module.exports, calls = [], on = { openDashboard: () => calls.push('open'), complete: id => calls.push('done:' + id), addFollowUp: t => calls.push('add:' + t) };
+    const v = document.getElementById('v');
+    v.append(render.followUps(document, null, on));
+    v.querySelector('button').click();
+    v.replaceChildren(render.followUps(document, { open: [{ id: 'a', title: 'Coffee', due: '2026-10-14', overdue: true }, { id: 'b', title: 'Budget reply', waiting: true, waitSince: '2026-10-15' }], last: '2026-09-01', today: '2026-10-15' }, on));
+    const text = v.textContent;
+    v.querySelector('input[type=checkbox]').click();
+    const input = v.querySelector('.ldl-fu-add input'); input.value = 'Pray tomorrow'; v.querySelector('.ldl-fu-add').requestSubmit();
+    return { calls, text };
+  }, code);
+  expect(out.calls).toEqual(['open', 'done:a', 'add:Pray tomorrow']);
+  expect(out.text).toContain('Last finished');
+  expect(out.text).toContain('Overdue');
+  expect(out.text).toContain('Waiting since');
+});
