@@ -376,7 +376,6 @@ const render = (() => {
   function titleCard(doc, n, hubNote, on) {
     const c = el(doc, 'div', 'ldl-titlecard');
     const txt = el(doc, 'div', 'ldl-titlecard-text');
-    txt.append(el(doc, 'div', 'ldl-kicker', n.kind || 'Note'));
     const meta = [n.scripture, n.date ? core.fmtDate(n.date, core.ymd(new Date())) : '', n.series].filter(Boolean).join(' · ');
     if (meta) txt.append(el(doc, 'div', 'ldl-titlecard-meta', meta));
     const actions = el(doc, 'div', 'ldl-titlecard-actions');
