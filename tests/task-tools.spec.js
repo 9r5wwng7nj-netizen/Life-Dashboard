@@ -325,3 +325,24 @@ test('text in parentheses goes to the notes, not the title', async ({ page }) =>
   await expect(page.locator('#modal textarea[name="notes"]')).toHaveValue('bring the contract | and a pen');
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('a task on today’s list can be pushed 1, 2 or 3 days', async ({ page }) => {
+  const { errors } = await open(page);
+  await page.evaluate(tasks => { Store.set('tasks', tasks); ui.taskTab = 'today'; go('tasks'); }, [task('due today', { due: new Date().toLocaleDateString('en-CA') }), task('overdue', { due: '2020-01-01' }), task('next week', { due: '2099-01-01' })]);
+  const push = (id, n) => page.locator(`[data-action="taskPush"][data-id="${id}"][data-n="${n}"]`);
+  await expect(push('due today', 1)).toBeVisible();
+  await expect(push('overdue', 3)).toBeVisible();
+  await expect(page.locator('[data-action="taskPush"][data-id="next week"]')).toHaveCount(0);
+
+  await push('due today', 2).click();
+  await push('overdue', 1).click();
+  expect(await page.evaluate(() => TK().slice(0, 2).map(t => [daysBetween(ymd(), t.due), t.pushed || 0]))).toEqual([[2, 1], [1, 1]]);
+  // Pushed tasks leave today's list.
+  await expect(page.locator('[data-action="taskPush"]')).toHaveCount(0);
+  // Select mode hides the buttons.
+  await page.evaluate(() => { TK()[0].due = ymd(); render(); });
+  await expect(push('due today', 1)).toBeVisible();
+  await page.click('[data-action="selToggle"]');
+  await expect(page.locator('[data-action="taskPush"]')).toHaveCount(0);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
