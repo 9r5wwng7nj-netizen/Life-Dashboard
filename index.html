@@ -4443,7 +4443,7 @@ function mediaSeek(t) {
 function mediaEmbed(o) { // Parse the hostname and escape every constructed iframe URL.
   const u = webUrl(o.url || ''); if (!u) return '';
   const parsed = new URL(u), h = parsed.hostname.replace(/^www\./, ''), y = ytId(u); let m;
-  if (y) return `<div class="aspect-video w-full"><iframe id="m-yt" src="https://www.youtube-nocookie.com/embed/${y}?enablejsapi=1&rel=0" class="w-full h-full rounded-xl" allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div><p class="text-[11px] muted mt-1">YouTube won’t play inside an app opened as a file (Error 153). Use “Open” for now — it plays here once the dashboard has a web address.</p>`;
+  if (y) return `<div class="aspect-video w-full"><iframe id="m-yt" src="https://www.youtube-nocookie.com/embed/${y}?enablejsapi=1&rel=0" class="w-full h-full rounded-xl" allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>${location.protocol === 'file:' ? '<p class="text-[11px] muted mt-1">YouTube won’t play inside an app opened as a file (Error 153). Use “Open”, or use the hosted copy of the app, where it plays here.</p>' : ''}`;
   if (['vimeo.com', 'player.vimeo.com'].includes(h) && (m = parsed.pathname.match(/^\/(?:video\/)?(\d+)(?:\/|$)/))) return `<div class="aspect-video w-full"><iframe src="https://player.vimeo.com/video/${m[1]}" class="w-full h-full rounded-xl" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div>`;
   if (h === 'open.spotify.com' && (m = parsed.pathname.match(/^\/(?:intl-\w+\/)?(episode|show|track|playlist)\/(\w+)(?:\/|$)/))) return `<iframe src="https://open.spotify.com/embed/${m[1]}/${m[2]}" class="w-full rounded-xl" height="152" allow="encrypted-media; clipboard-write" loading="lazy"></iframe>`;
   if (h === 'podcasts.apple.com') return `<iframe src="${esc('https://embed.podcasts.apple.com' + parsed.pathname + parsed.search)}" class="w-full rounded-xl" height="175" allow="autoplay *; encrypted-media *" sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation" loading="lazy"></iframe>`;
@@ -4753,7 +4753,7 @@ const A_MEDIA = {
   mPrev: el => { ui.mPrev = el.dataset.v === '1'; const o = mFind(ui.medOpen); if (o) mRefresh(o); },
   mTpl: el => { const o = mFind(el.dataset.id), t = MEDIA_TEMPLATES[el.value]; el.value = ''; if (!o || !t) return; o.body = (o.body || '').trim() ? `${o.body.trimEnd()}\n\n${t[1]}` : t[1]; mCommit(o); ui.mPrev = false; mRefresh(o); setTimeout(() => $('#m-notes')?.focus(), 30); },
   mStamp: () => {
-    const t = mediaTime(), ta = $('#m-notes'); if (t == null) return toast('Timestamps work with the in-app player — MP3/MP4 links and podcasts (and YouTube once the app has a web address)', 'error');
+    const t = mediaTime(), ta = $('#m-notes'); if (t == null) return toast('Timestamps work with the in-app player — MP3/MP4 links, podcasts, and YouTube in the hosted copy of the app', 'error');
     if (!ta) return; const at = ta.selectionStart ?? ta.value.length, s = `[${fmtT(t)}] `; ta.value = ta.value.slice(0, at) + (at && ta.value[at - 1] !== '\n' ? '\n' : '') + s + ta.value.slice(at); ta.dispatchEvent(new Event('input', { bubbles: true })); ta.focus(); const p = ta.value.indexOf(s, Math.max(0, at - 1)) + s.length; ta.setSelectionRange(p, p);
   },
   mSeek: el => { if (!mediaSeek(+el.dataset.t)) toast('Open the player to jump to that moment', 'error'); },
@@ -7004,6 +7004,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16d', title: 'Watch YouTube in the app', slides: [
+    { title: 'YouTube plays right here', body: '<p>Save a YouTube link to your Media library (Add link, or share it to the app) and open it: the video plays inside the app. Notes you write while it plays can carry the video’s time, so you can jump back to that moment. Shorts links work too.</p>', go: ['media', '', '', 'Open Media library'] }
+  ] },
   { id: '2026-10-16c', title: 'Fewer tabs', slides: [
     { title: 'Related tabs are together now', body: '<p>Several sections have fewer tabs, and nothing was removed:</p><ul class="list-disc pl-5 space-y-1"><li><strong>Workouts:</strong> History shows the calendar and stats on top.</li><li><strong>Nutrition:</strong> Body &amp; weight holds your trend, measurements and photos; your habits sit under Plan.</li><li><strong>Scripture:</strong> Highlights &amp; notes are one tab, and the Bible Library is at the bottom of Study.</li><li><strong>Marriage &amp; Family:</strong> today’s check-in is on This week, and milestones sit with memories.</li></ul>', go: ['scripture', 'scrTab', 'marks', 'Open Highlights & notes'] },
     { title: 'Someday is a filter', body: '<p>In Tasks → All tasks, tap the <strong>Someday</strong> chip to see your someday ideas. Tasks you add while it is on go to Someday.</p><p>Tasks → People and Media → Stats are hidden to start. Tap the sliders at the end of the tabs to bring them back.</p>', go: ['tasks', 'taskTab', 'all', 'Open All tasks'] },

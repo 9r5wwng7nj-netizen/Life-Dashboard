@@ -3,6 +3,7 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- YouTube: the Error 153 note under the player shows only when the app is opened as a file; on the hosted copy YouTube plays in the Media library (checked on the live site) and note timestamps work.
 - Fewer tabs. Workouts: Calendar & stats joins History (calendar on top) and Import / Export moves to Settings & Sync → Data & sync. Nutrition: Body joins Weight & expenditure as Body & weight, and History (habits & adherence) moves under Plan. Scripture: Notes join Highlights as Highlights & notes, and Library moves to the bottom of Study (links to it scroll there). Marriage & Family: Check-ins fold into This week, and Milestones join Memories. Tasks: Someday becomes a filter chip in All tasks (tasks added with it on are Someday). Old tab ids still open the merged tab.
 - Tasks → People and Media → Stats start hidden. Settings saved before this change get them hidden once (`S.tabsV` = 2); showing them again afterwards is kept.
 - Dashboard cards can be hidden with the sliders button beside the greeting (`S.hiddenCards`, synced; the cards are listed in `DASH_CARDS`).
