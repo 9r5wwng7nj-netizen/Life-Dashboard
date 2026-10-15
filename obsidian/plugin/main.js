@@ -103,6 +103,7 @@ const core = (() => {
     return {
       path: file.path, folder: file.folder || '', title, family, type: String(fm.type || ''), date,
       mtime: file.mtime || 0, scripture: plain(fm.scripture || fm.passage), series: plain(fm.series),
+      roles: plain(fm.roles), lastContact: isoDate(fm.last_contact),
       projectLink: linkTarget(fm.project), projectPath: null, status: status.key, statusLabel: status.label,
       kind: family ? FAMILIES[family].kind : '', cover: coverText(title, fm.scripture || fm.passage),
       color: PALETTE[hash(title) % PALETTE.length], hub: family === 'series' || String(fm.type || '').toLowerCase() === 'project'
@@ -236,7 +237,9 @@ const render = (() => {
   function cover(doc, n, big) {
     const c = el(doc, 'div', 'ldl-cover' + (big ? ' ldl-cover-big' : ''));
     c.style.background = n.color;
-    c.append(el(doc, 'span', 'ldl-cover-kind', n.kind || 'Note'), el(doc, 'span', 'ldl-cover-title', n.cover || n.title));
+    // A person's cover shows their initials; everything else its passage or short title.
+    const initials = n.family === 'person' ? String(n.title).split(/\s+/).filter(w => /^[A-Za-z]/.test(w)).map(w => w[0].toUpperCase()).slice(0, 2).join('') : '';
+    c.append(el(doc, 'span', 'ldl-cover-kind', n.kind || 'Note'), el(doc, 'span', 'ldl-cover-title' + (initials ? ' ldl-cover-initials' : ''), initials || n.cover || n.title));
     return c;
   }
   function chip(doc, n) { const c = el(doc, 'span', 'ldl-chip ldl-st-' + (n.status || 'none'), n.statusLabel); return n.statusLabel ? c : null; }
@@ -376,10 +379,11 @@ const render = (() => {
   function titleCard(doc, n, hubNote, on) {
     const c = el(doc, 'div', 'ldl-titlecard');
     const txt = el(doc, 'div', 'ldl-titlecard-text');
-    const meta = [n.scripture, n.date ? core.fmtDate(n.date, core.ymd(new Date())) : '', n.series].filter(Boolean).join(' · ');
-    if (meta) txt.append(el(doc, 'div', 'ldl-titlecard-meta', meta));
+    const today = core.ymd(new Date());
+    const meta = (n.family === 'person' ? [n.roles, n.lastContact ? `Last contact ${core.fmtDate(n.lastContact, today)}` : ''] : [n.scripture, n.date ? core.fmtDate(n.date, today) : '', n.series]).filter(Boolean).join(' · ');
+    txt.append(el(doc, 'div', 'ldl-titlecard-meta' + (meta ? '' : ' ldl-muted'), meta || (n.family === 'person' ? 'Person' : n.kind || 'Note')));
     const actions = el(doc, 'div', 'ldl-titlecard-actions');
-    if (n.statusLabel || on.status) { const st = el(doc, 'button', 'ldl-chip ldl-st-' + (n.status || 'none'), n.statusLabel || 'Set status'); st.type = 'button'; st.title = 'Change status'; st.addEventListener('click', () => on.status(n.path)); actions.append(st); }
+    if (!['person', 'area', 'classic'].includes(n.family) && (n.statusLabel || on.status)) { const st = el(doc, 'button', 'ldl-chip ldl-st-' + (n.status || 'none'), n.statusLabel || 'Set status'); st.type = 'button'; st.title = 'Change status'; st.addEventListener('click', () => on.status(n.path)); actions.append(st); }
     if (hubNote) { const p = el(doc, 'button', 'ldl-link', `Part of ${hubNote.title}`); p.type = 'button'; p.addEventListener('click', () => on.hub(hubNote.path)); actions.append(p); }
     if (n.hub && n.count) { const p = el(doc, 'button', 'ldl-link', `${n.count} notes in this project`); p.type = 'button'; p.addEventListener('click', () => on.hub(n.path)); actions.append(p); }
     if (n.family === 'meeting' && on.meetingTasks) { const b = el(doc, 'button', 'ldl-link', 'Send action items to Tasks'); b.type = 'button'; b.addEventListener('click', () => on.meetingTasks(n.path)); actions.append(b); }

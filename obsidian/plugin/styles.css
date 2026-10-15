@@ -33,7 +33,7 @@
 .ldl-cover { width: 100%; aspect-ratio: 3 / 4; border-radius: 14px; color: #fff; padding: 12px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; text-align: left; }
 .ldl-cover-big { width: 104px; flex-shrink: 0; aspect-ratio: auto; min-height: 136px; }
 .ldl-cover-kind { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .85; }
-.ldl-cover-title { font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 21px; line-height: 1.08; overflow-wrap: anywhere; }
+.ldl-cover-title { font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 21px; line-height: 1.08; overflow-wrap: break-word; hyphens: auto; }
 .ldl-cover-big .ldl-cover-title { font-size: 24px; }
 
 .ldl-shelf { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; margin: 0 -20px; padding-left: 20px; padding-right: 20px; scroll-snap-type: x proximity; }
@@ -147,3 +147,5 @@
 .ldl-foldermark { width: 28px; height: 6px; border-radius: 3px; margin-bottom: auto; }
 .is-mobile .ldl-cover-big .ldl-cover-title, .ldl-cover-big .ldl-cover-title { font-size: 21px; }
 @container (min-width: 760px) { .ldl-cover-big .ldl-cover-title { font-size: 26px; } }
+.ldl-cover .ldl-cover-title.ldl-cover-initials { font-size: 34px; letter-spacing: .02em; }
+.ldl-titlecard .ldl-cover .ldl-cover-title.ldl-cover-initials { font-size: 26px; }

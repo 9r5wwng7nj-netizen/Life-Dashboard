@@ -147,15 +147,16 @@ test('@Name links a task to a person; day words after @ stay dates', async ({ pa
   const r = await page.evaluate(() => {
     const p = s => { const x = parseTaskInput(s); return [x.title, x.person, x.atPerson, x.due]; };
     const fri = parseTaskInput('call @fri').due, tmr = addDays(ymd(), 1);
-    return { tmr, fri, a: p('Coffee with @Sam tomorrow'), b: p('call @fri'), c: p('Lunch @Sam Rivera'), d: p('Text @sam Tomorrow'), e: p('Visit @Sunny'), f: p('email me@example.com'), g: p('Ask @sam about the budget') };
+    return { tmr, fri, a: p('Coffee with @Sam tomorrow'), b: p('call @fri'), c: p('Lunch @Sam Rivera'), d: p('Text @sam Tomorrow'), e: p('Visit @Sunny'), h: p('Call @dwayne conner tomorrow'), f: p('email me@example.com'), g: p('Ask @sam about the budget') };
   });
-  expect(r.a).toEqual(['Coffee with', 'Sam', true, r.tmr]);
+  expect(r.a).toEqual(['Coffee with Sam', 'Sam', true, r.tmr]); // the name stays in the title
   expect(r.b).toEqual(['call', null, false, r.fri]);
-  expect(r.c).toEqual(['Lunch', 'Sam Rivera', true, null]);
-  expect(r.d).toEqual(['Text', 'Sam', true, r.tmr]); // a day after the name is still the date
-  expect(r.e).toEqual(['Visit', 'Sunny', true, null]); // a name that starts like "sun" is a name
+  expect(r.c).toEqual(['Lunch Sam Rivera', 'Sam Rivera', true, null]);
+  expect(r.d).toEqual(['Text Sam', 'Sam', true, r.tmr]); // a day after the name is still the date
+  expect(r.e).toEqual(['Visit Sunny', 'Sunny', true, null]); // a name that starts like "sun" is a name
   expect(r.f[1]).toBeNull();
-  expect(r.g).toEqual(['Ask about the budget', 'Sam', true, null]); // a lowercase word after the name is not a surname
+  expect([r.h[0], r.h[1]]).toEqual(['Call Dwayne conner', 'Dwayne']); // with no profile yet, a lowercase second word stays a plain word
+  expect(r.g).toEqual(['Ask Sam about the budget', 'Sam', true, null]); // a lowercase word after the name is not a surname
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
@@ -166,11 +167,13 @@ test('@Name finds the existing profile, and asks Obsidian to create missing ones
   await page.evaluate(prefix => { window.LD_OBSIDIAN = { notes: [], people: ['Sam Rivera', 'Ana Lee', 'Ana Cruz'], prefix }; window.dispatchEvent(new Event('ld-obsidian')); }, PREFIX);
   await expect.poll(() => lastMessage(page)).toEqual({ people: ['Jo'] });
   expect(await page.evaluate(() => 'personAt' in TK()[0])).toBe(false);
+  const known = await page.evaluate(() => { LD_OBSIDIAN.people.push('Dwayne Conner'); const x = parseTaskInput('Call @dwayne conner tomorrow'); return [x.title, x.person]; });
+  expect(known).toEqual(['Call Dwayne Conner', 'Dwayne Conner']); // a profile that exists: full name, kept in the title
   const names = await page.evaluate(() => ['@sam', '@Ana', '@ana cruz'].map(x => parseTaskInput('Hi ' + x).person));
   expect(names).toEqual(['Sam Rivera', 'Ana', 'Ana Cruz']); // a unique first name finds the profile; two Anas stay as typed
   await page.evaluate(() => { history.replaceState(null, '', location.pathname); addTask('Thank @Sam today'); });
   await page.waitForTimeout(500);
   expect(await lastMessage(page)).toBeNull(); // Sam Rivera already has a profile
-  expect(await page.evaluate(() => TK().find(t => t.title === 'Thank').person)).toBe('Sam Rivera');
+  expect(await page.evaluate(() => TK().find(t => t.title === 'Thank Sam').person)).toBe('Sam Rivera'); // shown as typed, linked to the full profile
   expect(errors, errors.join('\n')).toEqual([]);
 });
