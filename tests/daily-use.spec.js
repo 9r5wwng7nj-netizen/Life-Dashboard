@@ -166,23 +166,26 @@ test('on a touch screen, buttons and tabs are finger-sized and no text is under 
   await context.close();
 });
 
-test('section tabs can be hidden and shown again, and Tasks hides Stats to start', async ({ page }) => {
+test('section tabs can be hidden and shown again, and Tasks hides Stats and People to start', async ({ page }) => {
   const errors = await open(page);
   await page.evaluate(() => { ui.taskTab = 'stats'; go('tasks'); });
   const tab = id => page.locator(`#view [data-action="setTab"][data-key="taskTab"][data-val="${id}"]`);
   await expect(tab('stats')).toHaveCount(0);
+  await expect(tab('people')).toHaveCount(0);
+  await expect(page.locator('#view [role="group"] [data-val="plan"]')).toHaveCount(1);
   await expect(tab('today')).toHaveAttribute('aria-pressed', 'true'); // a hidden tab that was open falls back to the first
   await expect(page.locator('#view')).toContainText('Big 3');
 
   await page.click('#view [data-action="tabsEdit"][data-key="taskTab"]');
   const box = id => page.locator(`#modal [data-change="tabsToggle"][data-val="${id}"]`);
   await expect(box('stats')).not.toBeChecked();
+  await expect(box('people')).not.toBeChecked();
   await box('stats').check();
-  await box('someday').uncheck();
+  await box('templates').uncheck();
   await page.click('#modal button:has-text("Done")');
   await expect(tab('stats')).toHaveCount(1);
-  await expect(tab('someday')).toHaveCount(0);
-  expect(await page.evaluate(() => S.hiddenTabs.taskTab)).toEqual(['someday']);
+  await expect(tab('templates')).toHaveCount(0);
+  expect(await page.evaluate(() => S.hiddenTabs.taskTab)).toEqual(['people', 'templates']);
 
   // Every tab cannot be hidden.
   await page.evaluate(() => go('recipes'));

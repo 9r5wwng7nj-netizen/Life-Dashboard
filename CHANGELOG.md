@@ -3,6 +3,9 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Fewer tabs. Workouts: Calendar & stats joins History (calendar on top) and Import / Export moves to Settings & Sync → Data & sync. Nutrition: Body joins Weight & expenditure as Body & weight, and History (habits & adherence) moves under Plan. Scripture: Notes join Highlights as Highlights & notes, and Library moves to the bottom of Study (links to it scroll there). Marriage & Family: Check-ins fold into This week, and Milestones join Memories. Tasks: Someday becomes a filter chip in All tasks (tasks added with it on are Someday). Old tab ids still open the merged tab.
+- Tasks → People and Media → Stats start hidden. Settings saved before this change get them hidden once (`S.tabsV` = 2); showing them again afterwards is kept.
+- Dashboard cards can be hidden with the sliders button beside the greeting (`S.hiddenCards`, synced; the cards are listed in `DASH_CARDS`).
 - Every tab row ends with a Show or hide tabs button; hidden tabs are stored in `S.hiddenTabs` (synced) and Tasks → Stats starts hidden. A hidden tab that was open falls back to the section's first tab.
 - Recipes & Meals: Hosting & meal trains is now Hosting. Bringing and receiving meal-train meals is no longer offered; saved `bring` and `receive` records are kept but not shown.
 - Link reader: a Cloudflare Worker (`reader/`) fetches pages for the app. Saving a recipe link fills in the whole recipe (ingredients, steps, servings, time, photo); saving an article keeps its title, author, picture and a readable copy; TikTok links get their caption. Import a recipe gains a web-address box. A pasted caption with an ingredient list also becomes the recipe's ingredients and steps, for Facebook and Instagram, which cannot be read.

@@ -163,7 +163,9 @@ const SETTINGS_DEFAULT = {
   targets: { cal: 2400, p: 180, c: 240, f: 75 },
   translation: 'web', esvKey: '', collapsed: false, view: 'dashboard', lastExport: null,
   aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: '', tour: '', newsSeen: '', taskHelp: false,
-  hiddenTabs: { taskTab: ['stats'] } // section tabs the person chose to hide, by section; see tabs()
+  hiddenTabs: { taskTab: ['stats', 'people'], medTab: ['stats'] }, // section tabs the person chose to hide, by section; see tabs()
+  tabsV: 0, // which default-hidden tabs have been applied to saved settings (see below)
+  hiddenCards: [] // dashboard cards the person chose to hide; see DASH_CARDS
 };
 let S = loadSettings();
 function loadSettings() {
@@ -171,6 +173,12 @@ function loadSettings() {
   catch (e) { return structuredClone(SETTINGS_DEFAULT); }
 }
 function saveSettings() { localStorage.setItem('ld.settings', JSON.stringify(S)); }
+// Tabs that started out hidden in 2026-10 are hidden once for people who already had settings; after that the person's choice stands.
+if ((S.tabsV || 0) < 2) {
+  const H = S.hiddenTabs = { ...(S.hiddenTabs || {}) };
+  for (const [k, ids] of Object.entries(SETTINGS_DEFAULT.hiddenTabs)) H[k] = [...new Set([...(H[k] || []), ...ids])];
+  S.tabsV = 2; try { if (localStorage.getItem('ld.settings')) saveSettings(); } catch (e) { console.warn(e); } // a brand-new person has nothing saved yet
+}
 
 // Units — all body/lift weights are stored in kg, displayed in the user's unit
 const LB = 0.45359237;
@@ -634,6 +642,14 @@ function miniBar(label, val, target, color) {
   const pct = target ? Math.min(100, val / target * 100) : 0;
   return `<div><div class="flex justify-between text-xs mb-0.5"><span class="font-medium">${label}</span><span class="tabular-nums muted">${fmtNum(val)}/${fmtNum(target)}g</span></div><div class="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${color}"></div></div></div>`;
 }
+// Dashboard cards the person can hide (S.hiddenCards); the order here is the order on the page.
+const DASH_CARDS = [['nutrition', 'Nutrition today', 'apple'], ['weight', 'Body weight', 'scale'], ['training', 'Training', 'dumbbell'], ['tasks', 'Tasks', 'list-checks'], ['faith', 'Faith & reflection', 'book-open'], ['family', 'Marriage & family', 'heart'], ['meals', 'Meals', 'chef-hat']];
+const dashShow = id => !(S.hiddenCards || []).includes(id);
+function dashCardsModal() {
+  Modal.open(modalShell('Show or hide cards', `<p class="text-sm muted">Choose which cards the dashboard shows. Hiding a card hides nothing else; the section is still in the menu.</p>
+    <div class="space-y-1">${DASH_CARDS.map(([id, label, ic]) => `<label class="flex items-center gap-3 py-1.5"><input type="checkbox" class="accent-brand-600" data-change="dashCardToggle" data-val="${id}" ${dashShow(id) ? 'checked' : ''}> ${icon(ic, 'w-4 h-4 muted')}<span>${esc(label)}</span></label>`).join('')}</div>`,
+    `<button type="button" class="btn btn-primary" data-action="closeModal">Done</button>`), { onClose: () => render() });
+}
 function renderDashboard() {
   const t = ymd(), tot = dayTotals(t), T = targetsFor(t);
   const tr = trendSeries(), last = tr[tr.length - 1];
@@ -651,29 +667,29 @@ function renderDashboard() {
   const needBackup = hasData && (!S.lastExport || Date.now() - new Date(S.lastExport) > 7 * 864e5);
   const lastMedia = Store.get('media').filter(m => m.status === 'active').sort((a, b) => (b.updated || '').localeCompare(a.updated || ''))[0] || Store.get('media').filter(m => m.status === 'queue').sort((a, b) => (a.qpos ?? 1e9) - (b.qpos ?? 1e9))[0];
   return `
-  <div class="mb-6"><h2 class="text-2xl font-bold tracking-tight">${greet}${S.name ? `, ${esc(S.name)}` : ''}</h2><p class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div>
+  <div class="mb-6 flex items-start gap-2"><div class="flex-1 min-w-0"><h2 class="text-2xl font-bold tracking-tight">${greet}${S.name ? `, ${esc(S.name)}` : ''}</h2><p class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div><button class="btn btn-sm btn-ghost" data-action="dashCardsEdit" aria-label="Show or hide cards" title="Show or hide cards">${icon('sliders-horizontal', 'w-4 h-4')}</button></div>
   ${dashNotices()}
   ${needBackup ? `<div class="card mb-4 flex flex-wrap items-center gap-3 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40">${icon('hard-drive-download', 'w-5 h-5 text-amber-600')}<div class="flex-1 text-sm min-w-[12rem]">${S.lastExport ? `Last backup: ${fmtDate(ymd(new Date(S.lastExport)))}.` : "You haven't exported a backup yet."} Your data lives only in this browser.</div><button class="btn btn-sm btn-primary" data-action="exportAll">Back up now</button></div>` : ''}
   <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-    <div class="card">${cardHead('apple', 'Nutrition today', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="nutrition">Log ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+    ${dashShow('nutrition') ? `<div class="card">${cardHead('apple', 'Nutrition today', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="nutrition">Log ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       <div class="flex items-center gap-4"><div class="relative shrink-0">${ring(tot.cal / T.cal, '#0d9488', 108, 11)}<div class="absolute inset-0 grid place-items-center text-center"><div><div class="text-xl font-bold tabular-nums">${fmtNum(tot.cal)}</div><div class="text-[11px] muted">of ${fmtNum(T.cal)} kcal</div></div></div></div>
       <div class="flex-1 space-y-2">${miniBar('Protein', tot.p, T.p, '#e11d48')}${miniBar('Carbs', tot.c, T.c, '#f59e0b')}${miniBar('Fat', tot.f, T.f, '#6366f1')}</div></div>
-    </div>
-    <div class="card">${cardHead('scale', 'Body weight', `<button class="btn btn-sm btn-ghost" data-action="goNutTab" data-tab="trend">Trend ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+    </div>` : ''}
+    ${dashShow('weight') ? `<div class="card">${cardHead('scale', 'Body weight', `<button class="btn btn-sm btn-ghost" data-action="goNutTab" data-tab="trend">Trend ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       <div class="flex items-end gap-4"><div><div class="text-xs muted">7-day trend</div><div class="text-2xl font-bold tabular-nums">${last ? wFmt(last.t) : '–'}</div>
       ${last && wk != null ? `<div class="text-xs ${last.t - wk > 0 ? 'text-amber-600' : 'text-emerald-600'}">${last.t - wk > 0 ? '▲' : '▼'} ${fmtNum(Math.abs(toUnit(last.t) - toUnit(wk)), 1)} ${S.unit} this week</div>` : '<div class="text-xs muted">Log weigh-ins to see a trend</div>'}</div>
       <div class="flex-1">${sparkline(tr.slice(-30).map(p => p.t))}</div></div>
       <div class="flex items-center gap-2 mt-3"><input type="number" step="0.1" inputmode="decimal" class="input" placeholder="Today's weight (${S.unit})" value="${wDisp(day(t).weight)}" data-change="nutWeightToday"><span class="text-xs muted shrink-0">${day(t).weight != null ? 'Logged ✓' : ''}</span></div>
-    </div>
-    <div class="card">${cardHead('dumbbell', 'Training', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="fitness">Open ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+    </div>` : ''}
+    ${dashShow('training') ? `<div class="card">${cardHead('dumbbell', 'Training', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="fitness">Open ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       ${aw ? `<div class="rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 p-3 flex items-center gap-3"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span><div class="flex-1"><div class="font-medium">${esc(aw.name)}</div><div class="text-xs muted">In progress since ${new Date(aw.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div></div><button class="btn btn-sm btn-primary" data-action="go" data-view="fitness">Resume</button></div>`
         : `<div class="grid grid-cols-2 gap-2 mb-3"><div class="stat"><div class="text-xs muted">This week</div><div class="text-xl font-bold">${weekCount}</div></div><div class="stat"><div class="text-xs muted">Last workout</div><div class="text-sm font-semibold truncate">${lw ? esc(lw.name) : '—'}</div><div class="text-xs muted">${lw ? fmtDate(wDate(lw), { month: 'short', day: 'numeric' }) : ''}</div></div></div>
         <div class="flex flex-wrap gap-1.5">${Store.get('routines').slice(0, 4).map(r => `<button class="btn btn-sm" data-action="startRoutine" data-id="${r.id}">${icon('play', 'w-3 h-3')} ${esc(r.name)}</button>`).join('')}<button class="btn btn-sm" data-action="startEmpty">${icon('plus', 'w-3 h-3')} Empty</button></div>`}
-    </div>
-    <div class="card">${cardHead('list-checks', 'Tasks', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="tasks">All ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+    </div>` : ''}
+    ${dashShow('tasks') ? `<div class="card">${cardHead('list-checks', 'Tasks', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="tasks">All ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       ${dashTasks(showTasks)}
-    </div>
-    <div class="card">${cardHead('book-open', 'Faith & reflection')}
+    </div>` : ''}
+    ${dashShow('faith') ? `<div class="card">${cardHead('book-open', 'Faith & reflection')}
       <div class="grid grid-cols-3 gap-2 mb-3">
         <button class="stat text-left hover:ring-2 ring-brand-400" data-action="journalNew" data-type="journal"><div class="text-xs muted">Journal</div><div class="text-sm font-semibold">${journaledToday ? 'Written ✓' : 'Write'}</div></button>
         <button class="stat text-left hover:ring-2 ring-brand-400" data-action="gratitudeOpen"><div class="text-xs muted">Gratitude</div><div class="text-sm font-semibold">3 things</div></button>
@@ -682,13 +698,13 @@ function renderDashboard() {
       ${dashScripture()}
       <p class="text-sm"><span class="muted">Journal prompt:</span> ${esc(todaysJournalPrompt())}</p>
       ${lastMedia ? `<button class="mt-3 w-full text-left text-sm rounded-lg border border-slate-200 dark:border-slate-800 p-2 hover:bg-slate-50 dark:hover:bg-slate-800" data-action="mediaOpen" data-id="${lastMedia.id}"><span class="muted text-xs">${lastMedia.status === 'active' ? 'Continue' : 'Up next'}${mProgress(lastMedia) != null ? ` · ${mProgress(lastMedia)}%` : ''}</span><div class="font-medium truncate">${esc(lastMedia.title || 'Untitled')}</div></button>` : ''}
-    </div>
-    <div class="card">${cardHead('heart', 'Marriage & family', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="family">Open ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+    </div>` : ''}
+    ${dashShow('family') ? `<div class="card">${cardHead('heart', 'Marriage & family', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="family">Open ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       ${dashFamily()}
       ${ms.length ? `<div class="space-y-1.5 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">${ms.map(m => `<div class="flex items-center gap-2 text-sm"><span class="chip">${daysBetween(t, m.date) === 0 ? 'Today' : `${daysBetween(t, m.date)}d`}</span><span class="truncate">${esc(m.title)}</span></div>`).join('')}</div>` : ''}
-    </div>
-    ${dashMeals()}
-  </div>`;
+    </div>` : ''}
+    ${dashShow('meals') ? dashMeals() : ''}
+  </div>${DASH_CARDS.every(([id]) => !dashShow(id)) ? `<p class="text-sm muted text-center mt-6">Every card is hidden. Tap <button class="underline" data-action="dashCardsEdit">Show or hide cards</button> to bring some back.</p>` : ''}`;
 }
 
 /* =====================================================================
@@ -891,8 +907,9 @@ const routineSummary = r => { const g = supersetGroups(r.exercises).filter(Boole
 function renderFitness() {
   if (ui.editW) return fitEditor(ui.editW);
   const aw = Store.get('activeWorkout');
-  const t = tabs('fitTab', [['workout', aw ? 'Active workout' : 'Workout', aw ? 'activity' : 'play'], ['history', 'History', 'history'], ['routines', 'Routines', 'folder'], ['library', 'Exercises', 'library'], ['progress', 'Progress', 'trending-up'], ['stats', 'Calendar & stats', 'calendar-days'], ['data', 'Import / Export', 'arrow-down-up']]);
-  return t + ({ workout: fitWorkoutTab, history: fitHistoryTab, routines: fitRoutinesTab, library: fitLibraryTab, progress: fitProgressTab, stats: fitStatsTab, data: fitDataTab }[ui.fitTab] || fitWorkoutTab)();
+  ui.fitTab = { stats: 'history', data: 'history' }[ui.fitTab] || ui.fitTab; // tabs merged into History in 2026-10
+  const t = tabs('fitTab', [['workout', aw ? 'Active workout' : 'Workout', aw ? 'activity' : 'play'], ['history', 'History', 'history'], ['routines', 'Routines', 'folder'], ['library', 'Exercises', 'library'], ['progress', 'Progress', 'trending-up']]);
+  return t + ({ workout: fitWorkoutTab, history: fitHistoryAll, routines: fitRoutinesTab, library: fitLibraryTab, progress: fitProgressTab }[ui.fitTab] || fitWorkoutTab)();
 }
 function routineCard(r, isNext) {
   const lastDone = W().find(w => w.routineId === r.id || (!w.routineId && w.name === r.name));
@@ -982,9 +999,11 @@ function fitEditor(w) {
   <form data-submit="awAddExercise" class="card mt-4 flex gap-2"><input name="name" list="ex-list" class="input" placeholder="Add exercise…" autocomplete="off" required><button class="btn btn-primary">${icon('plus')} Add</button></form>
   <p class="text-xs muted mt-2">Sets with any value entered are saved. Empty sets are dropped.</p>${exDatalist('ex-list')}</div>`;
 }
+// History: the month calendar and stats on top, then every workout
+const fitHistoryAll = () => (W().length ? fitStatsTab() : '') + fitHistoryTab();
 function fitHistoryTab() {
   const ws = W();
-  if (!ws.length) return emptyState('history', 'No workouts logged yet', 'Finish a workout, log a past one, or import your Hevy history.', `<div class="flex justify-center gap-2"><button class="btn" data-action="logPast">${icon('calendar-plus')} Log past workout</button><button class="btn btn-primary" data-action="setTab" data-key="fitTab" data-val="data">${icon('upload')} Import from Hevy</button></div>`);
+  if (!ws.length) return emptyState('history', 'No workouts logged yet', 'Finish a workout, log a past one, or import your Hevy history.', `<div class="flex justify-center gap-2"><button class="btn" data-action="logPast">${icon('calendar-plus')} Log past workout</button><button class="btn btn-primary" data-action="hevyImport">${icon('upload')} Import from Hevy</button></div>`);
   let month = '', out = `<div class="flex justify-end mb-1"><button class="btn btn-sm" data-action="logPast">${icon('calendar-plus', 'w-3.5 h-3.5')} Log past workout</button></div>`;
   for (const w of ws.slice(0, ui.histLimit)) {
     const m = new Date(w.start).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }), g = supersetGroups(w.exercises);
@@ -1139,17 +1158,6 @@ function fitStatsTab() {
       ${ms.length ? `<div class="space-y-1.5">${ms.map(([mm, v]) => `<div class="flex items-center gap-2 text-sm"><span class="w-24 shrink-0 truncate">${mm}</span><div class="flex-1 h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"><div class="h-full rounded-full bg-brand-500" style="width:${v / msMax * 100}%"></div></div><span class="w-12 text-right tabular-nums text-xs muted">${fmtNum(v, 1)}</span></div>`).join('')}</div><p class="text-xs muted mt-2">Working sets per muscle (secondary muscles count as ½).</p>` : '<p class="text-sm muted">No data this month.</p>'}</div>
     <div class="card overflow-x-auto">${cardHead('grid-3x3', 'Sets per muscle per week')}
       ${muscRows.length ? `<table class="w-full text-sm"><thead><tr class="text-xs muted"><th class="text-left font-medium py-1">Muscle</th>${weeks.map(s => `<th class="font-medium text-center">${fmtDate(s, { month: 'short', day: 'numeric' })}</th>`).join('')}</tr></thead><tbody>${muscRows.map(mm => `<tr class="border-t border-slate-100 dark:border-slate-800"><td class="py-1">${mm}</td>${wk.map(x => `<td class="text-center tabular-nums"><span class="inline-block min-w-[2.5rem] rounded px-1 py-0.5 ${shade(x[mm])}">${x[mm] ? fmtNum(x[mm], 1) : '·'}</span></td>`).join('')}</tr>`).join('')}</tbody></table><p class="text-xs muted mt-2">Weeks start Monday. Green = 5+ sets, darker = 10+.</p>` : '<p class="text-sm muted">No sets in these four weeks.</p>'}</div></div>`;
-}
-function fitDataTab() {
-  return `<div class="grid md:grid-cols-2 gap-4">
-    <div class="card">${cardHead('upload', 'Import from Hevy')}
-      <p class="text-sm muted mb-3">In the Hevy app, go to Settings → Export &amp; Import Data → Export Workouts, then choose the CSV here. Duplicates (same title + start time) are skipped, so re-importing is safe. Supersets and timed/distance sets come across, and exercise types are detected from your data.</p>
-      <p class="text-sm muted mb-3">Hevy's export includes workouts only — rebuild routines on the Routines tab.</p>
-      <button class="btn btn-primary" data-action="hevyImport">${icon('file-up')} Choose Hevy CSV…</button></div>
-    <div class="card">${cardHead('download', 'Export workouts')}
-      <p class="text-sm muted mb-3">Hevy-format CSV works with spreadsheets and other trackers. JSON includes workouts, routines, programs and your exercise settings — use Settings &amp; Sync for a full backup.</p>
-      <div class="flex flex-wrap gap-2"><button class="btn" data-action="hevyExport">${icon('sheet')} Export CSV (Hevy format)</button><button class="btn" data-action="fitJsonExport">${icon('braces')} Export JSON</button></div></div>
-  </div>`;
 }
 function workoutMarkdown(w) {
   const g = supersetGroups(w.exercises);
@@ -1653,8 +1661,9 @@ function macroBar(label, val, target, color, unit = 'g') {
     <div class="text-xs muted mt-0.5">${target ? (val <= target ? `${fmtNum(target - val)}${unit} left` : `${fmtNum(val - target)}${unit} over`) : ''}</div></div>`;
 }
 function renderNutrition() {
-  return tabs('nutTab', [['today', 'Daily log', 'utensils'], ['plan', 'Plan', 'target'], ['trend', 'Weight & expenditure', 'line-chart'], ['body', 'Body', 'ruler'], ['foods', 'Foods & meals', 'bookmark'], ['history', 'History', 'calendar-days']])
-    + ({ today: nutToday, plan: nutPlanTab, trend: nutTrend, body: nutBody, foods: nutFoods, history: nutHistory }[ui.nutTab] || nutToday)();
+  ui.nutTab = { body: 'trend', history: 'plan' }[ui.nutTab] || ui.nutTab; // tabs merged in 2026-10
+  return tabs('nutTab', [['today', 'Daily log', 'utensils'], ['plan', 'Plan', 'target'], ['trend', 'Body & weight', 'line-chart'], ['foods', 'Foods & meals', 'bookmark']])
+    + ({ today: nutToday, plan: () => nutPlanTab() + `<div class="mt-6">${nutHistory()}</div>`, trend: () => nutTrend() + `<div class="mt-6">${nutBody()}</div>`, foods: nutFoods }[ui.nutTab] || nutToday)();
 }
 function checkinBanner() {
   const p = nutPlan(); if (!p) return '';
@@ -2254,6 +2263,8 @@ function openSettings() {
       <p class="text-xs muted">Public-domain translations load from bible-api.com with no key. For ESV, create a free key at api.esv.org. The key stays in this browser and is left out of exports.</p></section>
     <section class="space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 p-4"><h4 class="font-semibold text-sm flex items-center gap-2">${icon('database', 'w-4 h-4')} Data &amp; sync</h4>
       <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-primary" data-action="exportAll">${icon('download')} Back up personal data + photos</button><button type="button" class="btn" data-action="importAll">${icon('upload')} Import backup…</button><button type="button" class="btn" data-action="hevyImport">${icon('dumbbell')} Import Hevy CSV…</button><button type="button" class="btn" data-action="mfImport">${icon('apple')} Import MacroFactor…</button></div>
+      <div class="flex flex-wrap items-center gap-2"><span class="text-sm muted">Export workouts:</span><button type="button" class="btn btn-sm" data-action="hevyExport">${icon('sheet', 'w-3.5 h-3.5')} CSV (Hevy format)</button><button type="button" class="btn btn-sm" data-action="fitJsonExport">${icon('braces', 'w-3.5 h-3.5')} JSON</button></div>
+      <p class="text-xs muted">Hevy import: in Hevy, go to Settings → Export &amp; Import Data → Export Workouts, then choose that CSV. Workouts already here (same title and start time) are skipped, so importing again is safe.</p>
       <p class="text-xs muted">Backups include personal records and photos. Downloaded Bibles, imported reference libraries, the Obsidian folder connection and API keys are device-specific and are not included.</p>
       <p class="text-xs muted">Last backup: ${S.lastExport ? fmtDateTime(S.lastExport) : 'never'} · <span id="storage-info">checking storage…</span></p>
       <div id="sync-box" class="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">${syncBox()}</div>
@@ -2712,8 +2723,10 @@ function rdGo(b, c, focus = null, plan = null) {
 }
 function renderScripture() {
   const due = memDue().length, pr = prayToday().length;
-  return tabs('scrTab', [['read', 'Read', 'book-open'], ['plans', 'Plans', 'calendar-check'], ['search', 'Search', 'sparkles'], ['study', 'Study', 'languages'], ['marks', 'Highlights', 'highlighter'], ['notes', 'Notes', 'notebook-text'], ['memory', `Memorize${due ? ` (${due})` : ''}`, 'brain'], ['prayer', `Prayer${pr ? ` (${pr})` : ''}`, 'hand-heart'], ['library', 'Library', 'library']])
-    + ({ read: scrRead, plans: scrPlans, search: scrSearch, study: scrStudy, marks: scrMarks, notes: scrNotes, memory: scrMemory, prayer: scrPrayer, library: scrLibrary }[ui.scrTab] || scrRead)();
+  if (ui.scrTab === 'library') { ui.scrTab = 'study'; setTimeout(() => $('#scr-library')?.scrollIntoView({ block: 'start' }), 0); } // Library sits at the bottom of Study
+  ui.scrTab = { notes: 'marks' }[ui.scrTab] || ui.scrTab; // tabs merged in 2026-10
+  return tabs('scrTab', [['read', 'Read', 'book-open'], ['plans', 'Plans', 'calendar-check'], ['search', 'Search', 'sparkles'], ['study', 'Study', 'languages'], ['marks', 'Highlights & notes', 'highlighter'], ['memory', `Memorize${due ? ` (${due})` : ''}`, 'brain'], ['prayer', `Prayer${pr ? ` (${pr})` : ''}`, 'hand-heart']])
+    + ({ read: scrRead, plans: scrPlans, search: scrSearch, study: () => scrStudy() + `<section id="scr-library" class="mt-8"><h2 class="font-semibold mb-3 flex items-center gap-2">${icon('library', 'w-4 h-4')} Library</h2>${scrLibrary()}</section>`, marks: () => scrMarks() + `<h2 class="font-semibold mt-8 mb-3 flex items-center gap-2">${icon('notebook-text', 'w-4 h-4')} Notes</h2>` + scrNotes(), memory: scrMemory, prayer: scrPrayer }[ui.scrTab] || scrRead)();
 }
 function scrRead() {
   const R = ui.rd, tr = rdTr(), b = R.b, c = R.c, hl = hlMap(), name = BOOKS[b][0], tm = [tr, ...R.cmp.filter(x => x !== tr)].slice(0, 3);
@@ -2723,7 +2736,7 @@ function scrRead() {
     return `<span role="button" tabindex="0" aria-pressed="${sel}" id="v${x.v}" class="cursor-pointer rounded px-0.5 transition ${sel ? 'underline decoration-2 decoration-brand-500 underline-offset-4' : ''} ${foc ? 'outline outline-2 outline-amber-400' : ''}" style="${h && h.color ? `background:${HL[h.color]}` : ''}" data-action="vTap" data-v="${x.v}"><sup class="text-brand-600 dark:text-brand-400 font-sans font-semibold mr-0.5 select-none">${x.v}</sup>${esc(x.t)}${h && h.bookmark ? ' 🔖' : ''} </span>${h && h.note ? `<button class="mx-0.5" aria-label="Open verse note" data-action="vNoteOpen" data-v="${x.v}" title="${esc(h.note)}">📝</button>` : ''}`; };
   let body;
   if (!main) body = `<div class="py-12 text-center muted">${icon('loader-circle', 'w-5 h-5 animate-spin mx-auto mb-2')}Loading ${esc(name)} ${c}…</div>`;
-  else if (main.error) body = `<p class="text-sm text-rose-600">${esc(main.error)}</p><div class="mt-3 flex flex-wrap gap-2"><button class="btn btn-sm" data-action="setTab" data-key="scrTab" data-val="library">${icon('library', 'w-3.5 h-3.5')} Library</button><button class="btn btn-sm" data-action="rdRetry">${icon('refresh-cw', 'w-3.5 h-3.5')} Try again</button></div>`;
+  else if (main.error) body = `<p class="text-sm text-rose-600">${esc(main.error)}</p><div class="mt-3 flex flex-wrap gap-2"><button class="btn btn-sm" data-action="goScrLib">${icon('library', 'w-3.5 h-3.5')} Library</button><button class="btn btn-sm" data-action="rdRetry">${icon('refresh-cw', 'w-3.5 h-3.5')} Try again</button></div>`;
   else if (tm.length > 1) {
     const maps = data.map(d => new Map(d && !d.error ? d.map(x => [x.v, x.t]) : []));
     body = `<div class="overflow-x-auto"><table class="w-full text-[15px] font-serif"><thead><tr class="text-xs muted font-sans text-left"><th class="w-8"></th>${tm.map(t => `<th class="font-semibold px-2 pb-2">${BIBLES[t].short}</th>`).join('')}</tr></thead><tbody>${main.map(x => `<tr class="border-t border-slate-100 dark:border-slate-800 align-top"><td class="py-2 pr-1 text-xs font-sans font-semibold text-brand-600">${x.v}</td>${maps.map((m, i) => `<td class="py-2 px-2 leading-7">${i === 0 ? vh(x) : esc(m.get(x.v) || (data[i] ? '' : '…'))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -3145,7 +3158,7 @@ function scrSearch() {
       ${dl.length ? `<select name="tr" class="input w-auto text-sm py-1.5">${dl.map(k => `<option value="${k}" ${k === S_.tr ? 'selected' : ''}>${BIBLES[k].short}</option>`).join('')}</select>` : ''}
       <select name="scope" class="input w-auto text-sm py-1.5"><option value="all">Whole Bible</option><option value="ot" ${S_.scope === 'ot' ? 'selected' : ''}>Old Testament</option><option value="nt" ${S_.scope === 'nt' ? 'selected' : ''}>New Testament</option>${BOOKS.map(([n], i) => `<option value="${i}" ${String(S_.scope) === String(i) ? 'selected' : ''}>${n}</option>`).join('')}</select></div></form>`;
   if (smart) return form + smartView();
-  if (!dl.length) return form + emptyState('search', 'Download a Bible to search it', 'Word and phrase search runs on your device, so it needs a downloaded translation. The Berean Standard Bible (BSB) is a great modern choice.', `<button class="btn btn-primary" data-action="setTab" data-key="scrTab" data-val="library">${icon('library')} Go to Library</button>`);
+  if (!dl.length) return form + emptyState('search', 'Download a Bible to search it', 'Word and phrase search runs on your device, so it needs a downloaded translation. The Berean Standard Bible (BSB) is a great modern choice.', `<button class="btn btn-primary" data-action="goScrLib">${icon('library')} Go to Library</button>`);
   const R = S_.results, q = S_.q.trim();
   const hiQ = t => { if (!q) return esc(t); const words = S_.mode === 'phrase' ? [q] : q.split(/\s+/); let h = esc(t); words.forEach(w => { const re = new RegExp(`(${esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'); h = h.replace(re, '<mark>$1</mark>'); }); return h; };
   const byBook = R ? R.reduce((m, x) => (m[x.b] = (m[x.b] || 0) + 1, m), {}) : {};
@@ -3156,12 +3169,12 @@ function scrSearch() {
 function smartSourcesLine() {
   const vm = vaultMeta(), tr = searchTr(), parts = [tr ? `Scripture (${BIBLES[tr].short})` : 'Scripture topics', 'your notes &amp; resources'];
   if (vm) parts.push(`Obsidian vault (${fmtNum(vm.count)} notes)`); if (S.miyoOn) parts.push('Miyo'); if (S.aiKey) parts.push('Claude (on request)');
-  return `<p class="text-xs muted mb-3">${icon('sparkles', 'w-3.5 h-3.5 inline -mt-0.5')} Searching ${parts.join(' · ')}. <button class="underline" data-action="setTab" data-key="scrTab" data-val="library">Sources</button></p>`;
+  return `<p class="text-xs muted mb-3">${icon('sparkles', 'w-3.5 h-3.5 inline -mt-0.5')} Searching ${parts.join(' · ')}. <button class="underline" data-action="goScrLib">Sources</button></p>`;
 }
 function smartView() {
   const S_ = ui.srch, R = S_.smart;
   if (S_.busy) return `<div class="py-12 text-center muted">${icon('loader-circle', 'w-5 h-5 animate-spin mx-auto mb-2')}Thinking it through…</div>`;
-  if (!R) return smartSourcesLine() + `${dlBibles().length ? '' : `<div class="card mb-4 text-sm flex flex-wrap items-center gap-2 border-amber-300 dark:border-amber-800">${icon('download', 'w-4 h-4 text-amber-600')}<span class="flex-1 min-w-[12rem]">Download a Bible (BSB is great) so Smart Search can show verse text and search every verse.</span><button class="btn btn-sm" data-action="setTab" data-key="scrTab" data-val="library">Library</button></div>`}
+  if (!R) return smartSourcesLine() + `${dlBibles().length ? '' : `<div class="card mb-4 text-sm flex flex-wrap items-center gap-2 border-amber-300 dark:border-amber-800">${icon('download', 'w-4 h-4 text-amber-600')}<span class="flex-1 min-w-[12rem]">Download a Bible (BSB is great) so Smart Search can show verse text and search every verse.</span><button class="btn btn-sm" data-action="goScrLib">Library</button></div>`}
     <div class="card mb-5"><div class="font-semibold mb-1">Ask it the way you’d ask a friend</div><p class="text-sm muted">Smart Search finds the topics underneath your question and pulls together key passages, more verses, your own notes and Obsidian vault, and trusted resources like Got Questions, Desiring God and BibleProject.</p>
       <div class="flex flex-wrap gap-1.5 mt-3">${SMART_EXAMPLES.map(q => `<button class="chip" data-action="smartAsk" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div></div>
     <h3 class="font-semibold mb-3">Browse topics</h3><div class="space-y-4">${Object.entries(TOPIC_CATS).map(([k, l]) => `<div><div class="text-xs font-semibold uppercase tracking-wide muted mb-1.5">${l}</div><div class="flex flex-wrap gap-1.5">${TOPICS.filter(t => t.cat === k).map(t => `<button class="chip" data-action="smartTopic" data-id="${t.id}">${esc(t.label)}</button>`).join('')}</div></div>`).join('')}</div>`;
@@ -3187,7 +3200,7 @@ function smartView() {
   const vault = (vm || S.miyoOn) ? `<div class="card p-0"><div class="px-4 pt-3 pb-2 flex items-center gap-2"><h3 class="font-semibold flex-1">From your Obsidian vault</h3>${R.miyo && R.miyo.busy ? `<span class="text-xs muted">${icon('loader-circle', 'w-3 h-3 animate-spin inline')} Miyo…</span>` : ''}</div>
     ${R.miyo && R.miyo.err ? `<p class="px-4 pb-2 text-xs text-amber-700 dark:text-amber-400">Miyo: ${esc(R.miyo.err)}</p>` : ''}
     ${vItems.length ? `<div class="divide-y divide-slate-100 dark:divide-slate-800">${vItems.map(d => `<a class="block px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60" href="${esc(obsidianUrl(d.vault || S.vaultName || (vm && vm.name), d.path))}"><div class="flex items-center gap-1.5 text-xs muted">${icon(d.kind === 'miyo' ? 'sparkles' : 'file-text', 'w-3.5 h-3.5')} ${d.kind === 'miyo' ? 'Miyo' : 'Vault'}${d.sub ? ` · ${esc(d.sub)}` : ''}</div><div class="text-sm font-medium">${esc(d.title)}</div><div class="text-xs muted line-clamp-2">${esc(d.snip)}</div></a>`).join('')}</div>` : `<p class="px-4 pb-3 text-sm muted">${R.miyo && R.miyo.busy ? 'Searching…' : 'No matching notes.'}</p>`}</div>`
-    : `<div class="card text-sm"><div class="font-medium mb-1">${icon('folder-search', 'w-4 h-4 inline -mt-0.5')} Search your Obsidian vault too</div><p class="muted text-xs mb-2">Connect your vault once and your own notes show up here.</p><button class="btn btn-sm" data-action="setTab" data-key="scrTab" data-val="library">Connect vault</button></div>`;
+    : `<div class="card text-sm"><div class="font-medium mb-1">${icon('folder-search', 'w-4 h-4 inline -mt-0.5')} Search your Obsidian vault too</div><p class="muted text-xs mb-2">Connect your vault once and your own notes show up here.</p><button class="btn btn-sm" data-action="goScrLib">Connect vault</button></div>`;
   return smartSourcesLine() + crisis + refCard + head + `<div class="grid lg:grid-cols-3 gap-4 items-start"><div class="lg:col-span-2 space-y-4">${keyCards}${ai}${more}${!keyCards && !more && !ai && !R.ref ? `<div class="card text-sm muted">No verses matched those words${R.hasBible ? '' : ' (download a Bible in Library to search every verse)'}. Try different wording, browse the topics, or use the resource links.</div>` : ''}</div><div class="space-y-4">${res}${smartBereanCards(R)}${lib}${vault}${S.aiKey ? '' : `<p class="text-xs muted px-1">Want written answers to any question? Add a Claude API key under Library → Smart Search sources.</p>`}</div></div>`;
 }
 function smartSourcesCard() {
@@ -3473,7 +3486,7 @@ function keyWordStudies(topicIds) { // the Hebrew/Greek words most often behind 
 const IL = (() => { try { return JSON.parse(localStorage.getItem('ld.il') || '{}'); } catch (e) { return {}; } })();
 const saveIL = () => localStorage.setItem('ld.il', JSON.stringify(IL));
 const loadingBox = msg => `<div class="py-12 text-center muted">${icon('loader-circle', 'w-5 h-5 animate-spin mx-auto mb-2')}${esc(msg)}</div>`;
-const bPrompt = (ic, title, sub) => emptyState(ic, title, sub, `<button class="btn btn-primary" data-action="setTab" data-key="scrTab" data-val="library">${icon('library')} Set it up in Library</button>`);
+const bPrompt = (ic, title, sub) => emptyState(ic, title, sub, `<button class="btn btn-primary" data-action="goScrLib">${icon('library')} Set it up in Library</button>`);
 const parseShort = i => BT.parses[BT.pa[i]].split('\u0001')[0], parseLong = i => BT.parses[BT.pa[i]].split('\u0001')[1] || '';
 // Reader: section headings + interlinear
 function rdHeading(b, c, v) { if (!btNow()) return ''; const h = BT.hdg[btVerse(b, c, v)]; return h ? `<span class="block font-sans font-semibold text-[15px] text-slate-700 dark:text-slate-200 mt-5 mb-1">${esc(h)}</span>` : ''; }
@@ -3846,6 +3859,7 @@ function dashScripture() {
 const selVerses = () => { const R = ui.rd, d = chapCache[`${rdTr()}|${R.b}|${R.c}`] || []; return R.sel.map(v => d.find(x => x.v === v)).filter(Boolean); };
 const A_SCR = {
   goScr: el => { ui.scrTab = el.dataset.tab; go('scripture'); },
+  goScrLib: () => { ui.scrTab = 'library'; if (S.view !== 'scripture') go('scripture'); else render(); },
   refOpen: el => { const r = parseRef(el.dataset.ref); if (!r) return toast('Couldn’t read that reference', 'error'); if (Modal.isOpen()) Modal.close(); rdGo(r.b, r.c, r.v1 ? [r.v1, r.c2 ? 999 : (r.v2 || r.v1)] : null); },
   rdGoto: el => { if (el.dataset.b === '') return; const v = el.dataset.v ? +el.dataset.v : null; rdGo(+el.dataset.b, +el.dataset.c, v ? [v, v] : null); },
   rdGotoRef: f => { const r = parseRef(fd(f).ref); if (!r) return toast('Try a reference like “John 3:16” or “Psalm 23”', 'error'); rdGo(r.b, r.c, r.v1 ? [r.v1, r.c2 ? 999 : (r.v2 || r.v1)] : null); },
@@ -4948,7 +4962,7 @@ function famOverview() {
   const loveDone = Store.get('loveLog').some(l => l.date === t);
   return `<div class="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
     <div class="card ${!rev ? 'border-rose-300 dark:border-rose-800' : ''}">${cardHead('calendar-check', 'Monday Family Review')}${rev ? `<p class="text-sm">Done this week ✓ ${reviewStreak() > 1 ? `· 🔥 ${reviewStreak()} weeks in a row` : ''}</p><button class="btn btn-sm mt-3" data-action="frOpen" data-id="${rev.id}">Open this week’s review</button>` : `<p class="text-sm ${isMon ? 'font-medium' : 'muted'}">${isMon ? 'It’s Monday — time to look back, look ahead, and pray together.' : 'Not done yet this week.'}</p><button class="btn btn-primary btn-sm mt-3" data-action="frStart">${icon('play', 'w-3.5 h-3.5')} Start the review</button>`}</div>
-    <div class="card">${cardHead('message-circle-heart', 'Today’s check-in')}<p class="text-sm">${esc(todaysCheckinPrompt())}</p><button class="btn btn-sm mt-3" data-action="setTab" data-key="famTab" data-val="checkin">Answer together</button></div>
+    <div class="card">${cardHead('message-circle-heart', 'Today’s check-in')}<p class="text-sm">${esc(todaysCheckinPrompt())}</p><button class="btn btn-sm mt-3" data-action="famCheckinOpen">Answer together</button></div>
     <div class="card">${cardHead('heart-handshake', `Love in action${sp ? ` · ${esc(sp.name)}` : ''}`)}<div class="text-xs muted mb-1">${LOVE_LANGS[love.lang]}${sp && sp.loveLang && sp.loveLang.length ? '' : ' · set your spouse’s love language in Family'}</div><p class="text-sm font-medium">${esc(love.text)}</p>
       <div class="flex gap-2 mt-3">${loveDone ? '<span class="chip chip-on whitespace-nowrap">Done today ❤️</span>' : `<button class="btn btn-sm btn-primary" data-action="loveDid">${icon('check', 'w-3.5 h-3.5')} I did it</button>`}<button class="btn btn-sm" data-action="loveNext">${icon('shuffle', 'w-3.5 h-3.5')} Another</button><button class="btn btn-sm btn-ghost" data-action="loveLog">Log something else</button></div></div>
     <div class="card">${cardHead('hand-heart', 'Pray for your family')}${pp ? `<div class="flex items-center gap-3">${fpAvatar(pp)}<div class="flex-1 min-w-0"><div class="font-medium">${esc(pp.name)}</div><div class="text-sm muted">${esc(pp.prayer || 'Add what you’re praying for them in their profile.')}</div></div></div><div class="flex gap-2 mt-3"><button class="btn btn-sm ${(pp.prayed || []).includes(t) ? 'chip-on' : ''}" data-action="fpPrayed" data-id="${pp.id}">🙏 Prayed</button><button class="btn btn-sm" data-action="fpPrayNext">${icon('shuffle', 'w-3.5 h-3.5')} Someone else</button></div>` : `<p class="text-sm muted">Add your family in the Family tab to pray for each person in rotation.</p>`}</div>
@@ -5069,9 +5083,13 @@ function famDates() {
   <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${ideas.map(d => `<div id="di-${d.id}" class="card ${ui.diPick === d.id ? 'ring-2 ring-rose-400 border-rose-300' : ''}"><div class="flex items-start gap-2"><div class="flex-1"><div class="font-semibold">${esc(d.title)}</div><div class="flex flex-wrap gap-1 mt-1"><span class="chip">${esc(d.cat)}</span><span class="chip">${esc(d.cost)}</span>${d.log.length ? `<span class="chip">Done ${d.log.length}× · last ${fmtDate(d.log[d.log.length - 1], { month: 'short', day: 'numeric' })}</span>` : ''}</div></div><button class="btn btn-ghost btn-sm" data-action="diDel" data-id="${d.id}" aria-label="Delete">${icon('x', 'w-3.5 h-3.5')}</button></div>
     <div class="flex gap-2 mt-3"><button class="btn btn-sm flex-1" data-action="diPlan" data-id="${d.id}">${icon('calendar-plus', 'w-3.5 h-3.5')} Plan it</button><button class="btn btn-sm flex-1" data-action="dlNew" data-idea="${d.id}">${icon('check', 'w-3.5 h-3.5')} We did this</button></div></div>`).join('')}</div>`;
 }
+// This week: the overview, then today's check-in and past check-ins (folded away until opened)
+const famThisWeek = () => famOverview() + `<details id="fam-checkin" class="card mt-4" ${ui.ciOpen ? 'open' : ''}><summary class="cursor-pointer list-none font-semibold flex items-center gap-2" data-action="ciFold">${icon('message-circle-heart', 'w-4 h-4')} Check-ins <span class="text-xs muted font-normal">today’s question and past answers</span></summary><div class="mt-4">${famCheckins()}</div></details>`;
 function renderFamily() {
-  return tabs('famTab', [['overview', 'This week', 'sparkles'], ['checkin', 'Check-ins', 'message-circle-heart'], ['review', 'Monday review', 'calendar-check'], ['people', 'Family', 'users'], ['dates', 'Date nights', 'wine'], ['memories', 'Memories', 'images'], ['rule', 'Rule of Life', 'scroll-text'], ['milestones', 'Milestones', 'calendar-heart']])
-    + ({ overview: famOverview, checkin: famCheckins, review: famReview, people: famPeople, dates: famDates, memories: famMemories, rule: famRule, milestones: famMilestones, goals: famRule }[ui.famTab] || famOverview)();
+  if (ui.famTab === 'checkin') { ui.famTab = 'overview'; ui.ciOpen = true; }
+  ui.famTab = { milestones: 'memories' }[ui.famTab] || ui.famTab; // tabs merged in 2026-10
+  return tabs('famTab', [['overview', 'This week', 'sparkles'], ['review', 'Monday review', 'calendar-check'], ['people', 'Family', 'users'], ['dates', 'Date nights', 'wine'], ['memories', 'Memories & milestones', 'images'], ['rule', 'Rule of Life', 'scroll-text']])
+    + ({ overview: famThisWeek, review: famReview, people: famPeople, dates: famDates, memories: () => famMilestones() + `<h2 class="font-semibold mt-8 mb-3 flex items-center gap-2">${icon('images', 'w-4 h-4')} Memories</h2>` + famMemories(), rule: famRule, goals: famRule }[ui.famTab] || famOverview)();
 }
 const ruleTitle = () => `${S.familyName ? S.familyName + ' ' : ''}Family Rule of Life`;
 function ruleMarkdown() { const k = fkit(), goals = Store.get('goals'), bs = Store.get('boundaries'); return obsidianMd({ title: ruleTitle(), date: ymd(), type: 'rule-of-life', tags: ['family', 'rule-of-life'], body: `## Covenant\n${k.covenant || ''}\n\n## Communication principles\n${k.principles || ''}\n\n## Restoration plan\n${k.restoration || ''}\n\n## Rhythms\n${goals.map(g => `- **${g.text}** (${g.cadence})`).join('\n')}\n\n## Boundaries\n${bs.map(b => `- When ${b.behavior} happens, we feel ${b.feel}. If that happens, we will ${b.response}.`).join('\n')}\n` }); }
@@ -6127,6 +6145,9 @@ function taskCard(t) {
       <div class="flex flex-col -mr-1"><button class="btn btn-ghost btn-sm px-1" data-action="taskMove" data-id="${t.id}" data-d="-1" ${idx === 0 ? 'disabled' : ''} title="Move left">${icon('chevron-left', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1" data-action="taskMove" data-id="${t.id}" data-d="1" ${idx === 2 ? 'disabled' : ''} title="Move right">${icon('chevron-right', 'w-3.5 h-3.5')}</button></div></div></div>`;
 }
 function tasksAll() {
+  const nSome = TK().filter(x => tOpen(x) && x.someday && inArea(x)).length;
+  const somedayChip = `<button class="chip ${ui.taskSomeday ? 'chip-on' : ''}" aria-pressed="${!!ui.taskSomeday}" data-action="taskSomedayToggle">${icon('archive', 'w-3.5 h-3.5')} Someday${nSome ? ` (${nSome})` : ''}</button>`;
+  if (ui.taskSomeday) return `<div class="flex flex-wrap items-center gap-2 mb-4">${somedayChip}<span class="text-xs muted">Showing Someday only. Tap again to see your other tasks.</span></div>` + tasksSomeday();
   const all = Store.get('tasks'), t = ymd(), tagsAll = [...new Set([...TASK_TAGS, ...all.flatMap(x => x.tags || [])])];
   const list = all.filter(x => (ui.taskTag === 'all' || (x.tags || []).includes(ui.taskTag)) && (ui.taskPri === 'all' || (x.priority || 'med') === ui.taskPri) && inArea(x) && !(x.someday && x.status !== 'done'));
   const sortFn = (a, b) => priRank(a) - priRank(b) || (a.due || '9999').localeCompare(b.due || '9999') || (a.created || '').localeCompare(b.created || '');
@@ -6147,7 +6168,7 @@ function tasksAll() {
     <div class="flex flex-wrap items-center gap-2 mb-4">
       <div class="flex gap-1 p-1 rounded-lg bg-slate-200/60 dark:bg-slate-900"><button class="tab ${ui.taskView === 'board' ? 'tab-active' : ''}" data-action="taskView" data-v="board">${icon('columns-3', 'w-4 h-4 inline -mt-0.5')} Board</button><button class="tab ${ui.taskView === 'list' ? 'tab-active' : ''}" data-action="taskView" data-v="list">${icon('list', 'w-4 h-4 inline -mt-0.5')} List</button></div>
       <div class="flex flex-wrap gap-1"><button class="chip ${ui.taskTag === 'all' ? 'chip-on' : ''}" data-action="taskTagFilter" data-v="all">All</button>${tagsAll.map(x => `<button class="chip ${ui.taskTag === x ? 'chip-on' : (tagColors[x] || '')}" data-action="taskTagFilter" data-v="${esc(x)}">#${esc(x)}</button>`).join('')}</div>
-      <select class="input w-auto ml-auto" data-change="taskPriFilter"><option value="all">Any priority</option>${Object.entries(PRI).map(([k, [l]]) => `<option value="${k}" ${ui.taskPri === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      ${somedayChip}<select class="input w-auto ml-auto" data-change="taskPriFilter"><option value="all">Any priority</option>${Object.entries(PRI).map(([k, [l]]) => `<option value="${k}" ${ui.taskPri === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     ${body}`;
 }
 
@@ -6476,7 +6497,8 @@ function taskRow(t, o = {}) {
 }
 function renderTasks() {
   const nInbox = TK().filter(isInbox).length, notif = 'Notification' in window && Notification.permission !== 'granted';
-  const view = { today: tasksToday, inbox: tasksInbox, upcoming: tasksUpcoming, all: tasksAll, projects: tasksProjects, people: tasksPeople, someday: tasksSomeday, plan: tasksPlan, templates: tasksTemplates, stats: tasksStats }[ui.taskTab] || tasksToday;
+  if (ui.taskTab === 'someday') { ui.taskTab = 'all'; ui.taskSomeday = true; } // Someday is a filter in All tasks since 2026-10
+  const view = { today: tasksToday, inbox: tasksInbox, upcoming: tasksUpcoming, all: tasksAll, projects: tasksProjects, people: tasksPeople, plan: tasksPlan, templates: tasksTemplates, stats: tasksStats }[ui.taskTab] || tasksToday;
   return `<form class="card mb-4" data-submit="taskAdd"><div class="flex flex-wrap gap-2"><input id="nl-in" name="title" class="input flex-1 min-w-[12rem]" placeholder="Add a task — try “Coffee with Jake fri at 9 ~Jake #ministry”" autocomplete="off" required data-input="nlPrev">
         <div class="flex items-center gap-3 ml-auto"><label class="flex items-center gap-1.5 text-sm whitespace-nowrap"><input type="checkbox" name="rep" value="1" class="w-4 h-4 accent-brand-600" data-change="addRep"> Repeat</label><button class="btn btn-primary">${icon('plus')} Add</button></div></div>
       <div id="add-rep" class="hidden flex-wrap items-center gap-2 mt-2 text-sm"><select name="repKind" class="input w-auto" data-change="addRep" aria-label="How often it repeats"><option value="day">Daily</option><option value="week" selected>Weekly</option><option value="month">Monthly</option><option value="days">Certain days…</option><option value="custom">Custom…</option></select>
@@ -6497,7 +6519,7 @@ function renderTasks() {
           <li>Tick <strong>Repeat</strong> to make every task in the entry repeat: daily, weekly, monthly, on certain days of the week (such as Mon, Thu and Sat), or a custom number of days, weeks, months or years.</li></ul>
           <p class="mt-2">Example: <code>Meet Sam wed at 3pm ~Sam #work | Text Sam to confirm today | Follow up +1 | Check in +1w</code></p></div></div></form>
     <div class="flex flex-wrap items-center gap-1.5 mb-3"><button class="chip ${!ui.taskArea ? 'chip-on' : ''}" data-action="taskAreaSet" data-v="">All areas</button>${AREAS.map(([k, l, ic]) => `<button class="chip ${ui.taskArea === k ? 'chip-on' : ''}" data-action="taskAreaSet" data-v="${k}"><span class="w-2 h-2 rounded-full ${AREA_CLS[k]}"></span> ${l}</button>`).join('')}<span class="flex-1"></span>${notif ? `<button class="btn btn-sm btn-ghost" data-action="enableNotifications">${icon('bell', 'w-3.5 h-3.5')} Turn on reminders</button>` : ''}<button class="btn btn-sm ${ui.taskSel ? 'chip-on' : ''}" aria-pressed="${!!ui.taskSel}" data-action="selToggle">${icon('list-checks', 'w-3.5 h-3.5')} ${ui.taskSel ? 'Selecting' : 'Select'}</button></div>
-    ${tabs('taskTab', [['today', 'Today', 'sun'], ['inbox', `Inbox${nInbox ? ` (${nInbox})` : ''}`, 'inbox'], ['upcoming', 'Upcoming', 'calendar-range'], ['all', 'All tasks', 'kanban'], ['projects', 'Projects', 'folder-kanban'], ['people', 'People', 'users'], ['someday', 'Someday', 'archive'], ['plan', 'Plan week', 'calendar-check'], ['templates', 'Templates', 'layout-template'], ['stats', 'Stats', 'chart-column']])}
+    ${tabs('taskTab', [['today', 'Today', 'sun'], ['inbox', `Inbox${nInbox ? ` (${nInbox})` : ''}`, 'inbox'], ['upcoming', 'Upcoming', 'calendar-range'], ['all', 'All tasks', 'kanban'], ['projects', 'Projects', 'folder-kanban'], ['people', 'People', 'users'], ['plan', 'Plan week', 'calendar-check'], ['templates', 'Templates', 'layout-template'], ['stats', 'Stats', 'chart-column']])}
     ${view()}${ui.taskSel ? taskBulkBar() : ''}`;
 }
 // Today + day planner
@@ -6508,7 +6530,7 @@ function tasksToday() {
   return `<div class="grid lg:grid-cols-5 gap-4"><div class="lg:col-span-3 space-y-4 min-w-0">
     <div class="card">${cardHead('star', 'This week’s Big 3', `<button class="btn btn-sm btn-ghost" data-action="setTab" data-key="taskTab" data-val="plan">${b3.length ? 'Change' : 'Pick'} ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}${b3.length ? `<div class="space-y-2">${b3.map(x => taskRow(x)).join('')}</div>` : '<p class="text-sm muted">Choose the three things that would make this week a win.</p>'}</div>
     ${overdue.length ? `<div class="card border-rose-200 dark:border-rose-900">${cardHead('alarm-clock', `Overdue · ${overdue.length}`, `<button class="btn btn-sm" data-action="tdAllToday">Move all to today</button>`)}<div class="space-y-2">${overdue.map(x => taskRow(x, { today: true, push: true })).join('')}</div></div>` : ''}
-    <div class="card">${cardHead('sun', `Today · ${fmtDate(t, { weekday: 'long', month: 'short', day: 'numeric' })}`, `${waiting ? `<button class="chip" data-action="setTab" data-key="taskTab" data-val="people">⏳ ${waiting} waiting</button>` : ''}`)}${today.length ? `<div class="space-y-2">${today.map(x => taskRow(x, { noDue: true, push: true })).join('')}</div>` : `<p class="text-sm muted">${doneToday.length ? 'All done for today. 🎉' : 'Nothing due today.'}</p>`}
+    <div class="card">${cardHead('sun', `Today · ${fmtDate(t, { weekday: 'long', month: 'short', day: 'numeric' })}`, `${waiting ? (hiddenTabsFor('taskTab').includes('people') ? `<span class="chip">⏳ ${waiting} waiting</span>` : `<button class="chip" data-action="setTab" data-key="taskTab" data-val="people">⏳ ${waiting} waiting</button>`) : ''}`)}${today.length ? `<div class="space-y-2">${today.map(x => taskRow(x, { noDue: true, push: true })).join('')}</div>` : `<p class="text-sm muted">${doneToday.length ? 'All done for today. 🎉' : 'Nothing due today.'}</p>`}
       ${doneToday.length ? `<details class="mt-3"><summary class="text-xs muted cursor-pointer list-none">Done today · ${doneToday.length}</summary><div class="space-y-2 mt-2">${doneToday.map(x => taskRow(x)).join('')}</div></details>` : ''}</div>
     ${tm.length ? `<div class="card">${cardHead('sunrise', `Tomorrow · ${tm.length}`)}<div class="space-y-1">${tm.sort(sortT).map(taskRowMini).join('')}</div></div>` : ''}</div>
     <div class="lg:col-span-2 min-w-0">${dayPlanner(ui.blockDate || t)}</div></div>`;
@@ -6676,7 +6698,7 @@ function blkModal(b, d) {
 const nextHalfHour = () => { const n = new Date(), m = n.getHours() * 60 + n.getMinutes(); return Math.min(H1 * 60 - 30, Math.max(H0 * 60, Math.ceil(m / 30) * 30)); };
 const A_TASKS = {
   taskAdd: f => {
-    const v = fd(f), ctx = { area: ui.taskArea || undefined, project: ui.taskTab === 'projects' && ui.projOpen ? ui.projOpen : undefined, someday: ui.taskTab === 'someday' || undefined, repeat: addRepeatFrom(f) };
+    const v = fd(f), ctx = { area: ui.taskArea || undefined, project: ui.taskTab === 'projects' && ui.projOpen ? ui.projOpen : undefined, someday: (ui.taskTab === 'all' && ui.taskSomeday) || undefined, repeat: addRepeatFrom(f) };
     if (f.rep && f.rep.checked && !ctx.repeat) return toast('Tick at least one day for the repeat', 'error');
     const added = addTasks(v.title, ctx), t = added[0]; if (!t) return;
     if (added.length > 1) { const loose = added.filter(isInbox).length; toast(`Added ${added.length} tasks${loose ? ` · ${loose} in the Inbox` : ''}`); render(); setTimeout(() => $('#nl-in')?.focus(), 30); return; }
@@ -6691,6 +6713,7 @@ const A_TASKS = {
   },
   taskRepKind: el => { const row = $('#task-rep-days'), on = el.value === 'days'; row.classList.toggle('hidden', !on); row.classList.toggle('flex', on); },
   taskHelp: el => { S.taskHelp = !S.taskHelp; saveSettings(); $('#task-rules').classList.toggle('hidden', !S.taskHelp); el.setAttribute('aria-expanded', String(S.taskHelp)); $('#task-rules-label').textContent = S.taskHelp ? 'Hide the rules for adding tasks' : 'Show the rules for adding tasks'; },
+  taskSomedayToggle: () => { ui.taskSomeday = !ui.taskSomeday; render(); },
   goTaskTab: el => { ui.taskTab = el.dataset.tab; go('tasks'); },
   goWeekPlan: () => { ui.taskTab = 'plan'; ui.planWk = null; Modal.close(); go('tasks'); },
   taskAreaSet: el => { ui.taskArea = el.dataset.v || null; render(); },
@@ -6788,6 +6811,8 @@ document.addEventListener('drop', e => { const c = e.target.closest && e.target.
 
 const A_HOME = {
   // family
+  famCheckinOpen: () => { ui.ciOpen = true; ui.famTab = 'overview'; render(); requestAnimationFrame(() => $('#fam-checkin')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); },
+  ciFold: el => { const d = el.parentElement; d.open = !d.open; ui.ciOpen = d.open; },
   ciShuffle: () => { let i; do { i = Math.floor(Math.random() * CHECKIN_PROMPTS.length); } while (i === ui.ciIdx && CHECKIN_PROMPTS.length > 1); ui.ciIdx = i; render(); },
   ciSave: f => { const v = fd(f); if (!v.notes.trim() && !v.rating && !v.action.trim()) return toast('Add a rating or a few notes first', 'error'); Store.get('checkins').push({ id: uid(), date: v.date || ymd(), prompt: v.prompt, rating: v.rating ? +v.rating : null, notes: v.notes.trim(), action: v.action.trim() }); Store.save('checkins'); ui.ciIdx = null; toast('Check-in saved ❤️'); render(); },
   ciDel: el => { if (!confirm('Delete this check-in?')) return; Store.set('checkins', Store.get('checkins').filter(c => c.id !== el.dataset.id)); render(); },
@@ -6979,6 +7004,12 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16c', title: 'Fewer tabs', slides: [
+    { title: 'Related tabs are together now', body: '<p>Several sections have fewer tabs, and nothing was removed:</p><ul class="list-disc pl-5 space-y-1"><li><strong>Workouts:</strong> History shows the calendar and stats on top.</li><li><strong>Nutrition:</strong> Body &amp; weight holds your trend, measurements and photos; your habits sit under Plan.</li><li><strong>Scripture:</strong> Highlights &amp; notes are one tab, and the Bible Library is at the bottom of Study.</li><li><strong>Marriage &amp; Family:</strong> today’s check-in is on This week, and milestones sit with memories.</li></ul>', go: ['scripture', 'scrTab', 'marks', 'Open Highlights & notes'] },
+    { title: 'Someday is a filter', body: '<p>In Tasks → All tasks, tap the <strong>Someday</strong> chip to see your someday ideas. Tasks you add while it is on go to Someday.</p><p>Tasks → People and Media → Stats are hidden to start. Tap the sliders at the end of the tabs to bring them back.</p>', go: ['tasks', 'taskTab', 'all', 'Open All tasks'] },
+    { title: 'Workout import and export moved', body: '<p>Importing from Hevy and exporting your workouts are now in <strong>Settings &amp; Sync</strong>, under Data &amp; sync.</p>' },
+    { title: 'Choose your dashboard cards', body: '<p>Tap the <strong>sliders</strong> beside the greeting on the dashboard to hide cards you don’t need, such as Training or Meals. Your choice follows you to your other devices.</p>', go: ['dashboard', '', '', 'Open the dashboard'] }
+  ] },
   { id: '2026-10-16b', title: 'Choose which tabs you see', slides: [
     { title: 'Show or hide tabs', body: '<p>Every section’s row of tabs now ends with a <strong>sliders</strong> button. Tap it to hide tabs you don’t use, or bring them back. Hidden tabs keep everything in them, and your choice follows you to your other devices.</p><p>Tasks → Stats is hidden to start.</p>' },
     { title: 'Hosting, without meal trains', body: '<p>Recipes &amp; Meals → <strong>Hosting</strong> is now just for meals you host: who is coming, the menu, groceries and a reminder. Bringing and receiving meal-train meals has been removed. Anything you saved before is still kept.</p>' }
@@ -7088,7 +7119,7 @@ const A_HELP = {
 // edits and deletions from either device survive. Photos, API keys and downloaded libraries stay
 // on the device. Sign-in is a plain redirect, so no Google script is loaded.
 const DRIVE = { clientId: '868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.googleusercontent.com', scope: 'https://www.googleapis.com/auth/drive.appdata', file: 'life-dashboard-sync.json', api: 'https://www.googleapis.com', auth: 'https://accounts.google.com/o/oauth2/v2/auth' };
-const SYNC_SETTINGS = ['name', 'familyName', 'hiddenTabs', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
+const SYNC_SETTINGS = ['name', 'familyName', 'hiddenTabs', 'tabsV', 'hiddenCards', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
 const SYNC_SKIP = ['photoMeta'];
 const SYNC_BASE = 'sync.base';
 // A sync that would remove more than this many records (outside the lists that are routinely
@@ -7334,6 +7365,8 @@ const A = {
   go: el => go(el.dataset.view),
   setTab: el => { ui[el.dataset.key] = el.dataset.val; render(); },
   tabsEdit: el => tabsEditModal(el.dataset.key),
+  dashCardsEdit: () => dashCardsModal(),
+  dashCardToggle: el => { const id = el.dataset.val, h = (S.hiddenCards || []).filter(x => x !== id); S.hiddenCards = el.checked ? h : [...h, id]; saveSettings(); syncTouch(); },
   tabsToggle: el => {
     const key = el.dataset.key, id = el.dataset.val, all = (TAB_LISTS[key] || []).map(t => t[0]), H = S.hiddenTabs = { ...(S.hiddenTabs || {}) };
     const next = el.checked ? hiddenTabsFor(key).filter(x => x !== id) : [...new Set([...hiddenTabsFor(key), id])];
