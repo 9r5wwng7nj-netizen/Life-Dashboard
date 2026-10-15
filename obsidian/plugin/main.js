@@ -43,6 +43,7 @@ const core = (() => {
   const STATUS_OF = Object.fromEntries(Object.entries(STATUS_WORDS).flatMap(([k, ws]) => ws.map(w => [w, k])));
   const STATUS_LABEL = { idea: 'Idea', draft: 'Draft', week: 'This week', ready: 'Ready', done: 'Done', toread: 'To read', read: 'Read' };
   const DONE_LABEL = { sermon: 'Preached', study: 'Taught' };
+  const SERIES_LABEL = { idea: 'Planned', draft: 'Active' }; // a series or project is under way, not drafted
   // The order Set status offers, and the word it writes into the note.
   const STATUS_CHOICES = [['idea', 'Idea', 'idea'], ['draft', 'Draft', 'draft'], ['ready', 'Ready', 'ready'], ['done', 'Done', 'done']];
 
@@ -88,7 +89,7 @@ const core = (() => {
     if (TEACHING.includes(family) && key !== 'done' && date && date >= today && date <= addDays(today, 6)) key = 'week';
     // "Preached" / "Taught" belong to the sermon or lesson itself; an outline or development note is just "Done".
     const delivered = (family === 'sermon' && ['sermon', 'project'].includes(type)) || family === 'study';
-    const label = key === 'done' && delivered ? DONE_LABEL[family] : (STATUS_LABEL[key] || '');
+    const label = key === 'done' && delivered ? DONE_LABEL[family] : family === 'series' && SERIES_LABEL[key] ? SERIES_LABEL[key] : (STATUS_LABEL[key] || '');
     return { key, label };
   }
 
@@ -270,6 +271,18 @@ const render = (() => {
   function home(doc, lib, on, q, results) {
     const root = el(doc, 'div', 'ldl-root');
     root.append(head(doc, new Date().toLocaleDateString(undefined, { weekday: 'long' }), 'Library', q, on));
+    // Quick actions, then a bar of every section: the Library stands in for the folder sidebar.
+    const acts = el(doc, 'div', 'ldl-actions');
+    [['New note', on.newNote, true], ['New sermon', on.newSermon], ['Today’s note', on.today]].forEach(([label, fn, primary]) => {
+      if (!fn) return; const b = el(doc, 'button', 'ldl-btn' + (primary ? ' ldl-btn-primary' : ' ldl-btn-soft'), label); b.type = 'button'; b.addEventListener('click', () => fn()); acts.append(b);
+    });
+    if (acts.childElementCount) root.append(acts);
+    const nav = el(doc, 'nav', 'ldl-nav'); nav.setAttribute('aria-label', 'Library sections');
+    const navBtn = (label, count, fn) => { const b = el(doc, 'button', 'ldl-navchip'); b.type = 'button'; b.append(el(doc, 'span', '', label)); if (count != null) b.append(el(doc, 'span', 'ldl-navcount', String(count))); b.addEventListener('click', fn); nav.append(b); };
+    lib.shelves.forEach(sh => navBtn(sh.label, sh.items.length, () => on.shelf(sh.id)));
+    if (lib.inbox && on.folder) navBtn('Inbox', null, () => on.folder(lib.inbox));
+    if (on.folder) navBtn('All folders', null, () => on.folder(''));
+    root.append(nav);
     if (q) {
       const box = el(doc, 'section', 'ldl-section');
       box.append(el(doc, 'h2', 'ldl-h2', results.length ? `Results for “${q}”` : `Nothing matches “${q}”`));
@@ -290,7 +303,7 @@ const render = (() => {
     for (const s of lib.shelves) {
       const sec = el(doc, 'section', 'ldl-section');
       const top = el(doc, 'div', 'ldl-section-head'); top.append(el(doc, 'h2', 'ldl-h2', s.label));
-      if (s.items.length > 8) { const all = el(doc, 'button', 'ldl-link', 'See all'); all.type = 'button'; all.addEventListener('click', () => on.shelf(s.id)); top.append(all); }
+      if (s.items.length > 6) { const all = el(doc, 'button', 'ldl-link', `See all ${s.items.length}`); all.type = 'button'; all.addEventListener('click', () => on.shelf(s.id)); top.append(all); }
       const shelf = el(doc, 'div', 'ldl-shelf'); s.items.slice(0, 12).forEach(n => shelf.append(card(doc, n, on, lib.today)));
       sec.append(top, shelf); root.append(sec);
     }
@@ -325,6 +338,38 @@ const render = (() => {
     const back = el(doc, 'button', 'ldl-back ldl-back-plain', '‹ Library'); back.type = 'button'; back.addEventListener('click', () => on.home());
     root.append(back, el(doc, 'h1', 'ldl-h1', s ? s.label : 'Shelf'));
     const grid = el(doc, 'div', 'ldl-grid'); (s ? s.items : []).forEach(n => grid.append(card(doc, n, on, lib.today))); root.append(grid);
+    return root;
+  }
+  // A folder: its sub-folders as tiles and its notes as rows, with a path you can click back through.
+  // data: { path, name, crumbs: [{ name, path }], folders: [{ path, name, count }], notes: [noteInfo], more }
+  function folder(doc, data, today, on) {
+    const root = el(doc, 'div', 'ldl-root');
+    const top = el(doc, 'div', 'ldl-crumbs');
+    const back = el(doc, 'button', 'ldl-back ldl-back-plain', '‹ Library'); back.type = 'button'; back.addEventListener('click', () => on.home()); top.append(back);
+    (data ? data.crumbs : []).forEach((c, i, all) => {
+      top.append(el(doc, 'span', 'ldl-muted', '/'));
+      if (i === all.length - 1) top.append(el(doc, 'span', 'ldl-crumb-here', c.name));
+      else { const b = el(doc, 'button', 'ldl-link', c.name); b.type = 'button'; b.addEventListener('click', () => on.folder(c.path)); top.append(b); }
+    });
+    root.append(top, el(doc, 'h1', 'ldl-h1', data ? data.name : 'Folder not found'));
+    if (!data) return root;
+    if (data.folders.length) {
+      const grid = el(doc, 'div', 'ldl-folders');
+      data.folders.forEach(f => {
+        const b = el(doc, 'button', 'ldl-foldertile'); b.type = 'button';
+        const mark = el(doc, 'span', 'ldl-foldermark'); mark.style.background = core.PALETTE[[...f.name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0 & 7];
+        b.append(mark, el(doc, 'span', 'ldl-foldername', f.name.replace(/^\d+\s+/, '')), el(doc, 'span', 'ldl-muted ldl-small', `${f.count} note${f.count === 1 ? '' : 's'}`));
+        b.addEventListener('click', () => on.folder(f.path)); grid.append(b);
+      });
+      root.append(grid);
+    }
+    if (data.notes.length) {
+      const sec = el(doc, 'section', 'ldl-section'); sec.append(el(doc, 'h2', 'ldl-h2', 'Notes'));
+      const list = el(doc, 'div', 'ldl-list'); data.notes.forEach(n => list.append(row(doc, n, on, today)));
+      if (data.more) list.append(el(doc, 'p', 'ldl-muted ldl-small', `and ${data.more} more; search to find them`));
+      sec.append(list); root.append(sec);
+    }
+    if (!data.folders.length && !data.notes.length) root.append(el(doc, 'p', 'ldl-muted', 'This folder is empty.'));
     return root;
   }
   // The card at the top of a note in reading view.
@@ -368,7 +413,7 @@ const render = (() => {
     form.append(input, add); box.append(list, form);
     return box;
   }
-  return { home, hub, shelf, titleCard, followUps };
+  return { home, hub, shelf, folder, titleCard, followUps };
 })();
 
 /* =============================== 3. plugin =============================== */
@@ -384,21 +429,26 @@ const DEFAULTS = {
 
   titleCards: true,
   hideProperties: true,
-  openOnStartup: false
+  openOnStartup: false,
+  foldSidebar: false // fold the left sidebar away when the Library opens
 };
 
 class LibraryView extends ItemView {
-  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; this.page = { name: 'home' }; this.q = ''; }
+  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; this.page = { name: 'home' }; this.q = ''; this.navigation = true; }
   getViewType() { return VIEW_LIBRARY; }
+  // Each Library page is part of the tab's history, so Obsidian's back and forward arrows step through it.
+  getState() { return { page: this.page }; }
+  async setState(state, result) { if (state && state.page) this.page = state.page; this.q = ''; this.draw(); this.contentEl.scrollTop = 0; return super.setState(state, result); }
   getDisplayText() { return 'Library'; }
   getIcon() { return 'library'; }
   async onOpen() { this.contentEl.addClass('ldl-view'); this.draw(); }
-  show(page) { this.page = page; this.q = ''; this.draw(); this.contentEl.scrollTop = 0; }
+  show(page) { this.leaf.setViewState({ type: VIEW_LIBRARY, state: { page }, active: true }); }
   draw() {
     const lib = this.plugin.library(), doc = this.contentEl.ownerDocument, on = this.plugin.handlers(this);
     let node;
     if (this.page.name === 'hub') node = render.hub(doc, lib, this.page.path, on);
     else if (this.page.name === 'shelf') node = render.shelf(doc, lib, this.page.id, on);
+    else if (this.page.name === 'folder') node = render.folder(doc, this.plugin.folderData(this.page.path || ''), lib.today, on);
     else node = render.home(doc, lib, on, this.q, this.q ? core.search(this.plugin.notes(), this.q, this.plugin.ignored()) : []);
     const focused = doc.activeElement && doc.activeElement.classList.contains('ldl-search');
     this.contentEl.empty(); this.contentEl.append(node);
@@ -516,13 +566,35 @@ class LifeDashboardPlugin extends Plugin {
     try { add(this.app.plugins?.plugins?.['templater-obsidian']?.settings?.templates_folder); } catch (e) { }
     return out;
   }
-  library() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.ignored(), shelves: this.settings.shelves }); }
+  inboxFolder() { try { return (this.app.vault.getConfig('newFileLocation') === 'folder' && this.app.vault.getConfig('newFileFolderPath')) || ''; } catch (e) { return ''; } }
+  // One folder's contents for the Library's folder page (hidden folders left out; at most 300 notes listed).
+  folderData(path) {
+    const f = path ? this.app.vault.getAbstractFileByPath(path) : this.app.vault.getRoot();
+    if (!f || !f.children) return null;
+    const byPath = new Map(this.notes().map(n => [n.path, n])), today = core.ymd(new Date());
+    const count = x => x.children ? x.children.reduce((a, c) => a + count(c), 0) : (x.extension === 'md' ? 1 : 0);
+    const folders = f.children.filter(c => c.children && !c.name.startsWith('.')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })).map(c => ({ path: c.path, name: c.name, count: count(c) }));
+    const notes = f.children.filter(c => c.extension === 'md').map(c => byPath.get(c.path) || core.noteInfo({ path: c.path, basename: c.basename, folder: f.path, mtime: c.stat.mtime }, {}, today)).sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+    const parts = path ? path.split('/') : [];
+    return { path, name: parts.length ? parts[parts.length - 1] : 'All folders', crumbs: parts.map((p, i) => ({ name: p, path: parts.slice(0, i + 1).join('/') })), folders, notes: notes.slice(0, 300), more: Math.max(0, notes.length - 300) };
+  }
+  runCommand(id, missing) { const ok = this.app.commands?.executeCommandById?.(id); if (ok === false) new Notice(missing); }
+  async newNote() {
+    if (this.app.commands?.executeCommandById?.('file-explorer:new-file')) return;
+    const folder = this.inboxFolder(), f = await this.createUnique(folder, 'Untitled', ''); await this.app.workspace.getLeaf(false).openFile(f);
+  }
+  library() { return Object.assign(this.libraryData(), { inbox: this.inboxFolder() }); }
+  libraryData() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.ignored(), shelves: this.settings.shelves }); }
   handlers(view) {
     return {
       open: path => this.openNote(path),
       hub: path => view ? view.show({ name: 'hub', path }) : this.openLibrary({ name: 'hub', path }),
       shelf: id => view.show({ name: 'shelf', id }),
       home: () => view.show({ name: 'home' }),
+      folder: path => view ? view.show({ name: 'folder', path }) : this.openLibrary({ name: 'folder', path }),
+      newNote: () => this.newNote(),
+      newSermon: () => this.newSermon(),
+      today: () => this.runCommand('daily-notes', 'Turn on Daily notes in Settings → Core plugins to use Today’s note.'),
       search: q => { view.q = q; view.draw(); },
       status: path => this.pickStatus(path),
       meetingTasks: path => this.pickActions(path)
@@ -535,6 +607,7 @@ class LifeDashboardPlugin extends Plugin {
     if (!leaf) { leaf = this.app.workspace.getLeaf('tab'); await leaf.setViewState({ type: VIEW_LIBRARY, active: true }); }
     this.app.workspace.revealLeaf(leaf);
     if (page) leaf.view.show?.(page);
+    if (this.settings.foldSidebar) this.app.workspace.leftSplit?.collapse?.();
   }
   async openDashboard() {
     let leaf = this.app.workspace.getLeavesOfType(VIEW_DASH)[0];
@@ -695,6 +768,8 @@ class LibrarySettings extends PluginSettingTab {
       .addToggle(t => t.setValue(s.titleCards).onChange(v => { s.titleCards = v; save(); }));
     new Setting(containerEl).setName('Hide the properties box under title cards')
       .addToggle(t => t.setValue(s.hideProperties).onChange(v => { s.hideProperties = v; save(); }));
+    new Setting(containerEl).setName('Fold the left sidebar away when the Library opens').setDesc('The Library has every section and folder; the sidebar button at the top left still opens it.')
+      .addToggle(t => t.setValue(s.foldSidebar).onChange(v => { s.foldSidebar = v; save(); }));
     new Setting(containerEl).setName('Open the Library when Obsidian starts')
       .addToggle(t => t.setValue(s.openOnStartup).onChange(v => { s.openOnStartup = v; save(); }));
   }

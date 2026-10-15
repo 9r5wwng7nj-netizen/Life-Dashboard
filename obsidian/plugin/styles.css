@@ -126,3 +126,23 @@
 .ldl-fu-add { display: flex; gap: 8px; }
 .ldl-fu-add input { flex: 1; height: 36px; }
 .ldl-followups button.ldl-btn { margin-top: 0; height: 36px; }
+
+/* Library as home: quick actions, the section bar, and the folder pages */
+.ldl-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: -10px; }
+.ldl-root button.ldl-btn { margin-top: 0; }
+.ldl-btn-soft { background: var(--background-primary) !important; color: var(--text-normal) !important; border: 1px solid var(--background-modifier-border) !important; }
+.ldl-nav { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -20px; padding: 2px 20px; }
+.ldl-nav::-webkit-scrollbar { display: none; }
+.ldl-root button.ldl-navchip { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-normal); font-weight: 600; font-size: 14px; }
+.ldl-root button.ldl-navchip:hover { border-color: var(--interactive-accent); color: var(--text-accent); }
+.ldl-navcount { font-weight: 500; color: var(--text-muted); font-size: 12px; }
+.ldl-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; }
+.ldl-crumb-here { font-weight: 600; }
+.ldl-folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.ldl-root button.ldl-foldertile { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 4px; height: 104px; color: var(--text-normal); padding: 14px; border-radius: 16px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); text-align: left; }
+.ldl-root button.ldl-foldertile:hover { border-color: var(--interactive-accent); }
+.ldl-foldername { font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 18px; font-weight: 600; line-height: 1.15; }
+@container (min-width: 760px) { .ldl-nav { margin: 0; padding: 2px 0; flex-wrap: wrap; overflow: visible; } }
+.ldl-foldermark { width: 28px; height: 6px; border-radius: 3px; margin-bottom: auto; }
+.is-mobile .ldl-cover-big .ldl-cover-title, .ldl-cover-big .ldl-cover-title { font-size: 21px; }
+@container (min-width: 760px) { .ldl-cover-big .ldl-cover-title { font-size: 26px; } }
