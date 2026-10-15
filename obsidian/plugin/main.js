@@ -334,7 +334,7 @@ class LibraryView extends ItemView {
     let node;
     if (this.page.name === 'hub') node = render.hub(doc, lib, this.page.path, on);
     else if (this.page.name === 'shelf') node = render.shelf(doc, lib, this.page.id, on);
-    else node = render.home(doc, lib, on, this.q, this.q ? core.search(this.plugin.notes(), this.q, this.plugin.settings.ignoreFolders) : []);
+    else node = render.home(doc, lib, on, this.q, this.q ? core.search(this.plugin.notes(), this.q, this.plugin.ignored()) : []);
     const focused = doc.activeElement && doc.activeElement.classList.contains('ldl-search');
     this.contentEl.empty(); this.contentEl.append(node);
     if (focused) { const s = this.contentEl.querySelector('.ldl-search'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }
@@ -423,7 +423,14 @@ class LifeDashboardPlugin extends Plugin {
     });
     return this._notes;
   }
-  library() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.settings.ignoreFolders, shelves: this.settings.shelves }); }
+  // Folders left out of the Library: the person's list plus the template folders (core Templates and Templater).
+  ignored() {
+    const out = [...(this.settings.ignoreFolders || [])], add = f => { f = String(f || '').trim().replace(/^\/+|\/+$/g, ''); if (f && !out.includes(f)) out.push(f); };
+    try { add(this.app.internalPlugins?.plugins?.templates?.instance?.options?.folder); } catch (e) { }
+    try { add(this.app.plugins?.plugins?.['templater-obsidian']?.settings?.templates_folder); } catch (e) { }
+    return out;
+  }
+  library() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.ignored(), shelves: this.settings.shelves }); }
   handlers(view) {
     return {
       open: path => this.openNote(path),
@@ -511,7 +518,7 @@ class LifeDashboardPlugin extends Plugin {
   }
   // Tell the dashboard it is inside Obsidian, with the note names it can link a task to; then deliver waiting messages.
   greetDashboard(wv) {
-    const names = this.notes().filter(n => n.family && !core.inFolder(n.path, this.settings.ignoreFolders)).map(n => n.title).slice(0, 5000);
+    const names = this.notes().filter(n => n.family && !core.inFolder(n.path, this.ignored())).map(n => n.title).slice(0, 5000);
     const info = { vault: this.app.vault.getName(), notes: names, prefix: core.BRIDGE_PREFIX };
     wv.executeJavaScript(`window.LD_OBSIDIAN = ${JSON.stringify(info)}; window.dispatchEvent(new Event('ld-obsidian'));`).catch(() => { });
     const waiting = this.pending || []; this.pending = [];

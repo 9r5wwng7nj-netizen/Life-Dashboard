@@ -28,6 +28,7 @@ const FILES = [
   ['People/Sam Rivera.md', { type: 'person' }, 5],
   ['Library/Books/The Practice of Prayer.md', { type: 'book', status: 'unread', author: 'A. Writer' }, 7],
   ['Library/Sermons/Advent 2025.md', { type: 'sermon', status: 'preached', date: '2025-12-07', scripture: 'Isaiah 9' }, 3],
+  ['Library/Sermons/A Very Long Sermon Title That Wraps.md', { type: 'sermon', status: 'preached', date: '2025-11-02', scripture: 'Second Thessalonians Chapters One Through Three' }, 4],
   ['Library/Scripture/WEB/43 John/John 13.md', {}, 90],
   ['Library/Historical Theology/Confessions/Confessions.md', { type: 'work-index', author: 'Augustine' }, 2],
   ['Library/Historical Theology/Confessions/Book 1.md', { type: 'historical-text' }, 1],
@@ -44,7 +45,7 @@ test('notes are sorted into shelves, projects gather their notes, and teaching d
   const notes = notesFor(core, FILES, TODAY);
   const lib = core.buildLibrary(notes, { today: TODAY, ignoreFolders: ['Library/Scripture/WEB'], shelves: ['sermon', 'study', 'series', 'book', 'person'] });
   const shelf = id => (lib.shelves.find(s => s.id === id) || { items: [] }).items.map(n => n.title);
-  expect(shelf('sermon')).toEqual(['John 13 - October 28, 2026', 'Advent 2025']); // the hub, not its four notes
+  expect(shelf('sermon')).toEqual(['John 13 - October 28, 2026', 'Advent 2025', 'A Very Long Sermon Title That Wraps']); // the hub, not its four notes
   expect(shelf('series')).toEqual(['Connect Group']);
   expect(shelf('study')).toEqual([]); // studies live inside their series
   expect(shelf('book')).toEqual(['The Practice of Prayer']);
@@ -107,7 +108,7 @@ test('the Library draws on phone and desktop widths, light and dark, and its but
   const shots = process.env.LDL_SHOTS; // set to a folder to save screenshots for a visual check
   for (const [w, h, theme] of [[390, 844, 'theme-light'], [1200, 900, 'theme-light'], [390, 844, 'theme-dark']]) {
     await page.setViewportSize({ width: w, height: h });
-    await page.setContent(`<!doctype html><html><head><style>body{margin:0;--font-interface:var(--font-interface-theme);background:var(--background-secondary);color:var(--text-normal)} ${css}</style></head><body class="${theme}"><div class="ldl-view" style="height:100vh;overflow:auto" id="v"></div></body></html>`);
+    await page.setContent(`<!doctype html><html><head><style>body{margin:0;--font-interface:var(--font-interface-theme);background:var(--background-secondary);color:var(--text-normal)} button:not(.clickable-icon){display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;height:30px;padding:4px 12px;cursor:pointer} ${css}</style></head><body class="${theme}"><div class="ldl-view" style="height:100vh;overflow:auto" id="v"></div></body></html>`);
     await page.evaluate(([code, files, notesForSrc, today]) => {
       const module = { exports: {} }; class Base { }
       const fake = { Plugin: Base, ItemView: Base, PluginSettingTab: Base, Setting: Base, Modal: Base, SuggestModal: Base, Notice: Base, Platform: {}, TFile: Base, MarkdownView: Base, normalizePath: p => p, debounce: f => f };
@@ -120,7 +121,11 @@ test('the Library draws on phone and desktop widths, light and dark, and its but
     }, [code, FILES, notesFor.toString(), TODAY]);
     await expect(page.locator('.ldl-working')).toContainText('Working on now');
     await expect(page.locator('.ldl-working')).toContainText('1 of 3 notes done');
-    await expect(page.locator('.ldl-card')).toHaveCount(5);
+    await expect(page.locator('.ldl-card')).toHaveCount(6);
+    // Even under Obsidian's button rule: covers in a shelf start level, and long titles stay inside their cover.
+    const tops = await page.locator('.ldl-section').first().locator('.ldl-cover').evaluateAll(cs => cs.map(c => Math.round(c.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
+    expect(await page.locator('.ldl-cover-title').evaluateAll(ts => ts.every(t => t.scrollWidth <= t.parentElement.clientWidth))).toBe(true);
     if (shots) await page.screenshot({ path: `${shots}/library-${w}-${theme}.png` });
     await page.locator('.ldl-card', { hasText: 'The Practice of Prayer' }).click();
     expect(await page.evaluate(() => window.opened)).toEqual(['Library/Books/The Practice of Prayer.md']);
