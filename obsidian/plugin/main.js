@@ -186,18 +186,28 @@ const core = (() => {
     };
   }
 
-  // A meeting note's open to-dos: unticked "- [ ]" lines under a heading about actions, follow-ups, next steps or to-dos.
+  // A meeting note's open to-dos: the top-level bullets under a heading about actions, follow-ups, next steps or
+  // to-dos. Plain bullets and unticked "- [ ]" both count; ticked items and callouts (> lines) do not. A bullet's
+  // indented lines (Granola puts details under a **bold** item) go into the task's notes, in parentheses.
   // Items under a follow-up or waiting heading are things you are waiting on.
+  const mdPlain = t => String(t).replace(/!?\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/!?\[\[([^\]]+)\]\]/g, (m, x) => x.split('/').pop())
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/\*\*|__|`/g, '').replace(/(^|\s)[*_](\S[^*_]*)[*_]/g, '$1$2').replace(/\\([~*_[\]#|])/g, '$1').replace(/\s+\^[\w-]+$/, '').replace(/\s+/g, ' ').trim();
   function actionItems(md) {
-    const out = []; let section = '', take = false, inFm = false;
+    const out = []; let section = '', take = false, inFm = false, cur = null;
+    const close = () => { if (cur && cur.text) { const extra = cur.extra.join('; ').replace(/[()]/g, '').slice(0, 300); out.push({ text: cur.text + (extra ? ` (${extra})` : ''), section: cur.section, waiting: cur.waiting }); } cur = null; };
     String(md || '').split('\n').forEach((line, i) => {
       if (i === 0 && line.trim() === '---') { inFm = true; return; }
       if (inFm) { if (line.trim() === '---') inFm = false; return; }
       const h = line.match(/^#{1,6}\s+(.*)$/);
-      if (h) { section = h[1].trim(); take = /action|follow|next step|to.?do|tasks?\b/i.test(section); return; }
-      const m = take && line.match(/^\s*[-*+]\s+\[ \]\s+(.+)$/);
-      if (m) { const text = m[1].replace(/\s+\^[\w-]+$/, '').trim(); if (text) out.push({ text, section, waiting: /follow|waiting/i.test(section) }); }
+      if (h) { close(); section = h[1].trim(); take = /action|follow|next step|to.?do|tasks?\b/i.test(section); return; }
+      if (!take) return;
+      if (!line.trim() || /^\s*>/.test(line)) { close(); return; }
+      const top = line.match(/^[-*+]\s+(?:\[(.)\]\s+)?(.+)$/);
+      if (top) { close(); if (top[1] && top[1] !== ' ') return; cur = { text: mdPlain(top[2]), extra: [], section, waiting: /follow|waiting/i.test(section) }; return; }
+      if (cur && /^\s+\S/.test(line)) { const t = mdPlain(line.replace(/^\s*(?:[-*+]\s+(?:\[.\]\s+)?)?/, '')); if (t) cur.extra.push(t); return; }
+      close();
     });
+    close();
     return out;
   }
   const meetingTasksMessage = (source, items, area) => ({ addTasks: { source, area: plain(area) || '', items: items.map(it => ({ title: it.text, waiting: !!it.waiting })) } });
