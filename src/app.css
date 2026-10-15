@@ -72,3 +72,12 @@ label:has(input:focus-visible) { outline: 2px solid #0f766e; outline-offset: 3px
   .dark .text-rose-600 { color: #fda4af; }
   .bg-brand-600.text-white { background-color: #0f766e; }
 }
+
+/* Touch screens: larger tap targets and no text under 12px. Unlayered, so these win over utilities. */
+@media (pointer: coarse) {
+  .btn, .tab { min-height: 40px; }
+  .btn-sm { min-height: 36px; padding-left: .625rem; padding-right: .625rem; }
+  button.chip, a.chip, label.chip { min-height: 34px; padding-left: .75rem; padding-right: .75rem; }
+  input[type=checkbox], input[type=radio] { width: 1.25rem; height: 1.25rem; }
+  .text-\[10px\], .text-\[11px\] { font-size: 12px; }
+}

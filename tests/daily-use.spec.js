@@ -147,3 +147,21 @@ test('the template library can be used as it is or added and changed', async ({ 
   expect(made.projects).toEqual(['Host a dinner · Jun 15']);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('on a touch screen, buttons and tabs are finger-sized and no text is under 12px', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const page = await context.newPage();
+  await open(page);
+  const problems = [];
+  for (const id of await page.evaluate(() => VIEWS.filter(v => v.id).map(v => v.id))) {
+    await page.evaluate(v => go(v), id);
+    problems.push(...await page.evaluate(v => {
+      const shown = [...document.querySelectorAll('#view .btn, #view .tab, #view button.chip, header .btn')].filter(e => e.getBoundingClientRect().height > 0);
+      const small = shown.filter(e => e.getBoundingClientRect().height < (e.matches('.chip') ? 34 : 36) - 0.5).map(e => `${v}: "${e.textContent.trim().slice(0, 30)}" ${Math.round(e.getBoundingClientRect().height)}px`);
+      const tiny = [...document.querySelectorAll('#view *')].filter(e => !e.childElementCount && e.textContent.trim() && parseFloat(getComputedStyle(e).fontSize) < 12).map(e => `${v}: text "${e.textContent.trim().slice(0, 30)}"`);
+      return [...small, ...tiny];
+    }, id));
+  }
+  expect(problems).toEqual([]);
+  await context.close();
+});
