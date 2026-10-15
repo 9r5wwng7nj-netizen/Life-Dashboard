@@ -4758,7 +4758,7 @@ const ytConnected = () => { const m = ytMeta(); return !!m.token && m.exp > Date
 function ytSignIn(view) {
   const state = 'yt' + [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
   setYtMeta({ on: true, state, view: view || 'search', error: '' });
-  location.assign(DRIVE.auth + '?' + new URLSearchParams({ client_id: DRIVE.clientId, redirect_uri: new URL('./index.html', location.href).href, response_type: 'token', scope: YTAPI.scope, state }));
+  location.assign(DRIVE.auth + '?' + new URLSearchParams({ client_id: DRIVE.clientId, redirect_uri: new URL('./index.html', location.href).href, response_type: 'token', scope: YTAPI.scope, state, prompt: 'select_account' }));
 }
 // Google returns here after the YouTube sign-in. Answers to the Drive sign-in are left for syncFinishSignIn.
 function ytFinishSignIn() {
@@ -4784,7 +4784,12 @@ async function ytFetch(path, params) {
   if (/accessNotConfigured|SERVICE_DISABLED/i.test(reason) || (res.status === 403 && !reason)) throw new Error('YouTube is not turned on for this app’s Google project yet. Turn on the YouTube Data API v3 in Google Cloud, then try again.');
   if (/quota/i.test(reason)) throw new Error('YouTube’s daily limit for this app is used up. It resets overnight (Pacific time).');
   if (/insufficientPermissions|forbidden/i.test(reason)) throw Object.assign(new Error('YouTube needs your permission again. Reconnect to carry on.'), { signin: true });
-  throw new Error(`YouTube answered with error ${res.status}.`);
+  // Playlists, likes and subscriptions belong to a channel. Signing in with an account that has none (or not choosing
+  // the brand channel the playlists are on) gives "channelNotFound".
+  if (/channelNotFound|channelClosed|channelSuspended/i.test(reason) || (res.status === 404 && path !== 'playlistItems'))
+    throw Object.assign(new Error('YouTube couldn’t find a channel for the account you connected. If your playlists are on a channel with its own name (a brand channel), tap Reconnect and choose that channel when Google asks which account to use.'), { signin: true });
+  if (/playlistNotFound/i.test(reason) || res.status === 404) throw new Error('That playlist couldn’t be found. It may be private to another channel, or it was deleted.');
+  throw new Error(`YouTube answered with error ${res.status}${reason ? ` (${reason})` : ''}.`);
 }
 const ytSecs = d => { const m = String(d || '').match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/); return m ? (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0) : 0; };
 const ytClock = t => !t ? '' : t >= 3600 ? `${Math.floor(t / 3600)}:${pad(Math.floor(t % 3600 / 60))}:${pad(t % 60)}` : `${Math.floor(t / 60)}:${pad(t % 60)}`;
