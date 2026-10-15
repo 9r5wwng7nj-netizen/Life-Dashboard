@@ -57,6 +57,7 @@ Statuses are read loosely and shown the same way everywhere: Idea (idea, planned
 | 3 | **Taught record:** when and to whom each sermon or lesson was given; "taught before?" on the title card. | plugin |
 | 4 | **Scripture in notes:** hover a reference to see the verse; open it in the dashboard's reader. | plugin + bridge |
 | 4 | **Weekly review** that pulls dashboard numbers into one note alongside Plan week and the family review. | plugin + bridge |
+| 3 ✅ | **Library as home:** quick actions (New note, New sermon, Today's note), a section bar for every shelf plus Inbox and All folders, folder pages with a clickable path, Library pages in the tab's back and forward history, and a setting to fold the left sidebar away. | plugin |
 | 4 | **Auto-filer:** notes file themselves by `type`; each series gets an index page. | plugin |
 
 ## Developing

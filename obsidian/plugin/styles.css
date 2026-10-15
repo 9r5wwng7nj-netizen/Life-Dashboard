@@ -33,7 +33,7 @@
 .ldl-cover { width: 100%; aspect-ratio: 3 / 4; border-radius: 14px; color: #fff; padding: 12px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; text-align: left; }
 .ldl-cover-big { width: 104px; flex-shrink: 0; aspect-ratio: auto; min-height: 136px; }
 .ldl-cover-kind { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .85; }
-.ldl-cover-title { font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 21px; line-height: 1.08; overflow-wrap: anywhere; }
+.ldl-cover-title { font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 21px; line-height: 1.08; overflow-wrap: break-word; hyphens: auto; }
 .ldl-cover-big .ldl-cover-title { font-size: 24px; }
 
 .ldl-shelf { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; margin: 0 -20px; padding-left: 20px; padding-right: 20px; scroll-snap-type: x proximity; }
@@ -54,7 +54,7 @@
 .ldl-row-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ldl-row-meta { font-size: 13px; color: var(--text-muted); }
 
-.ldl-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 26px; padding: 0 10px !important; border-radius: 13px !important; border: 0 !important; font-size: 12px; font-weight: 700; background: var(--background-secondary) !important; color: var(--text-muted) !important; }
+.ldl-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 26px; padding: 0 10px !important; border-radius: 13px !important; border: 1px solid var(--background-modifier-border) !important; font-size: 12px; font-weight: 700; background: var(--background-secondary) !important; color: var(--text-muted) !important; }
 .ldl-st-week { background: rgba(20, 184, 166, .16) !important; color: var(--text-accent) !important; }
 .ldl-st-draft { background: rgba(245, 158, 11, .18) !important; color: var(--text-normal) !important; }
 .ldl-st-ready { background: rgba(59, 130, 246, .16) !important; color: var(--text-normal) !important; }
@@ -71,8 +71,9 @@
 
 /* Title card at the top of a note in reading view */
 .ldl-titlecard { display: flex; gap: 14px; align-items: stretch; margin: 4px 0 18px; padding: 12px; border-radius: 16px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); font-family: var(--font-interface); }
-.ldl-titlecard .ldl-cover { width: 76px; aspect-ratio: auto; min-height: 96px; flex-shrink: 0; padding: 10px; }
-.ldl-titlecard .ldl-cover-title { font-size: 17px; }
+.ldl-titlecard .ldl-cover { width: 84px; aspect-ratio: auto; min-height: 96px; flex-shrink: 0; padding: 10px; }
+.ldl-titlecard .ldl-cover-title { font-size: 15px; -webkit-line-clamp: 3; }
+.ldl-titlecard .ldl-chip { background: var(--background-primary) !important; }
 .ldl-titlecard-text { display: flex; flex-direction: column; gap: 6px; justify-content: center; min-width: 0; }
 .ldl-titlecard-meta { font-size: 15px; color: var(--text-normal); }
 .ldl-titlecard-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -126,3 +127,25 @@
 .ldl-fu-add { display: flex; gap: 8px; }
 .ldl-fu-add input { flex: 1; height: 36px; }
 .ldl-followups button.ldl-btn { margin-top: 0; height: 36px; }
+
+/* Library as home: quick actions, the section bar, and the folder pages */
+.ldl-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: -10px; }
+.ldl-root button.ldl-btn { margin-top: 0; }
+.ldl-btn-soft { background: var(--background-primary) !important; color: var(--text-normal) !important; border: 1px solid var(--background-modifier-border) !important; }
+.ldl-nav { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -20px; padding: 2px 20px; }
+.ldl-nav::-webkit-scrollbar { display: none; }
+.ldl-root button.ldl-navchip { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-normal); font-weight: 600; font-size: 14px; }
+.ldl-root button.ldl-navchip:hover { border-color: var(--interactive-accent); color: var(--text-accent); }
+.ldl-navcount { font-weight: 500; color: var(--text-muted); font-size: 12px; }
+.ldl-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; }
+.ldl-crumb-here { font-weight: 600; }
+.ldl-folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.ldl-root button.ldl-foldertile { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 4px; height: 104px; color: var(--text-normal); padding: 14px; border-radius: 16px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); text-align: left; }
+.ldl-root button.ldl-foldertile:hover { border-color: var(--interactive-accent); }
+.ldl-foldername { font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 18px; font-weight: 600; line-height: 1.15; }
+@container (min-width: 760px) { .ldl-nav { margin: 0; padding: 2px 0; flex-wrap: wrap; overflow: visible; } }
+.ldl-foldermark { width: 28px; height: 6px; border-radius: 3px; margin-bottom: auto; }
+.is-mobile .ldl-cover-big .ldl-cover-title, .ldl-cover-big .ldl-cover-title { font-size: 21px; }
+@container (min-width: 760px) { .ldl-cover-big .ldl-cover-title { font-size: 26px; } }
+.ldl-cover .ldl-cover-title.ldl-cover-initials { font-size: 34px; letter-spacing: .02em; }
+.ldl-titlecard .ldl-cover .ldl-cover-title.ldl-cover-initials { font-size: 26px; }

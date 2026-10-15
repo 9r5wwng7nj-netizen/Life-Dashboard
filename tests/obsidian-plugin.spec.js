@@ -194,3 +194,24 @@ test('new people: the bridge message and the profile made from the Person templa
   expect(core.personNote('Jo Park', tpl, '2026-10-15')).toBe('---\ntype: person\ncreated: "2026-10-15"\nroles: []\n---\n\n# Jo Park\n\n## Follow-up\n');
   expect(core.personNote('Jo Park', '', '2026-10-15')).toContain('type: person');
 });
+
+test('a person’s title card: initials on the cover, roles and last contact, no status button', async ({ page }) => {
+  const css = fs.readFileSync('obsidian/theme/Life Dashboard/theme.css', 'utf8') + fs.readFileSync('obsidian/plugin/styles.css', 'utf8'), code = fs.readFileSync(MAIN, 'utf8');
+  await page.setViewportSize({ width: 700, height: 300 });
+  await page.setContent(`<!doctype html><html><head><style>body{margin:0;padding:20px;--font-interface:var(--font-interface-theme);background:var(--background-primary);color:var(--text-normal)} button:not(.clickable-icon){display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;height:30px;padding:4px 12px} ${css}</style></head><body class="theme-dark"><div id="v"></div></body></html>`);
+  const out = await page.evaluate(code => {
+    const module = { exports: {} }; class Base { }
+    const fake = { Plugin: Base, ItemView: Base, PluginSettingTab: Base, Setting: Base, Modal: Base, SuggestModal: Base, Notice: Base, Platform: {}, TFile: Base, MarkdownView: Base, normalizePath: p => p, debounce: f => f };
+    new Function('module', 'exports', 'require', code)(module, module.exports, n => (n === 'obsidian' ? fake : null));
+    const { core, render } = module.exports;
+    const n = core.noteInfo({ path: 'People/Dwayne Conner.md', basename: 'Dwayne Conner' }, { type: 'person', roles: ['Family', 'Mentor'], last_contact: '2026-10-01' }, '2026-10-15');
+    const card = render.titleCard(document, n, null, { status: () => { }, hub: () => { } });
+    document.getElementById('v').append(card);
+    return { cover: card.querySelector('.ldl-cover-title').textContent, meta: card.querySelector('.ldl-titlecard-meta').textContent, chips: card.querySelectorAll('.ldl-chip').length, fits: [...card.querySelectorAll('.ldl-cover-title')].every(t => t.scrollWidth <= t.parentElement.clientWidth) };
+  }, code);
+  expect(out.cover).toBe('DC');
+  expect(out.meta).toMatch(/^Family, Mentor · Last contact Oct 1/);
+  expect(out.chips).toBe(0);
+  expect(out.fits).toBe(true);
+  if (process.env.LDL_SHOTS) await page.screenshot({ path: `${process.env.LDL_SHOTS}/person-card.png` });
+});
