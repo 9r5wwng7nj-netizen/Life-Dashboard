@@ -103,7 +103,7 @@ const core = (() => {
     return {
       path: file.path, folder: file.folder || '', title, family, type: String(fm.type || ''), date,
       mtime: file.mtime || 0, scripture: plain(fm.scripture || fm.passage), series: plain(fm.series),
-      roles: plain(fm.roles), lastContact: isoDate(fm.last_contact),
+      roles: plain(fm.roles), lastContact: isoDate(fm.last_contact), taught: parseTaught(fm.taught), scriptureKey: scriptureKey(fm.scripture || fm.passage),
       projectLink: linkTarget(fm.project), projectPath: null, status: status.key, statusLabel: status.label,
       kind: family ? FAMILIES[family].kind : '', cover: coverText(title, fm.scripture || fm.passage),
       color: PALETTE[hash(title) % PALETTE.length], hub: family === 'series' || String(fm.type || '').toLowerCase() === 'project'
@@ -189,6 +189,36 @@ const core = (() => {
     };
   }
 
+  // --- Taught record. A note's `taught` property lists "2026-10-28 — Group" entries, newest kept first.
+  function parseTaught(v) {
+    return [].concat(v || []).map(x => String(x).trim()).map(x => { const m = x.match(/^(\d{4}-\d{2}-\d{2})\s*(?:[—–-]+\s*)?(.*)$/); return m ? { date: m[1], group: m[2].trim() } : null; })
+      .filter(Boolean).sort((a, b) => b.date.localeCompare(a.date));
+  }
+  const taughtEntry = (date, group) => `${date} — ${group}`;
+  // Groups from settings: one per line; "(inactive)" after a name means not teaching it right now.
+  const parseGroups = lines => [].concat(lines || []).map(String).map(l => l.trim()).filter(Boolean).map(l => ({ name: l.replace(/\s*\(inactive\)\s*$/i, '').trim(), active: !/\(inactive\)\s*$/i.test(l) }));
+  // "John 13:1-17" and "John 13" match; so do "1 Cor 8" and "1 Corinthians 8-10" (book's first letters + chapter).
+  function scriptureKey(ref) {
+    const m = plain(ref).toLowerCase().match(/^([1-3])?\s*([a-z]+)\.?\s*(\d+)/);
+    return m ? `${m[1] || ''}${m[2].slice(0, 3)} ${+m[3]}` : '';
+  }
+  const TEACH_TYPES = ['sermon', 'project', 'study-session', 'session-preparation', 'study', 'lesson', 'bible-study', 'handout', 'class', 'teaching'];
+  const teachable = n => TEACHING.includes(n.family) && TEACH_TYPES.includes(String(n.type).toLowerCase()) && !n.hubPath;
+  // The record: each group's entries (newest first), entries for groups no longer listed, and teaching marked done
+  // with a date but no group recorded yet (to fill in).
+  function teachingRecord(notes, groups, ignore) {
+    const seen = notes.filter(n => !inFolder(n.path, ignore || [])), gs = parseGroups(groups);
+    const by = new Map(gs.map(g => [g.name.toLowerCase(), { ...g, items: [] }])), other = { name: 'Other', active: true, items: [] };
+    for (const n of seen) for (const t of n.taught || []) (by.get(t.group.toLowerCase()) || other).items.push({ note: n, date: t.date, group: t.group });
+    const out = [...by.values(), ...(other.items.length ? [other] : [])];
+    out.forEach(g => g.items.sort((a, b) => b.date.localeCompare(a.date)));
+    const unrecorded = seen.filter(n => teachable(n) && n.status === 'done' && !(n.taught || []).length).sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.title.localeCompare(b.title));
+    return { groups: out, unrecorded, total: out.reduce((a, g) => a + g.items.length, 0) };
+  }
+  // Other notes on the same passage that have been taught.
+  const taughtBefore = (n, notes) => !n.scriptureKey ? [] : notes.filter(x => x.path !== n.path && x.scriptureKey === n.scriptureKey && (x.taught || []).length)
+    .flatMap(x => x.taught.map(t => ({ note: x, ...t }))).sort((a, b) => b.date.localeCompare(a.date));
+
   // A meeting note's open to-dos: the top-level bullets under a heading about actions, follow-ups, next steps or
   // to-dos. Plain bullets and unticked "- [ ]" both count; ticked items and callouts (> lines) do not. A bullet's
   // indented lines (Granola puts details under a **bold** item) go into the task's notes, in parentheses.
@@ -227,7 +257,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -283,6 +313,7 @@ const render = (() => {
     const nav = el(doc, 'nav', 'ldl-nav'); nav.setAttribute('aria-label', 'Library sections');
     const navBtn = (label, count, fn) => { const b = el(doc, 'button', 'ldl-navchip'); b.type = 'button'; b.append(el(doc, 'span', '', label)); if (count != null) b.append(el(doc, 'span', 'ldl-navcount', String(count))); b.addEventListener('click', fn); nav.append(b); };
     lib.shelves.forEach(sh => navBtn(sh.label, sh.items.length, () => on.shelf(sh.id)));
+    if (on.taught && lib.teaching) navBtn('Teaching record', lib.teaching, () => on.taught());
     if (lib.inbox && on.folder) navBtn('Inbox', null, () => on.folder(lib.inbox));
     if (on.folder) navBtn('All folders', null, () => on.folder(''));
     root.append(nav);
@@ -386,8 +417,19 @@ const render = (() => {
     if (!['person', 'area', 'classic'].includes(n.family) && (n.statusLabel || on.status)) { const st = el(doc, 'button', 'ldl-chip ldl-st-' + (n.status || 'none'), n.statusLabel || 'Set status'); st.type = 'button'; st.title = 'Change status'; st.addEventListener('click', () => on.status(n.path)); actions.append(st); }
     if (hubNote) { const p = el(doc, 'button', 'ldl-link', `Part of ${hubNote.title}`); p.type = 'button'; p.addEventListener('click', () => on.hub(hubNote.path)); actions.append(p); }
     if (n.hub && n.count) { const p = el(doc, 'button', 'ldl-link', `${n.count} notes in this project`); p.type = 'button'; p.addEventListener('click', () => on.hub(n.path)); actions.append(p); }
+    if (on.markTaught && core.teachable(n)) { const b = el(doc, 'button', 'ldl-link', 'Mark taught'); b.type = 'button'; b.addEventListener('click', () => on.markTaught(n.path)); actions.append(b); }
     if (n.family === 'meeting' && on.meetingTasks) { const b = el(doc, 'button', 'ldl-link', 'Send action items to Tasks'); b.type = 'button'; b.addEventListener('click', () => on.meetingTasks(n.path)); actions.append(b); }
     txt.append(actions);
+    // Taught here, and the same passage taught from other notes.
+    const short = d => core.fmtDate(d, today);
+    if ((n.taught || []).length) txt.append(el(doc, 'div', 'ldl-titlecard-taught', `Taught: ${n.taught.slice(0, 4).map(t => `${short(t.date)}${t.group ? ` · ${t.group}` : ''}`).join('  ·  ')}${n.taught.length > 4 ? ` +${n.taught.length - 4}` : ''}`));
+    const before = on.taughtBefore ? on.taughtBefore(n) : [];
+    if (before.length) {
+      const line = el(doc, 'div', 'ldl-titlecard-before');
+      line.append(el(doc, 'span', '', `You’ve taught ${n.scripture} before: `));
+      before.slice(0, 3).forEach((t, i) => { if (i) line.append(el(doc, 'span', '', ' · ')); const b = el(doc, 'button', 'ldl-link', `${short(t.date)}${t.group ? `, ${t.group}` : ''}`); b.type = 'button'; b.title = t.note.title; b.addEventListener('click', () => on.open(t.note.path)); line.append(b); });
+      txt.append(line);
+    }
     c.append(cover(doc, n), txt);
     return c;
   }
@@ -416,7 +458,43 @@ const render = (() => {
     form.append(input, add); box.append(list, form);
     return box;
   }
-  return { home, hub, shelf, folder, titleCard, followUps };
+  // The teaching record: each group's history, then groups not taught right now, then teaching to fill in.
+  function taught(doc, rec, today, on) {
+    const root = el(doc, 'div', 'ldl-root');
+    const back = el(doc, 'button', 'ldl-back ldl-back-plain', '‹ Library'); back.type = 'button'; back.addEventListener('click', () => on.home());
+    root.append(back, el(doc, 'h1', 'ldl-h1', 'Teaching record'));
+    if (!rec.groups.length) root.append(el(doc, 'p', 'ldl-muted', 'List the groups you teach in the plugin’s settings (Teaching groups), then use Mark taught on a sermon or lesson.'));
+    const section = (title, items, note) => {
+      const sec = el(doc, 'section', 'ldl-section'), top = el(doc, 'div', 'ldl-section-head');
+      top.append(el(doc, 'h2', 'ldl-h2', title)); if (note) top.append(el(doc, 'span', 'ldl-muted ldl-small', note)); sec.append(top);
+      const list = el(doc, 'div', 'ldl-list'); sec.append(list); root.append(sec); return list;
+    };
+    const entry = (it, list) => {
+      const b = el(doc, 'button', 'ldl-row'); b.type = 'button';
+      b.append(el(doc, 'span', 'ldl-row-date', core.fmtDate(it.date, today)));
+      const mid = el(doc, 'span', 'ldl-row-text'); mid.append(el(doc, 'span', 'ldl-row-title', it.note.title));
+      const meta = [it.note.scripture, it.note.series].filter(Boolean).join(' · '); if (meta) mid.append(el(doc, 'span', 'ldl-row-meta', meta));
+      b.append(mid); b.addEventListener('click', () => on.open(it.note.path)); list.append(b);
+    };
+    const active = rec.groups.filter(g => g.active), resting = rec.groups.filter(g => !g.active);
+    active.forEach(g => { const list = section(g.name, g.items, `${g.items.length} taught`); if (!g.items.length) list.append(el(doc, 'p', 'ldl-muted ldl-small', 'Nothing recorded yet.')); g.items.forEach(it => entry(it, list)); });
+    if (resting.length) {
+      root.append(el(doc, 'div', 'ldl-kicker ldl-gap', 'Not teaching right now'));
+      resting.forEach(g => { const list = section(g.name, g.items, `${g.items.length} taught`); g.items.forEach(it => entry(it, list)); });
+    }
+    if (rec.unrecorded.length) {
+      const list = section('Taught, group not recorded', null, 'Choose the group once and it’s recorded');
+      rec.unrecorded.slice(0, 40).forEach(n => {
+        const r = el(doc, 'div', 'ldl-row ldl-row-static');
+        r.append(el(doc, 'span', 'ldl-row-date', n.date ? core.fmtDate(n.date, today) : '—'));
+        const mid = el(doc, 'span', 'ldl-row-text'); mid.append(el(doc, 'span', 'ldl-row-title', n.title)); if (n.scripture) mid.append(el(doc, 'span', 'ldl-row-meta', n.scripture));
+        const b = el(doc, 'button', 'ldl-btn ldl-btn-soft', 'Record'); b.type = 'button'; b.addEventListener('click', () => on.markTaught(n.path));
+        r.append(mid, b); list.append(r);
+      });
+    }
+    return root;
+  }
+  return { home, hub, shelf, folder, taught, titleCard, followUps };
 })();
 
 /* =============================== 3. plugin =============================== */
@@ -427,6 +505,7 @@ const DEFAULTS = {
   ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
   shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'classic', 'article', 'person'],
   sermonFolder: '',
+  groups: [], // teaching groups, one per line; "(inactive)" after a name for one not taught right now
   peopleFolder: '', // where profiles made from @Name in the dashboard go
   personTemplate: '', // a note whose text new profiles start from
 
@@ -451,6 +530,7 @@ class LibraryView extends ItemView {
     let node;
     if (this.page.name === 'hub') node = render.hub(doc, lib, this.page.path, on);
     else if (this.page.name === 'shelf') node = render.shelf(doc, lib, this.page.id, on);
+    else if (this.page.name === 'taught') node = render.taught(doc, this.plugin.teaching(), lib.today, on);
     else if (this.page.name === 'folder') node = render.folder(doc, this.plugin.folderData(this.page.path || ''), lib.today, on);
     else node = render.home(doc, lib, on, this.q, this.q ? core.search(this.plugin.notes(), this.q, this.plugin.ignored()) : []);
     const focused = doc.activeElement && doc.activeElement.classList.contains('ldl-search');
@@ -484,17 +564,18 @@ class DashboardView extends ItemView {
 }
 
 class TextModal extends Modal {
-  constructor(app, title, fields, onSubmit) { super(app); this.title = title; this.fields = fields; this.onSubmit = onSubmit; }
+  constructor(app, title, fields, onSubmit, submitLabel) { super(app); this.title = title; this.fields = fields; this.onSubmit = onSubmit; this.submitLabel = submitLabel || 'Create'; }
   onOpen() {
     const { contentEl } = this; this.setTitle ? this.setTitle(this.title) : contentEl.createEl('h2', { text: this.title });
     const form = contentEl.createEl('form', { cls: 'ldl-form' }), values = {};
     for (const f of this.fields) {
       const lab = form.createEl('label', { cls: 'ldl-field' }); lab.createEl('span', { text: f.label });
+      if (f.type === 'select') { const sel = lab.createEl('select', { cls: 'dropdown' }); f.options.forEach(o => sel.createEl('option', { text: o, value: o })); if (f.value) sel.value = f.value; values[f.key] = sel; continue; }
       const input = lab.createEl('input', { type: f.type || 'text', attr: { placeholder: f.placeholder || '' } });
       if (f.type === 'checkbox') { input.checked = !!f.value; lab.addClass('ldl-field-check'); lab.prepend(input); } else input.value = f.value || '';
       values[f.key] = input;
     }
-    form.createEl('button', { text: 'Create', cls: 'mod-cta', type: 'submit' });
+    form.createEl('button', { text: this.submitLabel, cls: 'mod-cta', type: 'submit' });
     form.addEventListener('submit', e => { e.preventDefault(); const out = Object.fromEntries(Object.entries(values).map(([k, i]) => [k, i.type === 'checkbox' ? i.checked : i.value.trim()])); this.close(); this.onSubmit(out); });
     setTimeout(() => form.querySelector('input')?.focus(), 0);
   }
@@ -586,7 +667,28 @@ class LifeDashboardPlugin extends Plugin {
     if (this.app.commands?.executeCommandById?.('file-explorer:new-file')) return;
     const folder = this.inboxFolder(), f = await this.createUnique(folder, 'Untitled', ''); await this.app.workspace.getLeaf(false).openFile(f);
   }
-  library() { return Object.assign(this.libraryData(), { inbox: this.inboxFolder() }); }
+  teaching() { return core.teachingRecord(this.notes(), this.settings.groups, this.ignored()); }
+  library() { const t = this.teaching(); return Object.assign(this.libraryData(), { inbox: this.inboxFolder(), teaching: this.settings.groups.length || t.total ? t.total : 0 }); }
+  // Record that a sermon or lesson was taught: which group, when; and mark it Preached or Taught.
+  markTaught(path) {
+    const f = this.app.vault.getAbstractFileByPath(path); if (!(f instanceof TFile)) return;
+    const groups = core.parseGroups(this.settings.groups), n = this.notes().find(x => x.path === path) || {};
+    if (!groups.length) return new Notice('Add your teaching groups in Settings → Life Dashboard Library first.');
+    const names = [...groups.filter(g => g.active), ...groups.filter(g => !g.active)].map(g => g.name);
+    new TextModal(this.app, `Mark taught · ${f.basename}`, [
+      { key: 'group', label: 'Group', type: 'select', options: names, value: (n.taught && n.taught[0] && n.taught[0].group) || names[0] },
+      { key: 'date', label: 'Date', type: 'date', value: n.date && n.date <= core.ymd(new Date()) ? n.date : core.ymd(new Date()) },
+      { key: 'done', label: n.family === 'sermon' ? 'Mark it Preached' : 'Mark it Taught', type: 'checkbox', value: true }
+    ], async v => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v.date || '') || !v.group) return new Notice('Choose a group and a date');
+      await this.app.fileManager.processFrontMatter(f, fm => {
+        const list = [...new Set([...[].concat(fm.taught || []).map(String), core.taughtEntry(v.date, v.group)])];
+        fm.taught = core.parseTaught(list).map(t => core.taughtEntry(t.date, t.group));
+        if (v.done) fm.status = n.family === 'sermon' ? 'preached' : 'taught';
+      });
+      new Notice(`Recorded: ${v.group}, ${v.date}`);
+    }, 'Save').open();
+  }
   libraryData() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.ignored(), shelves: this.settings.shelves }); }
   handlers(view) {
     return {
@@ -596,6 +698,9 @@ class LifeDashboardPlugin extends Plugin {
       home: () => view.show({ name: 'home' }),
       folder: path => view ? view.show({ name: 'folder', path }) : this.openLibrary({ name: 'folder', path }),
       newNote: () => this.newNote(),
+      taught: () => view ? view.show({ name: 'taught' }) : this.openLibrary({ name: 'taught' }),
+      markTaught: path => this.markTaught(path),
+      taughtBefore: n => core.taughtBefore(n, this.notes().filter(x => !core.inFolder(x.path, this.ignored()))),
       newSermon: () => this.newSermon(),
       today: () => this.runCommand('daily-notes', 'Turn on Daily notes in Settings → Core plugins to use Today’s note.'),
       search: q => { view.q = q; view.draw(); },
@@ -763,6 +868,8 @@ class LibrarySettings extends PluginSettingTab {
       .addText(t => t.setValue(s.shelves.join(', ')).onChange(v => { s.shelves = v.split(',').map(x => x.trim()).filter(x => core.FAMILIES[x]); save(); }));
     new Setting(containerEl).setName('Folder for new sermons').setDesc('Each new sermon gets its own folder inside this one.')
       .addText(t => t.setValue(s.sermonFolder).setPlaceholder('e.g. 02 Projects').onChange(v => { s.sermonFolder = v.trim(); save(); }));
+    new Setting(containerEl).setName('Teaching groups').setDesc('One per line. Add (inactive) after a group you aren’t teaching right now; its history stays.')
+      .addTextArea(t => t.setValue(s.groups.join('\n')).setPlaceholder('Connect Group\nCollege Night\nYouth (inactive)').onChange(v => { s.groups = v.split('\n').map(x => x.trim()).filter(Boolean); save(); }));
     new Setting(containerEl).setName('Folder for new people').setDesc('Where a profile goes when you type @Name in a dashboard task and they have none.')
       .addText(t => t.setValue(s.peopleFolder).setPlaceholder('e.g. 04 People').onChange(v => { s.peopleFolder = v.trim(); save(); }));
     new Setting(containerEl).setName('Template for new people').setDesc('A note new profiles start from. {{title}} and {{date}} are filled in.')
