@@ -61,6 +61,7 @@ The `<head>` holds the theme pre-paint script, compiled `assets/app.css`, and th
 | `HOME` → `TEMPLATE_LIBRARY` | Built-in task templates shared by every user. Copies a user adds live in their own `ttemplates` with a `lib` key. |
 | Share sheet → `READER`, `readLink()` | The link reader Worker in `reader/` (deployed with wrangler). It only answers the hosted origin and localhost:8080; change `ORIGINS` in `reader/worker.js` if the app's address changes. |
 | `HELP: start-here tour and what's new` | `RELEASES` (update notes shown to users), `TOUR`, `dashNotices()`, the slide `deck*` functions, `openHelp()`, `A_HELP` |
+| `// --- Media: YouTube` | Find a video: `YTAPI`, `ytSignIn`/`ytFinishSignIn` (own token in `ld.youtube`, read-only scope, same OAuth client as Drive), `ytFetch`, `YT_LOAD` (search, subs, liked, lists, list, channel), `ytModal`. `ytFinishSignIn` must run before `syncFinishSignIn` in `init()`. A search costs 101 of the project's 10,000 daily YouTube units, a Subscriptions refresh about 52. |
 | `DEVICE SYNC (Google Drive app folder)` | `DRIVE` config, `syncMerge()` three-way merge, Google sign-in redirect, Drive calls, the `Sync` object, `A_SYNC` |
 | `FAITH` | shared note helpers; `// --- Scripture`, `// --- Smart Search`, `// --- Berean study tools`, `// --- Journal`, `// --- Media library` |
 | `HOME` | `// --- Marriage & family`, `// --- Family: …`, `// --- Recipes …`, `// --- Recipes & Meals: …`, `// --- Tasks`, `// --- Tasks: …` |
@@ -77,7 +78,7 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
 - **UI state** that shouldn't persist goes on `ui` (defaults come from `Object.assign(ui, {...})` near each module). Persistent preferences go on `S` plus `saveSettings()`.
 - **Modals:** `Modal.open(modalShell(title, bodyHtml, footerHtml, submitActionName), { wide })`.
 - **Accessibility:** use associated labels or meaningful accessible names. Shared rendering links existing label/field pairs and restores focus; Modal manages its name, focus loop, inert background and return focus. Decorative icons are hidden from assistive technology, so icon-only buttons need their own name. See `docs/ACCESSIBILITY.md`.
-- **Tabs:** `tabs('uiKey', [[id, label, icon], …])` wired through the generic `setTab` action.
+- **Tabs:** `tabs('uiKey', [[id, label, icon], …])` wired through the generic `setTab` action. The person can hide tabs (`S.hiddenTabs`), so a view must still work when its default tab is hidden. When tabs are merged, keep the old id working by mapping it to the new tab at the top of the section's render function. Dashboard cards are listed in `DASH_CARDS` and can be hidden (`S.hiddenCards`).
 - **Icons:** `icon('lucide-name', 'w-4 h-4')`. The browser bundle is pinned under `vendor/lucide/`; confirm new icon names exist in that version.
 - **Top-level names are global.** Before adding `function foo` or `const foo`, search for `foo`. Duplicate `const` names break the whole script, and duplicate `function` names silently override each other.
 - **Imports and external URLs:** validate backups before planning a restore; persist records and photos through `commitBackupImport()`. Use `webUrl()` plus `esc()` for external links and image URLs. Podcast callbacks must remain in `isolatedPodcastRequest()`'s sandbox; never load service scripts in the main document.
