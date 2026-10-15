@@ -54,7 +54,7 @@
 .ldl-row-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ldl-row-meta { font-size: 13px; color: var(--text-muted); }
 
-.ldl-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 26px; padding: 0 10px !important; border-radius: 13px !important; border: 0 !important; font-size: 12px; font-weight: 700; background: var(--background-secondary) !important; color: var(--text-muted) !important; }
+.ldl-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 26px; padding: 0 10px !important; border-radius: 13px !important; border: 1px solid var(--background-modifier-border) !important; font-size: 12px; font-weight: 700; background: var(--background-secondary) !important; color: var(--text-muted) !important; }
 .ldl-st-week { background: rgba(20, 184, 166, .16) !important; color: var(--text-accent) !important; }
 .ldl-st-draft { background: rgba(245, 158, 11, .18) !important; color: var(--text-normal) !important; }
 .ldl-st-ready { background: rgba(59, 130, 246, .16) !important; color: var(--text-normal) !important; }
@@ -71,8 +71,9 @@
 
 /* Title card at the top of a note in reading view */
 .ldl-titlecard { display: flex; gap: 14px; align-items: stretch; margin: 4px 0 18px; padding: 12px; border-radius: 16px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); font-family: var(--font-interface); }
-.ldl-titlecard .ldl-cover { width: 76px; aspect-ratio: auto; min-height: 96px; flex-shrink: 0; padding: 10px; }
-.ldl-titlecard .ldl-cover-title { font-size: 17px; }
+.ldl-titlecard .ldl-cover { width: 84px; aspect-ratio: auto; min-height: 96px; flex-shrink: 0; padding: 10px; }
+.ldl-titlecard .ldl-cover-title { font-size: 15px; -webkit-line-clamp: 3; }
+.ldl-titlecard .ldl-chip { background: var(--background-primary) !important; }
 .ldl-titlecard-text { display: flex; flex-direction: column; gap: 6px; justify-content: center; min-width: 0; }
 .ldl-titlecard-meta { font-size: 15px; color: var(--text-normal); }
 .ldl-titlecard-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
