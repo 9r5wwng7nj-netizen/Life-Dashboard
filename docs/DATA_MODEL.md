@@ -16,6 +16,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 | localStorage | `ld.settings` → `hiddenTabs` | Section tabs the person hid, as `{ taskTab: ['stats'], … }`; synced between devices | ✅ (with settings) |
 | localStorage | `ld.settings` → `tabsV` | Which default-hidden tabs have been applied to saved settings (2 = Tasks People and Media Stats); synced | ✅ (with settings) |
 | localStorage | `ld.settings` → `hiddenCards` | Dashboard cards the person hid, by id from `DASH_CARDS` (`nutrition`, `weight`, `training`, `tasks`, `faith`, `family`, `meals`); synced | ✅ (with settings) |
+| localStorage | `ld.youtube` | YouTube connection for Find a video: `{ on, token, exp, state, view, error }`. The token is read-only and lasts about an hour | ❌ |
 | localStorage | `ld.sync` | Sync state for this device: on/off, the one-hour Google access token, last sync time, last error | ❌ |
 | localStorage | `ld.timer`, `ld.focus`, `ld.rd`, `ld.il`, `ld.votd`, `ld.bibles`, `ld.berean`, `ld.vault`, `ld.seeded`, `ld.libv`, `ld.srcv` | Small per-device state and one-time migration flags | ❌ |
 
