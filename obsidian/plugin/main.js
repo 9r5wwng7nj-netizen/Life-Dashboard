@@ -16,12 +16,14 @@ const core = (() => {
   // Note families: what a note is, by its `type` property. A project with project_kind "sermon" is a sermon's hub.
   const FAMILIES = {
     sermon: { label: 'Sermons', kind: 'Sermon', icon: 'mic', types: ['sermon', 'sermon-development', 'sermon-outline', 'sermon-manuscript'] },
-    study: { label: 'Studies & lessons', kind: 'Study', icon: 'book-open', types: ['study-session', 'study', 'lesson', 'bible-study', 'handout', 'class', 'teaching'] },
+    study: { label: 'Studies & lessons', kind: 'Study', icon: 'book-open', types: ['study-session', 'session-preparation', 'study', 'lesson', 'bible-study', 'handout', 'class', 'teaching'] },
     series: { label: 'Series & projects', kind: 'Series', icon: 'library', types: ['project', 'series'] },
-    meeting: { label: 'Meetings', kind: 'Meeting', icon: 'users', types: ['meeting', 'meeting-review', 'meeting-note'] },
+    meeting: { label: 'Meetings', kind: 'Meeting', icon: 'users', types: ['meeting', 'meeting-review', 'meeting-note', 'meeting-source'] },
     person: { label: 'People', kind: 'Person', icon: 'user', types: ['person'] },
     book: { label: 'Books', kind: 'Book', icon: 'book', types: ['book', 'book-note'] },
-    article: { label: 'Articles & media', kind: 'Source', icon: 'newspaper', types: ['article', 'podcast', 'video', 'source', 'historical-text'] },
+    // A classic work or collection is one cover; its chapters (historical-text) stay out of the shelves but in search.
+    classic: { label: 'Historical theology', kind: 'Classic', icon: 'scroll', types: ['work-index', 'collection'] },
+    article: { label: 'Articles & media', kind: 'Source', icon: 'newspaper', types: ['article', 'podcast', 'video', 'source'] },
     area: { label: 'Areas', kind: 'Area', icon: 'compass', types: ['area'] }
   };
   const TYPE_FAMILY = Object.fromEntries(Object.entries(FAMILIES).flatMap(([f, d]) => d.types.map(t => [t, f])));
@@ -313,7 +315,7 @@ const VIEW_LIBRARY = 'life-dashboard-library', VIEW_DASH = 'life-dashboard-panel
 const DEFAULTS = {
   dashboardUrl: 'https://9r5wwng7nj-netizen.github.io/Life-Dashboard/',
   ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
-  shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'article', 'person'],
+  shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'classic', 'article', 'person'],
   sermonFolder: '',
   titleCards: true,
   hideProperties: true,

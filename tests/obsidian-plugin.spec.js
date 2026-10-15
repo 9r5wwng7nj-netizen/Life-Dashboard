@@ -29,6 +29,8 @@ const FILES = [
   ['Library/Books/The Practice of Prayer.md', { type: 'book', status: 'unread', author: 'A. Writer' }, 7],
   ['Library/Sermons/Advent 2025.md', { type: 'sermon', status: 'preached', date: '2025-12-07', scripture: 'Isaiah 9' }, 3],
   ['Library/Scripture/WEB/43 John/John 13.md', {}, 90],
+  ['Library/Historical Theology/Confessions/Confessions.md', { type: 'work-index', author: 'Augustine' }, 2],
+  ['Library/Historical Theology/Confessions/Book 1.md', { type: 'historical-text' }, 1],
   ['Inbox/Loose idea.md', {}, 40]
 ];
 function notesFor(c, files, today) {
@@ -47,6 +49,9 @@ test('notes are sorted into shelves, projects gather their notes, and teaching d
   expect(shelf('study')).toEqual([]); // studies live inside their series
   expect(shelf('book')).toEqual(['The Practice of Prayer']);
   expect(shelf('person')).toEqual(['Sam Rivera']);
+  const all = core.buildLibrary(notes, { today: TODAY, ignoreFolders: [] });
+  expect(all.shelves.find(s => s.id === 'classic').items.map(n => n.title)).toEqual(['Confessions']); // the work, not its chapters
+  expect(all.shelves.some(s => s.items.some(n => n.title === 'Book 1'))).toBe(false);
 
   const hub = lib.hubs.get('Projects/John 13 - October 28, 2026/John 13 - October 28, 2026.md');
   expect(hub.members.map(m => m.title)).toEqual(['Manuscript', 'Development', 'Outline']); // dated first

@@ -1,7 +1,7 @@
 {
   "id": "life-dashboard-library",
   "name": "Life Dashboard Library",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.8.0",
   "description": "Browse your vault as a library of covers, shelves and series, with title cards on notes and the Life Dashboard docked beside your notes.",
   "author": "Life Dashboard",
