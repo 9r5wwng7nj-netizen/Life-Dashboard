@@ -1,0 +1,102 @@
+/* Life Dashboard Library. Colours come from the active theme's variables, so light and dark both work.
+   The same layout serves the Mac and the iPhone: shelves scroll sideways on narrow panes and become grids on wide ones. */
+
+.ldl-view { padding: 0 !important; background: var(--background-secondary); container-type: inline-size; }
+.ldl-root { box-sizing: border-box; max-width: 1180px; margin: 0 auto; padding: 28px 20px 48px; display: flex; flex-direction: column; gap: 24px; font-family: var(--font-interface); color: var(--text-normal); }
+.ldl-root button { font: inherit; cursor: pointer; box-shadow: none; }
+
+.ldl-kicker { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.ldl-accent { color: var(--text-accent); }
+.ldl-muted { color: var(--text-muted); font-size: 14px; }
+.ldl-small { font-size: 12px; }
+.ldl-h1 { margin: 2px 0 0; font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 34px; font-weight: 600; line-height: 1.1; letter-spacing: -.01em; }
+.ldl-h2 { margin: 0; font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 21px; font-weight: 600; }
+
+.ldl-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; }
+.ldl-head-text { flex: 1 1 200px; }
+.ldl-search { flex: 1 1 260px; max-width: 380px; height: 44px; padding: 0 14px; border-radius: 14px !important; border: 1px solid var(--background-modifier-border) !important; background: var(--background-primary) !important; font-size: 15px; }
+
+.ldl-working { display: flex; gap: 16px; padding: 14px; border-radius: 20px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); }
+.ldl-working-text { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.ldl-working-title { font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 21px; font-weight: 600; line-height: 1.2; }
+.ldl-progress { height: 6px; border-radius: 3px; background: var(--background-modifier-border); overflow: hidden; max-width: 360px; }
+.ldl-progress-fill { height: 100%; background: var(--interactive-accent); }
+
+.ldl-btn { align-self: flex-start; height: 38px; padding: 0 16px; border-radius: 19px !important; border: 0; font-weight: 600; margin-top: auto; }
+.ldl-btn-primary { background: var(--interactive-accent) !important; color: var(--text-on-accent) !important; }
+.ldl-link { background: none !important; border: 0 !important; padding: 4px 0 !important; color: var(--text-accent); font-weight: 600; font-size: 14px; height: auto; }
+
+.ldl-section { display: flex; flex-direction: column; gap: 10px; }
+.ldl-section-head { display: flex; align-items: baseline; gap: 12px; }
+.ldl-section-head .ldl-h2 { flex: 1; }
+
+.ldl-cover { width: 100%; aspect-ratio: 3 / 4; border-radius: 14px; color: #fff; padding: 12px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; text-align: left; }
+.ldl-cover-big { width: 104px; flex-shrink: 0; aspect-ratio: auto; min-height: 136px; }
+.ldl-cover-kind { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .85; }
+.ldl-cover-title { font-family: var(--ldl-display, ui-serif, Georgia, serif); font-size: 21px; line-height: 1.08; overflow-wrap: anywhere; }
+.ldl-cover-big .ldl-cover-title { font-size: 24px; }
+
+.ldl-shelf { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; margin: 0 -20px; padding-left: 20px; padding-right: 20px; scroll-snap-type: x proximity; }
+.ldl-shelf::-webkit-scrollbar { display: none; }
+.ldl-card { flex: 0 0 132px; display: flex; flex-direction: column; gap: 6px; padding: 0 !important; height: auto !important; background: none !important; border: 0 !important; color: var(--text-normal); text-align: left; scroll-snap-align: start; }
+.ldl-card:hover .ldl-cover, .ldl-card:focus-visible .ldl-cover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
+.ldl-cover { transition: transform .15s ease, box-shadow .15s ease; }
+.ldl-card-title { font-size: 14px; font-weight: 600; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ldl-card-meta { font-size: 12px; color: var(--text-muted); }
+.ldl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 16px; }
+.ldl-grid .ldl-card { flex: none; }
+
+.ldl-list { display: flex; flex-direction: column; gap: 8px; }
+.ldl-row { display: flex; align-items: center; gap: 12px; width: 100%; height: auto !important; min-height: 56px; padding: 10px 12px !important; border-radius: 14px !important; background: var(--background-primary) !important; border: 1px solid var(--background-modifier-border) !important; color: var(--text-normal); text-align: left; }
+.ldl-row:hover { border-color: var(--interactive-accent) !important; }
+.ldl-row-num { width: 38px; height: 38px; flex-shrink: 0; border-radius: 11px; display: grid; place-items: center; background: var(--background-secondary); font-family: var(--ldl-display, ui-serif, Georgia, serif); font-weight: 600; }
+.ldl-row-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.ldl-row-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ldl-row-meta { font-size: 13px; color: var(--text-muted); }
+
+.ldl-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 26px; padding: 0 10px !important; border-radius: 13px !important; border: 0 !important; font-size: 12px; font-weight: 700; background: var(--background-secondary) !important; color: var(--text-muted) !important; }
+.ldl-st-week { background: rgba(20, 184, 166, .16) !important; color: var(--text-accent) !important; }
+.ldl-st-draft { background: rgba(245, 158, 11, .18) !important; color: var(--text-normal) !important; }
+.ldl-st-ready { background: rgba(59, 130, 246, .16) !important; color: var(--text-normal) !important; }
+
+.ldl-hubpage { padding-top: 0; }
+.ldl-band { margin: 0 -20px; padding: 24px 20px 20px; color: #fff; display: flex; flex-direction: column; gap: 10px; }
+.ldl-band .ldl-kicker { color: rgba(255, 255, 255, .85); }
+.ldl-band .ldl-progress { background: rgba(255, 255, 255, .25); }
+.ldl-band .ldl-progress-fill { background: #fff; }
+.ldl-band-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ldl-band-chip { height: 28px; padding: 0 10px; border-radius: 14px; background: rgba(255, 255, 255, .16); display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; }
+.ldl-back { align-self: flex-start; height: 34px !important; padding: 0 12px !important; border-radius: 17px !important; border: 0 !important; background: rgba(255, 255, 255, .16) !important; color: #fff !important; font-weight: 600; }
+.ldl-back-plain { background: var(--background-primary) !important; color: var(--text-normal) !important; border: 1px solid var(--background-modifier-border) !important; }
+
+/* Title card at the top of a note in reading view */
+.ldl-titlecard { display: flex; gap: 14px; align-items: stretch; margin: 4px 0 18px; padding: 12px; border-radius: 16px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); font-family: var(--font-interface); }
+.ldl-titlecard .ldl-cover { width: 76px; aspect-ratio: auto; min-height: 96px; flex-shrink: 0; padding: 10px; }
+.ldl-titlecard .ldl-cover-title { font-size: 17px; }
+.ldl-titlecard-text { display: flex; flex-direction: column; gap: 6px; justify-content: center; min-width: 0; }
+.ldl-titlecard-meta { font-size: 15px; color: var(--text-normal); }
+.ldl-titlecard-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ldl-carded .markdown-reading-view .metadata-container { display: none; }
+
+/* Docked dashboard */
+.ldl-dash { padding: 0 !important; overflow: hidden !important; }
+.ldl-webview { width: 100%; height: 100%; border: 0; }
+
+.ldl-form { display: flex; flex-direction: column; gap: 12px; }
+.ldl-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
+.ldl-field input { height: 40px; font-size: 15px; }
+.ldl-form .mod-cta { align-self: flex-end; }
+
+/* Wide panes: covers in a grid instead of a sideways shelf, bigger type. */
+@container (min-width: 760px) {
+  .ldl-root { padding: 36px 40px 56px; gap: 30px; }
+  .ldl-h1 { font-size: 40px; }
+  .ldl-shelf { margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); overflow: visible; }
+  .ldl-shelf .ldl-card { flex: none; }
+  .ldl-band { margin: 0 -40px; padding: 32px 40px 26px; }
+  .ldl-cover-big { width: 150px; min-height: 190px; }
+  .ldl-working-title { font-size: 27px; }
+}
+/* Phones: bigger touch targets. */
+.is-mobile .ldl-row { min-height: 64px; }
+.is-mobile .ldl-card { flex-basis: 128px; }

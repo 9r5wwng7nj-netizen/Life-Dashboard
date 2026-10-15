@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "commonjs",
+  "description": "Marks main.js as CommonJS for the repo's tests. Obsidian itself only reads main.js, manifest.json and styles.css."
+}
