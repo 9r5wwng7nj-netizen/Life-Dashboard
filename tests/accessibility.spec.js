@@ -104,10 +104,11 @@ test('custom actions and hidden file pickers can be used by keyboard', async ({ 
   await page.getByRole('button', { name: 'Open Tasks', exact: true }).focus();
   await page.keyboard.press('Space');
   await expect(page.locator('#view-title')).toHaveText('Tasks');
+  const chooser = page.waitForEvent('filechooser'); // listen well before Enter: turning on file-chooser capture is not instant
   await page.evaluate(() => Modal.open(modalShell('Photo upload', '<label class="btn">Choose photo<input type="file" class="hidden"></label>')));
   const picker = page.getByRole('button', { name: 'Choose photo', exact: true });
   await picker.focus();
-  const chooser = page.waitForEvent('filechooser');
+  await expect(picker).toBeFocused();
   await page.keyboard.press('Enter');
   expect((await chooser).isMultiple()).toBe(false);
 });
