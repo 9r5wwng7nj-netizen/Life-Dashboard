@@ -137,3 +137,15 @@ test('the Library draws on phone and desktop widths, light and dark, and its but
     expect(await page.evaluate(() => window.opened.at(-1))).toBe('Projects/John 13 - October 28, 2026/Manuscript.md');
   }
 });
+
+test('a meeting’s open action items are found under action and follow-up headings', () => {
+  const md = ['---', 'type: meeting-review', 'areas: ["[[Ministry]]"]', '---', '# Leaders meeting', '## Notes', '- [ ] not an action (wrong section)',
+    '## Action items', '- [ ] Email the team about Friday #ministry', '- [x] Already done', '* [ ] Book the room ^abc123', '',
+    '## Follow-ups and waiting items', '- [ ] Hear back from Sam about the budget', '## Decisions', '- [ ] stray'].join('\n');
+  expect(core.actionItems(md)).toEqual([
+    { text: 'Email the team about Friday #ministry', section: 'Action items', waiting: false },
+    { text: 'Book the room', section: 'Action items', waiting: false },
+    { text: 'Hear back from Sam about the budget', section: 'Follow-ups and waiting items', waiting: true }
+  ]);
+  expect(core.meetingTasksMessage('Leaders meeting', core.actionItems(md).slice(1), ['[[Ministry]]'])).toEqual({ addTasks: { source: 'Leaders meeting', area: 'Ministry', items: [{ title: 'Book the room', waiting: false }, { title: 'Hear back from Sam about the budget', waiting: true }] } });
+});

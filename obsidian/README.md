@@ -51,7 +51,7 @@ Statuses are read loosely and shown the same way everywhere: Idea (idea, planned
 |---|---|---|
 | 2 ✅ | Dashboard side of the bridge: tasks and projects link to notes (`[[Note]]`), **Send to Obsidian** on Scripture notes, journal, media notes, word studies, topics and workouts. Messages travel as `#ld-obsidian=` + JSON (accepted only from the dashboard's own address); the plugin gives the dashboard the vault's note names (`window.LD_OBSIDIAN`). Outside Obsidian the same buttons use `obsidian://` links. | `index.html` |
 | 2 ✅ | **New sermon** also adds the prep tasks (think, pray, write; one a day for up to 21 days before the date, then the preaching) through `window.LD_FROM_OBSIDIAN`, each linked to its note. | both |
-| 3 | **Meetings to tasks:** action items in meeting notes become dashboard tasks with the person attached. | plugin + bridge |
+| 3 ✅ | **Meetings to tasks:** a meeting note's title card offers *Send action items to Tasks*; the person ticks their own items (unticked lines under Action items / Follow-ups / Next steps / To-do headings). Follow-ups become waiting tasks; sent items are remembered in `tasks_sent`. | plugin + bridge |
 | 3 | **People:** a person's page shows open follow-ups from the dashboard. Pastoral notes stay in the vault. | plugin |
 | 3 | **Taught record:** when and to whom each sermon or lesson was given; "taught before?" on the title card. | plugin |
 | 4 | **Scripture in notes:** hover a reference to see the verse; open it in the dashboard's reader. | plugin + bridge |

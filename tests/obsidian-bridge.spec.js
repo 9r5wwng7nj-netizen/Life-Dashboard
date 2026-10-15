@@ -109,3 +109,15 @@ test('the Library plugin builds the sermon prep message from New sermon', async 
   const v = { passage: 'Luke 15:11-32', title: 'The Father Who Runs', date: '2026-11-08' }, s = core.sermonNotes(v, '2026-10-24');
   expect(core.sermonPrepMessage(v, s)).toEqual({ sermonPrep: { passage: 'Luke 15:11-32', title: 'The Father Who Runs', date: '2026-11-08', hub: s.hub.name, manuscript: s.manuscript.name } });
 });
+
+test('action items picked in a meeting note become tasks linked to it, once', async ({ page }) => {
+  const errors = await open(page, { obsidian: true });
+  const tasks = await page.evaluate(() => {
+    const msg = { addTasks: { source: 'Leaders meeting', area: 'Ministry', items: [{ title: 'Email the team about the retreat tomorrow', waiting: false }, { title: 'Hear back from Sam about the budget', waiting: true }] } };
+    LD_FROM_OBSIDIAN(msg); LD_FROM_OBSIDIAN(msg); // sending again adds nothing
+    return TK().map(t => [t.title, t.note, t.area, t.due === addDays(ymd(), 1), !!t.waiting]);
+  });
+  expect(tasks).toEqual([['Email the team about the retreat', 'Leaders meeting', 'ministry', true, false], ['Hear back from Sam about the budget', 'Leaders meeting', 'ministry', false, true]]);
+  await expect(page.locator('#toasts')).toContainText('Those are already in Tasks');
+  expect(errors, errors.join('\n')).toEqual([]);
+});
