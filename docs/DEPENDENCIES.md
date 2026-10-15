@@ -25,6 +25,7 @@ Licenses and SHA-256 hashes are recorded in `THIRD_PARTY_NOTICES.md`. To change 
 | Podcast lookup | `itunes.apple.com` search/lookup callbacks in a sandboxed iframe with an opaque origin; scripts cannot read dashboard storage |
 | Link previews | `noembed.com` via CORS JSON fetch, with a timeout and no credentials |
 | Embedded players | `youtube-nocookie.com`, `player.vimeo.com`, `open.spotify.com`, `embed.podcasts.apple.com` |
+| Reading recipe pages, articles and TikTok captions (hosted app only) | The app's own Cloudflare Worker, `life-dashboard-reader.lifedashboard-9r5w.workers.dev` (source in `reader/`) |
 | Device sync (only after the user connects Google Drive in Settings) | `accounts.google.com` sign-in by redirect · `www.googleapis.com` Drive API, limited to the app's own hidden folder (`drive.appdata`). No Google script is loaded. |
 | Smart Search “answers” (off; user opted out for now) | `api.anthropic.com` with the user's own key |
 | Miyo local search (off; user opted out for now) | `http://127.0.0.1:8742` |

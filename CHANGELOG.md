@@ -3,6 +3,7 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Link reader: a Cloudflare Worker (`reader/`) fetches pages for the app. Saving a recipe link fills in the whole recipe (ingredients, steps, servings, time, photo); saving an article keeps its title, author, picture and a readable copy; TikTok links get their caption. Import a recipe gains a web-address box. A pasted caption with an ingredient list also becomes the recipe's ingredients and steps, for Facebook and Instagram, which cannot be read.
 - Plan my week (Recipes & Meals → Meal plan): choose days, meals, people, budget and cooking time; it picks a varied week from the user's recipes and a 34-recipe ready-made library (`RECIPE_LIBRARY`, estimated costs and nutrition), shows the estimated total against the budget, allows swapping or dropping any meal, and on Looks great fills the meal plan, copies used library recipes into the recipe box once, and builds the grocery list.
 - Touch screens: buttons and section tabs are at least 40px tall (small buttons 36px, chips 34px), tick boxes 20px, and no text is smaller than 12px. CSS only, under `@media (pointer: coarse)` in `src/app.css`.
 - Add from a link: a header button opens a sheet for a pasted link or text, suggests Media library (with the type: video, podcast, sermon, article, book), Recipe or Task, and files it there. Android's share menu opens the same sheet (manifest `share_target`).

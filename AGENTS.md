@@ -59,6 +59,7 @@ The `<head>` holds the theme pre-paint script, compiled `assets/app.css`, and th
 | `ROUTER / SHELL` → `NAV_COUNTS` | One entry per menu item returning `{ n, what, late?, dot? }` or null. To give a section a count, fill in its entry; do not add nagging counts for things a user has never used. |
 | `HOME` → `RECIPE_LIBRARY`, `mpw*` | Ready-made budget recipes and the Plan my week planner. A library recipe is copied into `recipes` (with a `lib` key) only when a planned week is accepted. |
 | `HOME` → `TEMPLATE_LIBRARY` | Built-in task templates shared by every user. Copies a user adds live in their own `ttemplates` with a `lib` key. |
+| Share sheet → `READER`, `readLink()` | The link reader Worker in `reader/` (deployed with wrangler). It only answers the hosted origin and localhost:8080; change `ORIGINS` in `reader/worker.js` if the app's address changes. |
 | `HELP: start-here tour and what's new` | `RELEASES` (update notes shown to users), `TOUR`, `dashNotices()`, the slide `deck*` functions, `openHelp()`, `A_HELP` |
 | `DEVICE SYNC (Google Drive app folder)` | `DRIVE` config, `syncMerge()` three-way merge, Google sign-in redirect, Drive calls, the `Sync` object, `A_SYNC` |
 | `FAITH` | shared note helpers; `// --- Scripture`, `// --- Smart Search`, `// --- Berean study tools`, `// --- Journal`, `// --- Media library` |
