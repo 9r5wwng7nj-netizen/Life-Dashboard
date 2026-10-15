@@ -5610,13 +5610,164 @@ function tableCard() {
     <div><div class="label flex items-center gap-1">At the table <button class="btn btn-ghost btn-sm ml-auto -my-1" data-action="tblNext" aria-label="Another question">${icon('shuffle', 'w-3.5 h-3.5')}</button></div><p class="text-sm font-medium">${esc(tb.q)}</p></div>
     <div><div class="label flex items-center gap-1">Blessing · ${esc(tb.who)} prays <button class="btn btn-ghost btn-sm ml-auto -my-1" data-action="tblPray" aria-label="Someone else prays">${icon('repeat', 'w-3.5 h-3.5')}</button></div><p class="text-sm">${esc(tb.b[1])}</p><p class="text-[11px] muted mt-1">${esc(tb.b[0])}</p></div></div>`;
 }
+// --- Recipes & Meals: plan my week ---
+// Ready-made budget recipes the planner can use alongside the user's own. Cost is the estimated total
+// for the listed servings at a discount grocer, and nutrition is per serving; both are estimates.
+// [key, title, slot, servings, minutes, kcal, protein, carbs, fat, cost, tags, ingredients, steps]
+const RECIPE_LIBRARY = [
+  ['oats', 'Overnight Oats with Berries', 'breakfast', 2, 5, 350, 14, 55, 9, 2.40, ['Make ahead'], '1 cup rolled oats\n1 cup milk\n1/2 cup plain Greek yogurt\n1 tbsp chia seeds\n1 tbsp honey\n1 cup frozen mixed berries', 'Stir the oats, milk, yogurt, chia and honey together and divide between two jars.\nTop with the berries.\nRefrigerate overnight; eat cold or warmed.'],
+  ['egg-tacos', 'Scrambled Egg Breakfast Tacos', 'breakfast', 2, 10, 380, 20, 28, 20, 2.60, ['Quick'], '4 eggs\n4 small flour tortillas\n1/2 cup shredded cheddar\n1/4 cup salsa\n1 tbsp butter', 'Whisk the eggs with a pinch of salt.\nScramble in the butter over medium-low heat.\nWarm the tortillas, fill with eggs and cheese, and top with salsa.'],
+  ['pb-toast', 'Peanut Butter Banana Toast', 'breakfast', 2, 5, 360, 12, 45, 15, 1.40, ['Quick'], '4 slices whole wheat bread\n3 tbsp peanut butter\n2 bananas\n1 tsp cinnamon', 'Toast the bread.\nSpread with peanut butter, top with sliced banana and a sprinkle of cinnamon.'],
+  ['egg-muffins', 'Spinach and Cheese Egg Muffins', 'breakfast', 4, 25, 210, 15, 3, 15, 3.20, ['Make ahead', 'High Protein'], '8 eggs\n2 cups spinach, chopped\n1/2 cup shredded cheddar\n1/4 cup milk', 'Heat the oven to 350°F and grease a 12-cup muffin tin.\nWhisk the eggs and milk with salt and pepper, then stir in the spinach and cheese.\nFill the cups and bake 18 to 20 minutes, until set.\nKeeps 4 days in the fridge.'],
+  ['parfait', 'Greek Yogurt Parfait', 'breakfast', 2, 5, 320, 20, 42, 8, 2.80, ['Quick', 'High Protein'], '2 cups vanilla Greek yogurt\n1 cup granola\n1 cup strawberries, sliced', 'Layer the yogurt, strawberries and granola in two bowls or jars.'],
+  ['egg-quesadilla', 'Cheesy Spinach and Egg Quesadillas', 'breakfast', 2, 10, 350, 20, 26, 18, 2.30, ['Quick'], '4 eggs\n2 large flour tortillas\n1 cup spinach\n1/2 cup shredded mozzarella', 'Scramble the eggs with the spinach until just set.\nFill half of each tortilla with egg and cheese and fold.\nCook in a dry pan 2 minutes a side, until crisp.'],
+  ['sheet-pancakes', 'Sheet-Pan Blueberry Pancakes', 'breakfast', 6, 25, 300, 8, 48, 8, 2.70, ['Make ahead', 'Kid-Friendly'], '2 cups pancake mix\n1 1/2 cups milk\n2 eggs\n1 cup blueberries', 'Heat the oven to 425°F and line a sheet pan with greased parchment.\nWhisk the mix, milk and eggs, pour into the pan and scatter the blueberries.\nBake 12 to 15 minutes and cut into squares.'],
+  ['burritos', 'Freezer Breakfast Burritos', 'breakfast', 6, 30, 420, 20, 40, 19, 8.00, ['Make ahead', 'Freezer'], '8 eggs\n1 lb breakfast sausage\n6 large flour tortillas\n1 cup shredded cheddar\n2 cups frozen diced potatoes', 'Brown the sausage and potatoes together.\nScramble the eggs and fold them in.\nFill the tortillas with the mix and cheese, roll and wrap in foil.\nFreeze; reheat 2 minutes in the microwave without the foil.'],
+  ['turkey-wrap', 'Turkey and Cheese Wraps', 'lunch', 2, 5, 420, 28, 34, 18, 3.60, ['Quick'], '2 large flour tortillas\n6 oz sliced turkey\n2 slices provolone\n1 cup spinach\n2 tbsp ranch dressing', 'Spread each tortilla with ranch.\nLayer turkey, provolone and spinach, roll tightly and cut in half.'],
+  ['caesar', 'Chicken Caesar Salad', 'lunch', 2, 10, 450, 35, 18, 26, 4.80, ['Quick', 'High Protein'], '2 cups cooked chicken, chopped\n1 bag romaine\n1/4 cup Caesar dressing\n1/4 cup grated parmesan\n1 cup croutons', 'Toss the romaine with the dressing.\nTop with chicken, parmesan and croutons.'],
+  ['chicken-salad', 'Greek Yogurt Chicken Salad Sandwiches', 'lunch', 2, 10, 380, 38, 14, 18, 4.20, ['High Protein'], '2 cups cooked chicken, chopped\n1/2 cup plain Greek yogurt\n1 celery stalk, diced\n1/2 cup grapes, halved\n4 slices whole wheat bread', 'Mix the chicken, yogurt, celery and grapes with salt and pepper.\nSpread between the slices of bread.'],
+  ['bean-quesadilla', 'Black Bean Quesadillas', 'lunch', 2, 12, 480, 20, 58, 18, 2.40, ['Quick', 'Vegetarian'], '1 can black beans, drained\n4 small flour tortillas\n1 cup shredded Mexican cheese\n1/2 cup salsa\n1 tsp cumin', 'Mash the beans with the cumin.\nSpread on two tortillas, add cheese and top with the others.\nCook in a dry pan 3 minutes a side and serve with salsa.'],
+  ['tuna', 'Tuna Salad Sandwiches', 'lunch', 2, 10, 400, 30, 32, 16, 2.60, ['Quick'], '2 cans tuna, drained\n3 tbsp mayonnaise\n1 celery stalk, diced\n4 slices whole wheat bread\n1 cup lettuce', 'Mix the tuna, mayonnaise and celery.\nMake sandwiches with the lettuce.'],
+  ['fried-rice', 'Chicken Fried Rice', 'lunch', 4, 20, 450, 28, 55, 12, 6.40, ['Leftovers welcome'], '3 cups cooked rice\n2 cups cooked chicken, diced\n2 cups frozen peas and carrots\n3 eggs\n3 tbsp soy sauce\n1 tbsp oil', 'Scramble the eggs in the oil and set aside.\nStir-fry the vegetables 3 minutes, then add the rice and chicken.\nAdd the soy sauce and eggs and fry until hot.'],
+  ['lentil-soup', 'Lentil Soup', 'lunch', 6, 40, 300, 17, 45, 5, 5.50, ['Make ahead', 'Vegetarian'], '1 1/2 cups dry lentils\n1 onion, diced\n2 carrots, diced\n2 celery stalks, diced\n1 can diced tomatoes\n6 cups vegetable broth\n1 tsp cumin', 'Soften the onion, carrot and celery in a little oil.\nAdd the lentils, tomatoes, broth and cumin.\nSimmer 30 minutes, until the lentils are tender, and season.'],
+  ['pasta-salad', 'Italian Pasta Salad', 'lunch', 6, 20, 380, 12, 50, 14, 5.20, ['Make ahead'], '1 lb rotini\n1 cup cherry tomatoes, halved\n1 cucumber, diced\n1/2 cup Italian dressing\n1/2 cup mozzarella pearls\n1/4 cup sliced olives', 'Cook the pasta, rinse under cold water and drain.\nToss with everything else and chill.'],
+  ['sausage-pan', 'Sheet-Pan Sausage and Vegetables', 'dinner', 4, 30, 480, 20, 30, 30, 9.50, ['Sheet pan'], '14 oz smoked sausage, sliced\n1 1/2 lb baby potatoes, halved\n2 bell peppers, chopped\n1 onion, chopped\n2 tbsp olive oil\n1 tsp Italian seasoning', 'Heat the oven to 425°F.\nToss everything on a sheet pan with salt and pepper.\nRoast 25 minutes, stirring once.'],
+  ['chicken-veg', 'Grilled Chicken with Roasted Vegetables', 'dinner', 4, 35, 410, 40, 20, 18, 12.00, ['High Protein'], '1 1/2 lb chicken breast\n2 zucchini, sliced\n12 oz broccoli florets\n2 tbsp olive oil\n1 tsp garlic powder', 'Heat the oven to 425°F and roast the vegetables with half the oil for 20 minutes.\nSeason the chicken with garlic powder, salt and pepper, and grill or pan-sear 6 minutes a side, to 165°F.'],
+  ['spaghetti', 'Spaghetti with Meat Sauce', 'dinner', 6, 30, 560, 28, 70, 18, 9.00, ['Kid-Friendly'], '1 lb spaghetti\n1 lb ground beef\n24 oz marinara sauce\n1 onion, diced\n2 cloves garlic, minced\n1/4 cup grated parmesan', 'Brown the beef with the onion and garlic and drain.\nAdd the marinara and simmer 10 minutes.\nCook the spaghetti, toss with the sauce and top with parmesan.'],
+  ['taco-bowls', 'Turkey Taco Bowls', 'dinner', 4, 25, 520, 34, 58, 16, 10.50, ['Kid-Friendly'], '1 lb ground turkey\n1 packet taco seasoning\n1 1/2 cups dry rice\n1 can black beans\n1 cup frozen corn\n1 cup salsa\n1/2 cup shredded cheddar', 'Cook the rice.\nBrown the turkey, add the seasoning and a splash of water.\nWarm the beans and corn, and build bowls with rice, turkey, beans, corn, salsa and cheese.'],
+  ['stir-fry', 'Teriyaki Chicken Stir-Fry', 'dinner', 4, 25, 430, 36, 45, 11, 10.00, ['Quick'], '1 1/2 lb chicken breast, sliced\n1 bag frozen stir-fry vegetables\n1/3 cup teriyaki sauce\n1 1/2 cups dry rice', 'Cook the rice.\nBrown the chicken in a hot pan, then add the vegetables and cook 5 minutes.\nStir in the teriyaki sauce and serve over rice.'],
+  ['chili', 'Slow Cooker Chili', 'dinner', 8, 20, 420, 30, 38, 16, 13.00, ['Slow cooker', 'Freezer'], '2 lb ground beef\n2 cans kidney beans, drained\n2 cans diced tomatoes\n1 onion, diced\n3 tbsp chili seasoning', 'Brown the beef with the onion and drain.\nPut everything in the slow cooker and cook on low 6 to 8 hours.\nFreeze leftovers in portions.'],
+  ['salmon', 'Baked Salmon with Rice and Green Beans', 'dinner', 4, 25, 480, 34, 45, 17, 18.00, ['High Protein'], '1 1/4 lb salmon fillets\n1 1/2 cups dry rice\n1 lb green beans\n1 lemon\n2 tbsp butter', 'Cook the rice.\nHeat the oven to 400°F. Bake the salmon with butter, lemon slices, salt and pepper 12 to 15 minutes.\nSteam the green beans and serve together.'],
+  ['alfredo', 'Chicken Broccoli Alfredo', 'dinner', 6, 25, 620, 35, 65, 24, 12.00, ['Kid-Friendly'], '1 lb fettuccine\n1 1/2 lb chicken breast, sliced\n15 oz alfredo sauce\n2 cups broccoli florets', 'Cook the pasta, adding the broccoli for the last 3 minutes.\nBrown the chicken until cooked through.\nToss everything with the warmed sauce.'],
+  ['sweet-potato-tacos', 'Black Bean and Sweet Potato Tacos', 'dinner', 4, 30, 430, 14, 70, 11, 7.00, ['Vegetarian'], '2 sweet potatoes, diced\n1 can black beans, drained\n8 corn tortillas\n1 avocado\n1/2 cup salsa\n1 tsp chili powder', 'Heat the oven to 425°F and roast the sweet potato with oil and chili powder 20 minutes.\nWarm the beans and tortillas.\nFill with sweet potato, beans, avocado and salsa.'],
+  ['beef-broccoli', 'Beef and Broccoli', 'dinner', 4, 25, 500, 32, 48, 18, 12.50, ['Quick'], '1 lb sirloin, sliced thin\n4 cups broccoli florets\n1/3 cup soy sauce\n2 tbsp brown sugar\n1 tbsp cornstarch\n1 1/2 cups dry rice', 'Cook the rice.\nMix the soy sauce, sugar, cornstarch and 1/2 cup water.\nSear the beef in batches, then cook the broccoli 4 minutes.\nAdd the sauce and beef back and simmer until glossy.'],
+  ['pizza', 'Homemade Pizza Night', 'dinner', 4, 25, 600, 26, 68, 24, 9.00, ['Kid-Friendly'], '2 pizza crusts\n1 cup pizza sauce\n2 cups shredded mozzarella\n6 oz pepperoni', 'Heat the oven to 425°F.\nTop the crusts with sauce, cheese and pepperoni.\nBake 10 to 12 minutes.'],
+  ['chicken-soup', 'Chicken Noodle Soup', 'dinner', 6, 40, 280, 26, 25, 7, 9.00, ['Freezer'], '1 1/2 lb chicken breast\n1 onion, diced\n3 carrots, sliced\n3 celery stalks, sliced\n8 cups chicken broth\n2 cups egg noodles', 'Simmer the chicken in the broth 20 minutes, then shred it.\nSoften the onion, carrot and celery, add the broth and chicken, and simmer 10 minutes.\nAdd the noodles and cook until tender.'],
+  ['apple-pb', 'Apple Slices with Peanut Butter', 'snacks', 2, 2, 250, 7, 30, 12, 1.20, ['Quick'], '2 apples\n3 tbsp peanut butter', 'Slice the apples and serve with peanut butter.'],
+  ['hummus', 'Hummus and Veggies', 'snacks', 4, 5, 180, 6, 18, 9, 4.00, ['Quick', 'Vegetarian'], '10 oz hummus\n2 carrots\n1 cucumber\n1 bell pepper', 'Cut the vegetables into sticks and serve with hummus.'],
+  ['boiled-eggs', 'Hard-Boiled Eggs', 'snacks', 6, 15, 80, 6, 1, 5, 1.80, ['Make ahead', 'High Protein'], '6 eggs', 'Cover the eggs with water, bring to a boil, then cover and leave off the heat 12 minutes.\nCool in cold water and refrigerate.'],
+  ['trail-mix', 'Trail Mix', 'snacks', 8, 5, 200, 6, 18, 12, 6.00, ['Make ahead'], '1 cup almonds\n1 cup peanuts\n1/2 cup raisins\n1/2 cup chocolate chips', 'Mix and divide into small bags or jars.'],
+  ['cottage-pineapple', 'Cottage Cheese and Pineapple', 'snacks', 2, 2, 180, 20, 18, 3, 2.20, ['Quick', 'High Protein'], '1 1/2 cups cottage cheese\n1 cup pineapple chunks', 'Spoon into bowls and top with pineapple.'],
+  ['cheese-crackers', 'Cheese and Crackers', 'snacks', 4, 5, 220, 9, 18, 12, 4.00, ['Quick'], '8 oz cheddar\n1 box whole grain crackers', 'Slice the cheese and serve with the crackers.']
+].map(([key, title, slot, servings, time, cal, p, c, f, cost, tags, ingredients, steps]) => ({ key, title, slot, servings, time, cal, p, c, f, cost, tags, ingredients, steps }));
+Object.assign(ui, { mpw: null });
+const mpwPrefs = () => { const k = gkit(); return { people: 2, budget: num(k.budget) || 150, slots: ['breakfast', 'lunch', 'dinner'], maxTime: 0, library: true, ...(k.planPrefs || {}) }; };
+// What the planner can choose from for a slot: the user's own recipes (by their tags) and, if wanted, the library.
+function mpwPool(slot, P) {
+  const tagged = r => (r.tags || []).map(t => String(t).toLowerCase()), slotOf = r => { const t = tagged(r); return t.includes('breakfast') ? ['breakfast'] : t.some(x => /snack/.test(x)) ? ['snacks'] : t.includes('lunch') ? ['lunch'] : ['lunch', 'dinner']; };
+  const own = Store.get('recipes').filter(r => slotOf(r).includes(slot)).map(r => ({ ref: r.id, title: r.title, servings: num(r.servings) || 1, time: num(r.time), cal: num(r.cal), cost: num(r.cost), fav: !!r.fav, lib: r.lib || null }));
+  const lib = P.library ? RECIPE_LIBRARY.filter(L => L.slot === slot && !own.some(o => o.lib === L.key || o.title.toLowerCase() === L.title.toLowerCase())).map(L => ({ ref: 'lib:' + L.key, title: L.title, servings: L.servings, time: L.time, cal: L.cal, cost: L.cost, fav: false, lib: L.key })) : [];
+  return [...own, ...lib].filter(c => !P.maxTime || !c.time || c.time <= P.maxTime);
+}
+const mpwMealCost = (c, people) => c.cost ? (c.cost / c.servings) * people : 0;
+// Picks a varied week near the budget: each meal is drawn from the candidates closest to an even share of the
+// budget, avoiding repeats, then the most expensive meals are swapped for cheaper ones while the week is over budget.
+function mpwGenerate(P) {
+  const meals = [], picks = {}, used = new Set();
+  P.days.forEach(d => P.slots.forEach(s => meals.push([d, s])));
+  const share = meals.length ? P.budget / meals.length : 0;
+  for (const [d, s] of meals) {
+    const pool = mpwPool(s, P); if (!pool.length) continue;
+    const fresh = pool.filter(c => !used.has(c.ref)), from = (fresh.length ? fresh : pool).slice().sort((a, b) => Math.abs(mpwMealCost(a, P.people) - share) - Math.abs(mpwMealCost(b, P.people) - share) - (a.fav - b.fav) * 0.5);
+    const c = from[Math.floor(Math.random() * Math.min(4, from.length))]; picks[d + '|' + s] = c.ref; used.add(c.ref);
+  }
+  for (let n = 0; n < 40 && mpwTotal(picks, P) > P.budget; n++) {
+    const [key] = Object.entries(picks).map(([k, ref]) => [k, mpwMealCost(mpwFind(ref, P), P.people)]).sort((a, b) => b[1] - a[1])[0] || [];
+    if (!key) break; const slot = key.split('|')[1], now = mpwMealCost(mpwFind(picks[key], P), P.people);
+    const cheaper = mpwPool(slot, P).filter(c => c.cost && mpwMealCost(c, P.people) < now && !Object.values(picks).includes(c.ref)).sort((a, b) => mpwMealCost(a, P.people) - mpwMealCost(b, P.people))[0];
+    if (!cheaper) break; picks[key] = cheaper.ref;
+  }
+  return picks;
+}
+function mpwFind(ref, P) { for (const s of MSLOTS.map(x => x[0])) { const c = mpwPool(s, { ...P, maxTime: 0, library: true }).find(x => x.ref === ref); if (c) return c; } return null; }
+const mpwTotal = (picks, P) => sum(Object.values(picks).map(ref => mpwMealCost(mpwFind(ref, P) || {}, P.people)));
+function mpwIngredients(ref) { if (ref.startsWith('lib:')) { const L = RECIPE_LIBRARY.find(x => 'lib:' + x.key === ref); return L ? L.ingredients.split('\n') : []; } const r = recFind(ref); return r ? ingLines(r) : []; }
+function mpwGroceryCount(picks) { const names = new Set(); Object.values(picks).forEach(ref => mpwIngredients(ref).forEach(l => { const p = parseIngredient(l); const n = ((p && p.item) || l).split(',')[0].trim().toLowerCase(); if (n) names.add(n); })); return names.size; }
+function mpwStart() {
+  const P = mpwPrefs(), dow = (new Date().getDay() + 6) % 7, ws = dow <= 2 ? startOfWeek() : addDays(startOfWeek(), 7);
+  ui.mpw = { step: 'setup', ws, days: Array.from({ length: 7 }, (_, i) => addDays(ws, i)).filter(d => d >= ymd()), people: P.people, budget: P.budget, slots: P.slots.slice(), maxTime: P.maxTime, library: P.library, replace: false, picks: {} };
+  render();
+}
+function mpwView() {
+  const W = ui.mpw, week = d => fmtDate(d, { month: 'short', day: 'numeric' }), thisWk = startOfWeek(), days = Array.from({ length: 7 }, (_, i) => addDays(W.ws, i));
+  const head = `<div class="flex flex-wrap items-center gap-2 mb-4"><button class="btn btn-sm" data-action="mpwClose">${icon('arrow-left', 'w-3.5 h-3.5')} Meal plan</button><h2 class="font-semibold">Plan my week</h2></div>`;
+  if (W.step === 'setup') {
+    const counts = MSLOTS.map(([k, l]) => [l, mpwPool(k, W).length]);
+    return `${head}<div class="card space-y-4 max-w-2xl">
+      <div><div class="label">Week</div><div class="flex flex-wrap gap-1.5">${[thisWk, addDays(thisWk, 7)].map(ws => `<button class="chip ${W.ws === ws ? 'chip-on' : ''}" aria-pressed="${W.ws === ws}" data-action="mpwWeek" data-v="${ws}">Week of ${week(ws)}</button>`).join('')}</div></div>
+      <div><div class="label">Days</div><div class="flex flex-wrap gap-1.5">${days.map(d => `<button class="chip ${W.days.includes(d) ? 'chip-on' : ''}" aria-pressed="${W.days.includes(d)}" data-action="mpwDay" data-v="${d}" ${d < ymd() ? 'disabled' : ''}>${parseYmd(d).toLocaleDateString(undefined, { weekday: 'short' })} ${parseYmd(d).getDate()}</button>`).join('')}</div></div>
+      <div><div class="label">Meals to plan</div><div class="flex flex-wrap gap-1.5">${MSLOTS.map(([k, l, ic]) => `<button class="chip ${W.slots.includes(k) ? 'chip-on' : ''}" aria-pressed="${W.slots.includes(k)}" data-action="mpwSlot" data-v="${k}">${icon(ic, 'w-3 h-3')} ${l}</button>`).join('')}</div></div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label class="label" for="mpw-people">People</label><input id="mpw-people" type="number" min="1" max="12" inputmode="numeric" class="input" value="${W.people}" data-change="mpwNum" data-k="people"></div>
+        <div><label class="label" for="mpw-budget">Weekly food budget ($)</label><input id="mpw-budget" type="number" min="0" step="5" inputmode="decimal" class="input" value="${W.budget}" data-change="mpwNum" data-k="budget"></div>
+        <div><label class="label" for="mpw-time">Cooking time</label><select id="mpw-time" class="input" data-change="mpwNum" data-k="maxTime">${[[0, 'Any'], [15, 'Up to 15 min'], [30, 'Up to 30 min'], [45, 'Up to 45 min']].map(([v, l]) => `<option value="${v}" ${W.maxTime === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+      <label class="flex items-start gap-2 text-sm"><input type="checkbox" class="mt-0.5 accent-brand-600" data-change="mpwLib" ${W.library ? 'checked' : ''}> <span>Include ready-made recipes <span class="muted">(${RECIPE_LIBRARY.length} budget meals; costs and nutrition are estimates)</span></span></label>
+      <p class="text-xs muted">Recipes to choose from: ${counts.map(([l, n]) => `${l} ${n}`).join(' · ')}. Tag your own recipes Breakfast, Lunch or Snack to use them for those meals; untagged recipes count as lunch or dinner.</p>
+      <button class="btn btn-primary" data-action="mpwMake" ${W.days.length && W.slots.length ? '' : 'disabled'}>${icon('sparkles')} Plan my week</button></div>`;
+  }
+  const total = mpwTotal(W.picks, W), over = total > W.budget, pct = W.budget ? Math.min(100, Math.round(100 * total / W.budget)) : 0, n = Object.keys(W.picks).length;
+  const unknown = Object.values(W.picks).filter(ref => !(mpwFind(ref, W) || {}).cost).length;
+  return `${head}<h3 class="text-xl font-bold mb-3">Your week is ready</h3>
+    <div class="grid grid-cols-2 gap-3 mb-4"><div class="card"><div class="text-xs muted uppercase tracking-wide">Estimated, of ${money(W.budget)}</div><div class="text-2xl font-bold ${over ? 'text-rose-700 dark:text-rose-400' : ''}">${money(total)}</div>
+        <div class="h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 mt-2 overflow-hidden" role="progressbar" aria-label="Estimated cost against the budget" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="h-full ${over ? 'bg-rose-500' : 'bg-brand-500'}" style="width:${pct}%"></div></div>
+        <div class="text-xs muted mt-1">${n} meal${n === 1 ? '' : 's'} for ${W.people}${unknown ? ` · ${unknown} without a cost` : ''}</div></div>
+      <div class="card"><div class="text-xs muted uppercase tracking-wide">Grocery list</div><div class="text-2xl font-bold">${mpwGroceryCount(W.picks)} items</div><div class="text-xs muted mt-1">Built when you tap Looks great</div></div></div>
+    <div class="space-y-2">${days.filter(d => W.days.includes(d)).flatMap(d => MSLOTS.filter(([k]) => W.slots.includes(k)).map(([k, l]) => { const ref = W.picks[d + '|' + k], c = ref && mpwFind(ref, W); return `<div class="card p-3 flex items-center gap-3"><div class="flex-1 min-w-0"><div class="text-xs muted uppercase tracking-wide">${parseYmd(d).toLocaleDateString(undefined, { weekday: 'short' })} · ${l}</div>
+      ${c ? `<div class="font-medium">${esc(c.title)}</div><div class="text-xs muted">${[c.cost ? money(mpwMealCost(c, W.people)) : 'No cost yet', c.time ? `${c.time} min` : '', c.cal ? `${fmtNum(c.cal)} cal` : '', c.lib && ref.startsWith('lib:') ? 'Ready-made' : 'Your recipe'].filter(Boolean).join(' · ')}</div>` : '<div class="text-sm muted">Nothing fits. Try another cooking time or add a recipe.</div>'}</div>
+      ${c ? `<button class="btn btn-sm" data-action="mpwSwap" data-k="${d}|${k}" aria-label="Swap ${esc(c.title)} for something else">${icon('arrow-left-right', 'w-3.5 h-3.5')}</button><button class="btn btn-sm btn-ghost" data-action="mpwDrop" data-k="${d}|${k}" aria-label="Leave ${l} on ${fmtDate(d, { weekday: 'long' })} unplanned">${icon('x', 'w-3.5 h-3.5')}</button>` : ''}</div>`; })).join('')}</div>
+    <label class="flex items-start gap-2 text-sm mt-4"><input type="checkbox" class="mt-0.5 accent-brand-600" data-change="mpwReplace" ${W.replace ? 'checked' : ''}> <span>Replace meals already planned in these slots <span class="muted">(otherwise these are added alongside them)</span></span></label>
+    <div class="flex flex-wrap gap-2 mt-4"><button class="btn" data-action="mpwBack">${icon('settings-2', 'w-4 h-4')} Change settings</button><button class="btn" data-action="mpwMake">${icon('shuffle', 'w-4 h-4')} Try another week</button><span class="flex-1"></span><button class="btn btn-primary" data-action="mpwApply" ${n ? '' : 'disabled'}>${icon('check')} Looks great</button></div>`;
+}
+// Puts the week into the meal plan (copying ready-made recipes into the recipe box once) and builds the grocery list.
+function mpwApply() {
+  const W = ui.mpw, plan = Store.get('mealPlan'), rs = Store.get('recipes'); let n = 0;
+  for (const [key, ref] of Object.entries(W.picks)) {
+    const [d, slot] = key.split('|'); let r = null;
+    if (ref.startsWith('lib:')) {
+      const L = RECIPE_LIBRARY.find(x => 'lib:' + x.key === ref); if (!L) continue;
+      r = rs.find(x => x.lib === L.key);
+      if (!r) { r = { id: uid(), lib: L.key, title: L.title, tags: [...L.tags, { breakfast: 'Breakfast', lunch: 'Lunch', snacks: 'Snack', dinner: 'Dinner' }[L.slot]], servings: L.servings, time: L.time, cal: L.cal, p: L.p, c: L.c, f: L.f, cost: L.cost, ingredients: L.ingredients, steps: L.steps, notes: 'Ready-made recipe. Cost and nutrition are estimates; edit them to match your store.', source: '', freezer: L.tags.includes('Freezer'), created: new Date().toISOString() }; rs.push(r); }
+    } else r = recFind(ref);
+    if (!r) continue;
+    const day = plan[d] = plan[d] || [];
+    if (W.replace) for (let i = day.length - 1; i >= 0; i--) if ((day[i].slot || 'dinner') === slot) day.splice(i, 1);
+    const batch = Math.round((W.people / (num(r.servings) || 1)) * 2) / 2 || 0.5;
+    day.push({ id: uid(), recipeId: r.id, slot, ...(batch !== 1 ? { batch } : {}) }); n++;
+  }
+  const k = gkit(); k.planPrefs = { people: W.people, budget: W.budget, slots: W.slots, maxTime: W.maxTime, library: W.library }; if (!num(k.budget)) k.budget = W.budget;
+  Store.save('recipes'); Store.save('mealPlan'); Store.save('gkit');
+  ui.planWeek = W.ws; ui.mpw = null; ui.recTab = 'plan';
+  A.groceryBuild();
+  toast(`Planned ${n} meal${n === 1 ? '' : 's'} and built your grocery list`);
+}
+const A_MPW = {
+  mpwOpen: () => mpwStart(),
+  mpwClose: () => { ui.mpw = null; render(); },
+  mpwWeek: el => { const W = ui.mpw; W.ws = el.dataset.v; W.days = Array.from({ length: 7 }, (_, i) => addDays(W.ws, i)).filter(d => d >= ymd()); render(); },
+  mpwDay: el => { const W = ui.mpw, d = el.dataset.v; W.days = W.days.includes(d) ? W.days.filter(x => x !== d) : [...W.days, d].sort(); render(); },
+  mpwSlot: el => { const W = ui.mpw, s = el.dataset.v; W.slots = W.slots.includes(s) ? W.slots.filter(x => x !== s) : MSLOTS.map(x => x[0]).filter(x => x === s || W.slots.includes(x)); render(); },
+  mpwNum: el => { const W = ui.mpw; W[el.dataset.k] = el.dataset.k === 'people' ? Math.max(1, Math.min(12, Math.round(num(el.value) || 1))) : Math.max(0, num(el.value) || 0); render(); },
+  mpwLib: el => { ui.mpw.library = el.checked; render(); },
+  mpwReplace: el => { ui.mpw.replace = el.checked; },
+  mpwMake: () => { const W = ui.mpw; W.picks = mpwGenerate(W); W.step = 'review'; render(); },
+  mpwBack: () => { ui.mpw.step = 'setup'; render(); },
+  mpwSwap: el => {
+    const W = ui.mpw, key = el.dataset.k, slot = key.split('|')[1], taken = new Set(Object.values(W.picks)), share = W.budget / Math.max(1, Object.keys(W.picks).length);
+    const options = mpwPool(slot, W).filter(c => !taken.has(c.ref)), fallback = mpwPool(slot, W).filter(c => c.ref !== W.picks[key]);
+    const from = (options.length ? options : fallback).sort((a, b) => Math.abs(mpwMealCost(a, W.people) - share) - Math.abs(mpwMealCost(b, W.people) - share));
+    if (!from.length) return toast('No other recipes fit this meal', 'error');
+    W.picks[key] = from[Math.floor(Math.random() * Math.min(5, from.length))].ref; render();
+  },
+  mpwDrop: el => { delete ui.mpw.picks[el.dataset.k]; render(); },
+  mpwApply
+};
 function recPlan() {
+  if (ui.mpw) return mpwView();
   if (ui.prepOn) return prepView();
   const ws = ui.planWeek, recipes = Store.get('recipes').slice().sort((a, b) => a.title.localeCompare(b.title)), days = Array.from({ length: 7 }, (_, i) => addDays(ws, i)), t = ymd(), slot = ui.planSlot || 'dinner', fz = Store.get('freezer').filter(f => (f.portions || 0) > 0);
   const cost = planWeekCost(ws), isThis = ws === startOfWeek(), anyToday = isThis && mpItems(t).some(it => it.recipeId && (recFind(it.recipeId) || {}).cal);
   return `${isThis ? tableCard() : ''}
   <div class="flex flex-wrap items-center gap-2 mb-3"><button class="btn" data-action="planWeek" data-d="-7" aria-label="Previous week">${icon('chevron-left')}</button><div class="font-semibold">Week of ${fmtDate(ws, { month: 'long', day: 'numeric' })}</div><button class="btn" data-action="planWeek" data-d="7" aria-label="Next week">${icon('chevron-right')}</button>${!isThis ? `<button class="btn btn-sm" data-action="planWeek" data-d="0">This week</button>` : ''}
-    <span class="flex-1"></span><button class="btn btn-sm" data-action="planCopyLast">${icon('copy', 'w-3.5 h-3.5')} Copy last week</button><button class="btn btn-sm" data-action="prepOpen">${icon('list-checks', 'w-3.5 h-3.5')} Prep day</button>${anyToday ? `<button class="btn btn-sm" data-action="planLogToday">${icon('utensils', 'w-3.5 h-3.5')} Log today’s meals</button>` : ''}<button class="btn btn-sm btn-primary" data-action="groceryBuild">${icon('shopping-cart', 'w-3.5 h-3.5')} Build grocery list</button></div>
+    <span class="flex-1"></span><button class="btn btn-sm btn-primary" data-action="mpwOpen">${icon('sparkles', 'w-3.5 h-3.5')} Plan my week</button><button class="btn btn-sm" data-action="planCopyLast">${icon('copy', 'w-3.5 h-3.5')} Copy last week</button><button class="btn btn-sm" data-action="prepOpen">${icon('list-checks', 'w-3.5 h-3.5')} Prep day</button>${anyToday ? `<button class="btn btn-sm" data-action="planLogToday">${icon('utensils', 'w-3.5 h-3.5')} Log today’s meals</button>` : ''}<button class="btn btn-sm btn-primary" data-action="groceryBuild">${icon('shopping-cart', 'w-3.5 h-3.5')} Build grocery list</button></div>
   <div class="flex flex-wrap items-center gap-1.5 mb-3 text-sm"><span class="muted mr-1">Adding to:</span>${MSLOTS.map(([k, l, ic]) => `<button class="chip ${slot === k ? 'chip-on' : ''}" data-action="planSlotSet" data-v="${k}">${icon(ic, 'w-3 h-3')} ${l}</button>`).join('')}<span class="flex-1"></span>${cost.n ? `<span class="text-xs muted">Est. ${money(cost.c)} for ${cost.n} planned meal${cost.n === 1 ? '' : 's'}${gkit().budget ? ` · budget ${money(gkit().budget)}/wk` : ''}</span>` : ''}</div>
   <div class="grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">${days.map(d => { const items = mpItems(d), today = d === t, mac = planDayMacros(d), T = targetsFor(d); return `<div class="card p-3 flex flex-col ${today ? 'ring-2 ring-brand-400' : ''}"><div class="text-xs font-semibold uppercase tracking-wide ${today ? 'text-brand-600' : 'muted'}">${parseYmd(d).toLocaleDateString(undefined, { weekday: 'short' })} <span class="font-normal">${fmtDate(d, { month: 'short', day: 'numeric' })}</span></div>
     ${mac.known ? `<div class="text-[11px] tabular-nums mt-0.5 ${T && T.cal && mac.cal > T.cal * 1.1 ? 'text-amber-600 dark:text-amber-400' : 'muted'}" title="Planned per-serving macros vs your targets">${fmtNum(mac.cal)}${T && T.cal ? `/${fmtNum(T.cal)}` : ''} kcal · P${fmtNum(mac.p)}${T && T.p ? `/${fmtNum(T.p)}` : ''}</div>` : ''}
@@ -5794,7 +5945,7 @@ const planAdd = (d, it) => { const plan = Store.get('mealPlan'); (plan[d] = plan
 const planFindItem = (d, id) => (Store.get('mealPlan')[d] || []).find(x => x.id === id);
 function grocAddLines(lines, scale, source, store) { const before = new Set(Store.get('grocery').map(x => x.id)), n = mergeGrocery(lines, scale, source); if (store) Store.get('grocery').forEach(x => { if (!before.has(x.id)) x.store = store; }); Store.save('grocery'); return n; }
 const A_RECIPES = {
-  goRecTab: el => { ui.recTab = el.dataset.tab; ui.prepOn = false; go('recipes'); },
+  goRecTab: el => { ui.recTab = el.dataset.tab; ui.prepOn = false; ui.mpw = null; go('recipes'); },
   recSortSet: el => { ui.recSort = el.value; render(); },
   recImport: () => recImportModal(),
   recImpClip: async () => { try { const t = await navigator.clipboard.readText(); $('#rec-imp').value = t; toast(t ? 'Pasted — now tap Read recipe' : 'Clipboard is empty'); } catch (e) { toast('Click in the box and press Ctrl/⌘+V instead', 'error'); } },
@@ -6764,6 +6915,10 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-15d', title: 'Plan your week of meals in one tap', slides: [
+    { title: 'Plan my week', img: '2026-10-plan-my-week.png', alt: 'Your week is ready: an estimated total against the budget, a grocery list count, and each meal with its cost, time and calories.',
+      body: '<p>Recipes &amp; Meals → Meal plan → <strong>Plan my week</strong>. Choose the days, which meals, how many people and your budget. It picks a varied week from your recipes and 34 ready-made budget meals, showing the estimated cost, time and calories of each.</p><p>Tap the swap button to change any meal, then <strong>Looks great</strong> to fill your meal plan and build the grocery list.</p>', go: ['recipes', 'recTab', 'plan', 'Open Meal plan'] }
+  ] },
   { id: '2026-10-15c', title: 'Bigger buttons on your phone', slides: [
     { title: 'Easier to tap', body: '<p>On phones and tablets, buttons, section tabs, chips and tick boxes are now larger, and small labels are easier to read. Nothing moved; it is just easier to hit the right thing with your thumb.</p>' }
   ] },
@@ -7151,7 +7306,7 @@ const A = {
   }
 };
 
-Object.assign(A, A_FIT, A_NUT, A_MF, A_FAITH, A_MEDIA, A_JOURNAL, A_SCR, A_SMART, A_BEREAN, A_HOME, A_FAMILY, A_RECIPES, A_TASKS, A_SYNC, A_HELP, A_SHARE);
+Object.assign(A, A_FIT, A_NUT, A_MF, A_FAITH, A_MEDIA, A_JOURNAL, A_SCR, A_SMART, A_BEREAN, A_HOME, A_FAMILY, A_RECIPES, A_MPW, A_TASKS, A_SYNC, A_HELP, A_SHARE);
 
 /* =====================================================================
    EVENT WIRING & INIT
