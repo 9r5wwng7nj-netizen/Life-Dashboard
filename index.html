@@ -6282,11 +6282,13 @@ function taskBulkBar() {
       ${ps.length ? `<select class="input w-auto py-1 text-xs" data-change="selApply" data-do="project" aria-label="Move selected to a project" ${n ? '' : 'disabled'}><option value="">Project…</option>${ps.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}
       <span class="flex-1"></span>${act('delete', 'Delete', 'trash-2', 'btn-danger')}</div></div>`;
 }
+// +1 / +2 / +3 on today's list: move a task that many days from today.
+const taskPushButtons = t => `<div class="flex items-center gap-1 mt-1.5" role="group" aria-label="Push ${esc(t.title)} to a later day"><span class="text-[11px] muted mr-0.5">Push</span>${[1, 2, 3].map(n => `<button class="btn btn-sm px-2 py-0.5 tabular-nums" data-action="taskPush" data-id="${t.id}" data-n="${n}" title="${fmtDate(addDays(ymd(), n), { weekday: 'long', month: 'short', day: 'numeric' })}" aria-label="Push ${n} day${n === 1 ? '' : 's'}, to ${fmtDate(addDays(ymd(), n), { weekday: 'long' })}">+${n}</button>`).join('')}</div>`;
 function taskRow(t, o = {}) {
   const done = !tOpen(t), isB3 = big3().includes(t);
   if (ui.taskSel) o = { ...o, today: false };
   return `<div class="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5${taskPicked(t)}" ${o.drag ? `draggable="true" data-drag-task="${t.id}"` : ''}>${taskTick(t)}
-    <div class="flex-1 min-w-0"><button class="text-left text-sm font-medium break-words hover:underline ${done ? 'line-through' : ''}" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><div class="flex flex-wrap items-center gap-1 mt-1 empty:hidden"><span class="w-1.5 h-1.5 rounded-full ${PRI[t.priority || 'med'][1]}" title="${PRI[t.priority || 'med'][0]} priority"></span>${taskMeta(t, o)}</div>${o.extra || ''}</div>
+    <div class="flex-1 min-w-0"><button class="text-left text-sm font-medium break-words hover:underline ${done ? 'line-through' : ''}" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><div class="flex flex-wrap items-center gap-1 mt-1 empty:hidden"><span class="w-1.5 h-1.5 rounded-full ${PRI[t.priority || 'med'][1]}" title="${PRI[t.priority || 'med'][0]} priority"></span>${taskMeta(t, o)}</div>${o.push && tOpen(t) && !ui.taskSel ? taskPushButtons(t) : ''}${o.extra || ''}</div>
     <div class="flex items-center gap-0.5 shrink-0">${o.today ? `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="today">Today</button>` : ''}${tOpen(t) && !ui.taskSel ? `<button class="btn btn-ghost btn-sm px-1.5 ${isB3 ? 'text-amber-500' : 'opacity-50 hover:opacity-100'}" data-action="big3Toggle" data-id="${t.id}" title="${isB3 ? 'Remove from' : 'Add to'} this week’s Big 3" aria-label="Big 3">${icon('star', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="blkNew" data-task="${t.id}" title="Block time" aria-label="Block time">${icon('calendar-clock', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="ftStartA" data-id="${t.id}" title="Focus 25 min" aria-label="Focus">${icon('target', 'w-3.5 h-3.5')}</button>` : ''}</div></div>`;
 }
 function renderTasks() {
@@ -6322,8 +6324,8 @@ function tasksToday() {
   const doneToday = TK().filter(x => doneOn(x) === t && inArea(x)), tm = open.filter(x => x.due === addDays(t, 1)), waiting = open.filter(x => x.waiting).length;
   return `<div class="grid lg:grid-cols-5 gap-4"><div class="lg:col-span-3 space-y-4 min-w-0">
     <div class="card">${cardHead('star', 'This week’s Big 3', `<button class="btn btn-sm btn-ghost" data-action="setTab" data-key="taskTab" data-val="plan">${b3.length ? 'Change' : 'Pick'} ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}${b3.length ? `<div class="space-y-2">${b3.map(x => taskRow(x)).join('')}</div>` : '<p class="text-sm muted">Choose the three things that would make this week a win.</p>'}</div>
-    ${overdue.length ? `<div class="card border-rose-200 dark:border-rose-900">${cardHead('alarm-clock', `Overdue · ${overdue.length}`, `<button class="btn btn-sm" data-action="tdAllToday">Move all to today</button>`)}<div class="space-y-2">${overdue.map(x => taskRow(x, { today: true })).join('')}</div></div>` : ''}
-    <div class="card">${cardHead('sun', `Today · ${fmtDate(t, { weekday: 'long', month: 'short', day: 'numeric' })}`, `${waiting ? `<button class="chip" data-action="setTab" data-key="taskTab" data-val="people">⏳ ${waiting} waiting</button>` : ''}`)}${today.length ? `<div class="space-y-2">${today.map(x => taskRow(x, { noDue: true })).join('')}</div>` : `<p class="text-sm muted">${doneToday.length ? 'All done for today. 🎉' : 'Nothing due today.'}</p>`}
+    ${overdue.length ? `<div class="card border-rose-200 dark:border-rose-900">${cardHead('alarm-clock', `Overdue · ${overdue.length}`, `<button class="btn btn-sm" data-action="tdAllToday">Move all to today</button>`)}<div class="space-y-2">${overdue.map(x => taskRow(x, { today: true, push: true })).join('')}</div></div>` : ''}
+    <div class="card">${cardHead('sun', `Today · ${fmtDate(t, { weekday: 'long', month: 'short', day: 'numeric' })}`, `${waiting ? `<button class="chip" data-action="setTab" data-key="taskTab" data-val="people">⏳ ${waiting} waiting</button>` : ''}`)}${today.length ? `<div class="space-y-2">${today.map(x => taskRow(x, { noDue: true, push: true })).join('')}</div>` : `<p class="text-sm muted">${doneToday.length ? 'All done for today. 🎉' : 'Nothing due today.'}</p>`}
       ${doneToday.length ? `<details class="mt-3"><summary class="text-xs muted cursor-pointer list-none">Done today · ${doneToday.length}</summary><div class="space-y-2 mt-2">${doneToday.map(x => taskRow(x)).join('')}</div></details>` : ''}</div>
     ${tm.length ? `<div class="card">${cardHead('sunrise', `Tomorrow · ${tm.length}`)}<div class="space-y-1">${tm.sort(sortT).map(taskRowMini).join('')}</div></div>` : ''}</div>
     <div class="lg:col-span-2 min-w-0">${dayPlanner(ui.blockDate || t)}</div></div>`;
@@ -6527,6 +6529,10 @@ const A_TASKS = {
     if (v === 'someday') { t.someday = true; t.due = null; } else { t.someday = false; setDue(t, v === 'today' ? today : v === 'tomorrow' ? addDays(today, 1) : v === 'fri' ? (new Date().getDay() >= 5 || new Date().getDay() === 0 ? addDays(startOfWeek(), 11) : addDays(startOfWeek(), 4)) : v === 'nextweek' ? addDays(startOfWeek(), 7) : null); }
     Store.save('tasks'); render();
   },
+  taskPush: el => {
+    const t = tFind(el.dataset.id); if (!t) return; const d = addDays(ymd(), +el.dataset.n || 1);
+    t.someday = false; setDue(t, d); Store.save('tasks'); toast(`Moved to ${fmtDate(d, { weekday: 'long', month: 'short', day: 'numeric' })}`); render();
+  },
   tdAllToday: () => { const t = ymd(); TK().filter(x => tOpen(x) && !x.someday && x.due && x.due < t && inArea(x)).forEach(x => setDue(x, t)); Store.save('tasks'); render(); },
   tdArea: el => { const t = tFind(el.dataset.id); if (!t) return; t.area = el.dataset.v; Store.save('tasks'); toast(isSorted(t) ? `Moved to ${areaLabel(t.area)}` : `${areaLabel(t.area)} — now give it a due date`); render(); },
   tdProject: el => { const t = tFind(el.dataset.id); if (!t || !el.value) return; t.project = el.value; Store.save('tasks'); toast(`Moved to ${projFind(el.value)?.name}`); render(); },
@@ -6690,7 +6696,9 @@ const A_HOME = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
-  { id: '2026-10-15', title: 'Scan barcodes with your iPhone camera', slides: [
+  { id: '2026-10-15', title: 'iPhone barcode scanning and quick push buttons for tasks', slides: [
+    { title: 'Push a task to a later day', img: '2026-10-task-push.png', alt: 'A task on today’s list with Push +1, +2 and +3 buttons under it.',
+      body: '<p>On Tasks → Today, each task due today or overdue has <strong>+1</strong>, <strong>+2</strong> and <strong>+3</strong> buttons. Tap one to move the task that many days from today.</p>', go: ['tasks', 'taskTab', 'today', 'Open Today'] },
     { title: 'Barcode scanning on iPhone', body: '<p>In Nutrition, log a food and open the <strong>Barcode</strong> tab, then tap <strong>Start camera</strong> and hold the barcode across the red line. It now works in Safari on iPhone, not only in Chrome.</p><p>The first time, your phone asks to allow the camera. If the product is not found, you can save it as your own food and it will scan instantly next time.</p>', go: ['nutrition', '', '', 'Open Nutrition'] }
   ] },
   { id: '2026-10-13b', title: 'Notes in parentheses when adding a task', slides: [
