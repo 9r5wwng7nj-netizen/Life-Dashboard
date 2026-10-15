@@ -20,7 +20,7 @@ const VIDEOS = {
 };
 const item = id => ({ id, snippet: { title: VIDEOS[id].title, channelTitle: VIDEOS[id].channelTitle, channelId: VIDEOS[id].channelId, publishedAt: VIDEOS[id].publishedAt, liveBroadcastContent: 'none', thumbnails: { medium: { url: `https://i.ytimg.com/vi/${id}/mqdefault.jpg` } } }, contentDetails: { duration: VIDEOS[id].duration } });
 
-function fakeYouTube(context, { fail } = {}) {
+function fakeYouTube(context, { fail, failStatus = 403 } = {}) {
   const calls = [];
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': '*' };
   const json = (route, body, status = 200) => route.fulfill({ status, headers: { ...cors, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -29,7 +29,7 @@ function fakeYouTube(context, { fail } = {}) {
     const req = route.request(), url = new URL(req.url()), p = url.searchParams, name = url.pathname.split('/').pop();
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
     calls.push(name + (p.get('playlistId') ? ':' + p.get('playlistId') : ''));
-    if (fail) return json(route, { error: { code: 403, errors: [{ reason: fail }] } }, 403);
+    if (fail) return json(route, { error: { code: failStatus, errors: [{ reason: fail }] } }, failStatus);
     if (req.headers().authorization !== `Bearer ${TOKEN}`) return json(route, { error: { code: 401 } }, 401);
     if (name === 'search') return json(route, { items: [vid(1), vid(2)].map(videoId => ({ id: { kind: 'youtube#video', videoId } })) });
     if (name === 'videos' && p.get('myRating') === 'like') return json(route, { items: [item(vid(4))] });
@@ -70,6 +70,7 @@ test('connecting YouTube asks Google for read-only access and comes back to Find
   expect(asked.get('scope')).toBe('https://www.googleapis.com/auth/youtube.readonly');
   expect(asked.get('response_type')).toBe('token');
   expect(asked.get('redirect_uri')).toBe(`${base}/index.html`);
+  expect(asked.get('prompt')).toBe('select_account'); // lets the person pick a brand channel
   await expect(page.locator('#modal input[name="q"]')).toBeVisible(); // back in Find a video, ready to search
   expect(await page.evaluate(() => [S.view, localStorage.getItem('ld.sync')])).toEqual(['media', null]); // Drive sync untouched
   expect(calls).toEqual([]);
@@ -174,4 +175,16 @@ test('a copy opened as a file explains that finding videos needs the hosted app'
   await page.evaluate(() => { A.helpDismiss({ dataset: { what: 'tour' } }); go('media'); });
   await page.click('#view [data-action="ytFind"]');
   await expect(page.locator('#modal')).toContainText('works in the hosted copy');
+});
+
+test('an account with no YouTube channel is told how to pick the right one', async ({ browser }) => {
+  const context = await browser.newContext();
+  fakeYouTube(context, { fail: 'channelNotFound', failStatus: 404 });
+  const { page, errors } = await openApp(context);
+  await page.click('#view [data-action="ytFind"]');
+  await page.locator('#modal [data-action="ytView"][data-v="lists"]').click();
+  await expect(page.locator('#modal')).toContainText('couldn’t find a channel');
+  await expect(page.locator('#modal [data-action="ytConnect"]')).toHaveText(/Reconnect YouTube/);
+  expect(errors, errors.join('\n')).toEqual([]);
+  await context.close();
 });
