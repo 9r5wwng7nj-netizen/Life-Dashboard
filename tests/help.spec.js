@@ -57,10 +57,16 @@ test('an existing user is told about the newest update once', async ({ page }) =
     await expect(dialog.locator('img')).toHaveJSProperty('complete', true);
     expect(await dialog.locator('img').evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
   }
-  await dialog.getByRole('button', { name: latest.slides[0].go[3] }).click();
-  const [view, key, tab] = latest.slides[0].go; // the shortcut lands on the page the slide is about
-  await expect(page.locator('#view-title')).toHaveText(await page.evaluate(v => VIEWS.find(x => x.id === v).label, view));
-  expect(await page.evaluate(k => [k ? ui[k] : '', S.newsSeen], key)).toEqual([key ? tab : '', latest.id]);
+  // A slide's shortcut, when it has one, lands on the page the slide is about.
+  const withGo = latest.slides.findIndex(sl => sl.go);
+  if (withGo >= 0) {
+    for (let i = 0; i < withGo; i++) await dialog.getByRole('button', { name: 'Next' }).click();
+    const [view, key, tab, label] = latest.slides[withGo].go;
+    await dialog.getByRole('button', { name: label }).click();
+    await expect(page.locator('#view-title')).toHaveText(await page.evaluate(v => VIEWS.find(x => x.id === v).label, view));
+    if (key) expect(await page.evaluate(k => ui[k], key)).toBe(tab);
+  } else await page.keyboard.press('Escape');
+  expect(await page.evaluate(() => S.newsSeen)).toBe(latest.id);
 
   await page.evaluate(() => go('dashboard'));
   await expect(page.locator('#view')).not.toContainText(latest.title);

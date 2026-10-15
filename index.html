@@ -69,6 +69,7 @@
       <div class="ml-auto flex items-center gap-2">
         <span id="header-date" class="hidden sm:inline text-sm muted"></span>
         <button id="sync-btn" class="btn btn-sm hidden" data-action="syncNow"></button>
+        <button class="btn btn-sm" data-action="shareOpen" title="Add from a link" aria-label="Add from a link"><i data-lucide="link-2" class="w-4 h-4"></i><span class="hidden sm:inline">Add link</span></button>
         <button class="btn btn-sm" data-action="showTimer" title="Rest timer"><i data-lucide="timer" class="w-4 h-4"></i><span class="hidden sm:inline">Timer</span></button>
       </div>
     </header>
@@ -6689,6 +6690,73 @@ const A_HOME = {
   taskClearDone: () => { const n = Store.get('tasks').filter(x => x.status === 'done').length; if (!confirm(`Permanently remove ${n} completed task${n === 1 ? '' : 's'}?`)) return; Store.set('tasks', Store.get('tasks').filter(x => x.status !== 'done')); render(); }
 };
 
+// --- Add from a link: one place to drop a shared link or text. It suggests where it belongs
+// (Media library, Recipes or Tasks) and files it there. Android's share menu opens it directly
+// (manifest share_target); on iPhone, copy the link and tap the header button.
+const RECIPE_HOSTS = ['allrecipes.com', 'foodnetwork.com', 'budgetbytes.com', 'seriouseats.com', 'bonappetit.com', 'delish.com', 'tasty.co', 'cooking.nytimes.com', 'simplyrecipes.com', 'epicurious.com', 'food.com', 'bbcgoodfood.com', 'pinchofyum.com', 'halfbakedharvest.com', 'tasteofhome.com', 'thepioneerwoman.com', 'eatingwell.com', 'skinnytaste.com', 'minimalistbaker.com', 'sallysbakingaddiction.com', 'damndelicious.net', 'recipetineats.com', 'cafedelites.com', 'gimmedelicious.com', 'joyfoodsunshine.com', 'iheartnaptime.net', 'spendwithpennies.com', 'thekitchn.com', 'myrecipes.com', 'kingarthurbaking.com', 'tastesbetterfromscratch.com', 'cookieandkate.com', 'loveandlemons.com', 'twopeasandtheirpod.com'];
+const SHARE_TO = [['media', 'Media library', 'podcast'], ['recipe', 'Recipe', 'chef-hat'], ['task', 'Task', 'list-checks']];
+const firstUrl = s => ((String(s || '').match(/https?:\/\/[^\s<>"']+/) || [''])[0]).replace(/[),.;!?]+$/, '');
+function classifyShare(text) {
+  const url = firstUrl(text); if (!url) return { to: 'task', kind: 'article', url: '' };
+  const h = hostOf(url), path = (() => { try { return new URL(url).pathname.toLowerCase(); } catch (e) { return ''; } })(), on = list => list.some(x => h === x || h.endsWith('.' + x));
+  if (/recipe/.test(path) || on(RECIPE_HOSTS)) return { to: 'recipe', kind: 'article', url };
+  if (ytId(url) || on(['vimeo.com', 'tiktok.com', 'rumble.com', 'fb.watch']) || (on(['instagram.com']) && /^\/(reels?|p|tv)\//.test(path)) || (on(['facebook.com']) && /^\/(watch|reel)/.test(path)) || isVideoUrl(url)) return { to: 'media', kind: 'video', url };
+  if (on(['podcasts.apple.com', 'open.spotify.com', 'overcast.fm', 'pca.st', 'castbox.fm', 'soundcloud.com', 'podbean.com']) || isAudioUrl(url)) return { to: 'media', kind: 'podcast', url };
+  if (/sermon/.test(url.toLowerCase()) || on(['sermonaudio.com', 'subsplash.com', 'churchcenter.com'])) return { to: 'media', kind: 'sermon', url };
+  if (on(['goodreads.com']) || (/amazon\./.test(h) && /\/dp\//.test(path))) return { to: 'media', kind: 'book', url };
+  return { to: 'media', kind: 'article', url };
+}
+function shareOpen(text = '', title = '') {
+  const c = classifyShare(text); ui.share = { text, title, to: c.to, kind: c.kind, suggested: c.to, saving: false }; shareDraw();
+}
+function shareDraw() {
+  const S_ = ui.share, url = firstUrl(S_.text), dest = SHARE_TO.find(x => x[0] === S_.to);
+  Modal.open(modalShell('Add from a link', `
+    <div><label class="label" for="sh-text">Link or text</label><textarea id="sh-text" class="input" rows="3" data-input="shareText" placeholder="Paste a link from YouTube, Instagram, a podcast, an article or a recipe site, or type a note" autofocus>${esc(S_.text)}</textarea>
+      <button type="button" class="btn btn-sm mt-2" data-action="sharePaste">${icon('clipboard-paste', 'w-3.5 h-3.5')} Paste</button></div>
+    <div><div class="label">Where should it go?</div><div class="flex flex-wrap gap-1.5" role="group" aria-label="Where should it go?">${SHARE_TO.map(([k, l, ic]) => `<button type="button" class="chip ${S_.to === k ? 'chip-on' : ''}" aria-pressed="${S_.to === k}" data-action="shareTo" data-v="${k}">${icon(ic, 'w-3 h-3')} ${l}${S_.suggested === k && url ? '<span class="opacity-80"> · suggested</span>' : ''}</button>`).join('')}</div></div>
+    ${S_.to === 'media' ? `<div><label class="label" for="sh-kind">Type</label><select id="sh-kind" class="input" data-change="shareKind">${Object.entries(MEDIA_KINDS).map(([k, [l]]) => `<option value="${k}" ${S_.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
+    ${S_.to !== 'task' || url ? `<div><label class="label" for="sh-title">Title</label><input id="sh-title" class="input" data-input="shareTitle" value="${esc(S_.title)}" placeholder="${S_.to === 'media' ? 'Filled in from the link if you leave it blank' : S_.to === 'recipe' ? 'Recipe name' : ''}"></div>` : ''}
+    <p class="text-xs muted">${S_.to === 'media' ? 'Saved to your Media library under Up next.' : S_.to === 'recipe' ? 'Saved to your Recipe box with the link. Add the ingredients and steps when you have a minute, or use Import a recipe.' : 'Added to Tasks. The rules for adding tasks apply, and a link goes in the notes.'}</p>`,
+    `<button type="button" class="btn" data-action="closeModal">Cancel</button><button type="button" class="btn btn-primary" data-action="shareSave" ${S_.saving ? 'disabled' : ''}>${icon(dest[2])} ${S_.saving ? 'Saving…' : `Save to ${dest[1]}`}</button>`), { onClose: () => { ui.share = null; } });
+}
+async function shareSave() {
+  const S_ = ui.share; if (!S_ || S_.saving) return;
+  const url = firstUrl(S_.text), rest = S_.text.replace(url, '').trim(), title = S_.title.trim();
+  if (!url && !rest) return toast('Paste a link or type something first', 'error');
+  if (S_.to === 'media') {
+    if (!url) return toast('The Media library needs a link', 'error');
+    S_.saving = true; shareDraw();
+    const o = { id: uid(), title, url: webUrl(url) || url, ministry: '', kind: S_.kind, status: 'queue', date: ymd(), refs: '', tags: [], body: rest, created: new Date().toISOString() };
+    const d = await Promise.race([autofillLink(url), new Promise(r => setTimeout(r, 8000, {}))]).catch(() => ({}));
+    ['title', 'author', 'thumb', 'ministry', 'feed'].forEach(k => { if (d[k] && !o[k]) o[k] = d[k]; }); if (d.audio) o.audio = d.audio; if (!o.title) o.title = slugTitle(url) || hostOf(url);
+    mCommit(o); Modal.close(); toast(`Saved to Media library: ${o.title}`); return render();
+  }
+  if (S_.to === 'recipe') {
+    const r = { id: uid(), created: new Date().toISOString(), title: title || (url ? slugTitle(url) : rest.split('\n')[0]) || 'Saved recipe', tags: [], servings: 4, time: '', cal: null, p: null, c: null, f: null, ingredients: '', steps: '', notes: rest, source: url, cost: null, freezer: false };
+    Store.get('recipes').push(r); recSaveNow(r); Modal.close(); toast(`Saved to Recipes: ${r.title}`); return render();
+  }
+  const t = url ? addParsedTask({ ...parseTaskInput(title || rest || hostOf(url)), notes: [url, title && rest ? rest : ''].filter(Boolean).join('\n') }, {}) : addTasks(rest)[0];
+  if (!t) return toast('Type what the task is', 'error');
+  Modal.close(); toast(`Added to Tasks: ${t.title}`); render();
+}
+// Android's share menu opens index.html?share_text=…&share_url=…&share_title=… (see manifest share_target).
+function shareFromAddress() {
+  const q = new URLSearchParams(location.search); if (!['share_text', 'share_url', 'share_title'].some(k => q.has(k))) return;
+  const title = q.get('share_title') || '', text = [q.get('share_text'), q.get('share_url')].filter(Boolean).join(' ').trim();
+  ['share_text', 'share_url', 'share_title'].forEach(k => q.delete(k)); history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
+  shareOpen(text, title);
+}
+const A_SHARE = {
+  shareOpen: () => shareOpen(),
+  shareText: el => { const S_ = ui.share; if (!S_) return; const before = classifyShare(S_.text); S_.text = el.value; const c = classifyShare(S_.text); if (c.to !== before.to || c.kind !== before.kind || c.url !== before.url) { S_.suggested = c.to; if (S_.to === before.to) { S_.to = c.to; S_.kind = c.kind; shareDraw(); } } },
+  shareTitle: el => { if (ui.share) ui.share.title = el.value; },
+  shareKind: el => { if (ui.share) ui.share.kind = el.value; },
+  shareTo: el => { if (!ui.share) return; ui.share.to = el.dataset.v; shareDraw(); },
+  sharePaste: async () => { try { const t = await navigator.clipboard.readText(); if (!t) return toast('The clipboard is empty', 'error'); const c = classifyShare(t); Object.assign(ui.share, { text: t, to: c.to, kind: c.kind, suggested: c.to }); shareDraw(); } catch (e) { toast('Long-press the box and choose Paste', 'error'); } },
+  shareSave
+};
+
 /* =====================================================================
    HELP: start-here tour and what's new
    ===================================================================== */
@@ -6696,6 +6764,10 @@ const A_HOME = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-15b', title: 'Add a link from anywhere', slides: [
+    { title: 'Add from a link', img: '2026-10-add-link.png', alt: 'The Add from a link sheet with a YouTube link pasted and Media library suggested.',
+      body: '<p>Found a video, podcast, article or recipe you want to keep? On iPhone, tap <strong>Share → Copy link</strong> in that app, open Life Dashboard and tap the <strong>link button</strong> at the top, then <strong>Paste</strong>.</p><p>It suggests where the link belongs (Media library, Recipes or Tasks) and files it there. You can pick a different place before saving. On Android, Life Dashboard also appears in the Share menu.</p>' }
+  ] },
   { id: '2026-10-15', title: 'iPhone barcode scanning and quick push buttons for tasks', slides: [
     { title: 'Push a task to a later day', img: '2026-10-task-push.png', alt: 'A task on today’s list with Push +1, +2 and +3 buttons under it.',
       body: '<p>On Tasks → Today, each task due today or overdue has <strong>+1</strong>, <strong>+2</strong> and <strong>+3</strong> buttons. Tap one to move the task that many days from today.</p>', go: ['tasks', 'taskTab', 'today', 'Open Today'] },
@@ -7076,7 +7148,7 @@ const A = {
   }
 };
 
-Object.assign(A, A_FIT, A_NUT, A_MF, A_FAITH, A_MEDIA, A_JOURNAL, A_SCR, A_SMART, A_BEREAN, A_HOME, A_FAMILY, A_RECIPES, A_TASKS, A_SYNC, A_HELP);
+Object.assign(A, A_FIT, A_NUT, A_MF, A_FAITH, A_MEDIA, A_JOURNAL, A_SCR, A_SMART, A_BEREAN, A_HOME, A_FAMILY, A_RECIPES, A_TASKS, A_SYNC, A_HELP, A_SHARE);
 
 /* =====================================================================
    EVENT WIRING & INIT
@@ -7132,6 +7204,7 @@ async function init() {
   render(); Timer.restore();
   try { if (navigator.storage && navigator.storage.persisted && !(await navigator.storage.persisted())) navigator.storage.persist(); } catch (e) {}
   registerOfflineShell();
+  shareFromAddress();
   Sync.draw(); Sync.run({ announce: signedIn });
 }
 init().catch(e => {
