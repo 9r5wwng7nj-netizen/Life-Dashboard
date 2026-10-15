@@ -149,3 +149,15 @@ test('a meeting’s open action items are found under action and follow-up headi
   ]);
   expect(core.meetingTasksMessage('Leaders meeting', core.actionItems(md).slice(1), ['[[Ministry]]'])).toEqual({ addTasks: { source: 'Leaders meeting', area: 'Ministry', items: [{ title: 'Book the room', waiting: false }, { title: 'Hear back from Sam about the budget', waiting: true }] } });
 });
+
+test('plain bullets, Granola’s bold items with details, and review callouts are read the way meeting notes write them', () => {
+  const md = ['---', 'type: meeting-source', '---', '### Action Items', '- **Draft the retreat schedule**', '  Due ~2 weeks; check with [[Sam Rivera|Sam]] and (maybe) Jo.', '- **Book the venue**', '  - call twice', '',
+    '## Action items', '> [!note] How these were sorted', '> Only mine are listed.', '- Send the budget to [[Finance Team]] by friday', '- [x] Already handled', '',
+    '## Follow-ups and waiting items', '- Hear back about the date \\~ soon'].join('\n');
+  expect(core.actionItems(md)).toEqual([
+    { text: 'Draft the retreat schedule (Due ~2 weeks; check with Sam and maybe Jo.)', section: 'Action Items', waiting: false },
+    { text: 'Book the venue (call twice)', section: 'Action Items', waiting: false },
+    { text: 'Send the budget to Finance Team by friday', section: 'Action items', waiting: false },
+    { text: 'Hear back about the date ~ soon', section: 'Follow-ups and waiting items', waiting: true }
+  ]);
+});
