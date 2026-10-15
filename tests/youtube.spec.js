@@ -96,6 +96,7 @@ test('search, then add a video to Up next or watch it in the app', async ({ brow
   await expect(modal).toContainText('Bible Videos · 8:05');
   await expect(modal).toContainText('1:02:03');
   expect(calls).toEqual(['search', 'videos']);
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('#modal .line-clamp-2')).fontSize)).toBe('16px'); // bigger titles
 
   await modal.locator('[data-action="ytAdd"][data-i="0"][data-s="queue"]').click();
   await expect(modal.locator('.chip-on', { hasText: 'In your library' })).toHaveCount(1);
@@ -122,8 +123,12 @@ test('subscriptions, playlists, liked videos and a channel’s videos', async ({
 
   await modal.locator('[data-action="ytView"][data-v="subs"]').click();
   await expect(modal).toContainText('Newest from your subscribed channels');
-  await expect.poll(titles).toEqual(['Quick tip', 'Prayer basics', 'Romans overview']); // newest first
+  await expect.poll(titles).toEqual(['Prayer basics', 'Romans overview']); // newest first; the 45-second Short is hidden
+  await expect(modal).toContainText('1 Short hidden');
+  await modal.locator('[data-action="ytShorts"]').click();
+  await expect.poll(titles).toEqual(['Quick tip', 'Prayer basics', 'Romans overview']);
   await expect(modal.locator('.chip', { hasText: 'Short' })).toHaveCount(1);
+  expect(await page.evaluate(() => S.ytShorts)).toBe(true);
 
   await modal.locator('[data-action="ytView"][data-v="lists"]').click();
   await modal.locator('[data-action="ytList"]').click();

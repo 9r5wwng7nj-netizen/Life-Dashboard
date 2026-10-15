@@ -162,7 +162,7 @@ const SETTINGS_DEFAULT = {
   name: '', theme: 'system', unit: 'lbs', restSeconds: 90, timerSound: true,
   targets: { cal: 2400, p: 180, c: 240, f: 75 },
   translation: 'web', esvKey: '', collapsed: false, view: 'dashboard', lastExport: null,
-  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', obsFolder: '', familyName: '', tour: '', newsSeen: '', taskHelp: false,
+  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', obsFolder: '', ytShorts: false, familyName: '', tour: '', newsSeen: '', taskHelp: false,
   hiddenTabs: { taskTab: ['stats', 'people'], medTab: ['stats'] }, // section tabs the person chose to hide, by section; see tabs()
   tabsV: 0, // which default-hidden tabs have been applied to saved settings (see below)
   hiddenCards: [] // dashboard cards the person chose to hide; see DASH_CARDS
@@ -4810,7 +4810,7 @@ async function ytFetch(path, params) {
 }
 const ytSecs = d => { const m = String(d || '').match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/); return m ? (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0) : 0; };
 const ytClock = t => !t ? '' : t >= 3600 ? `${Math.floor(t / 3600)}:${pad(Math.floor(t % 3600 / 60))}:${pad(t % 60)}` : `${Math.floor(t / 60)}:${pad(t % 60)}`;
-const ytThumb = th => ((th && (th.medium || th.high || th.default)) || {}).url || '';
+const ytThumb = th => ((th && (th.high || th.medium || th.default)) || {}).url || '';
 // Full details (clean title, length, live status) for up to 50 video ids, in the order given.
 async function ytVideos(ids) {
   ids = [...new Set(ids.filter(id => /^[\w-]{11}$/.test(id || '')))].slice(0, 50); if (!ids.length) return [];
@@ -4824,7 +4824,7 @@ function ytItems(items, order) {
 const ytUploads = id => /^UC[\w-]{22}$/.test(id || '') ? 'UU' + id.slice(2) : ''; // a channel's uploads playlist
 async function ytPlaylistIds(playlistId, max = 50) { const d = await ytFetch('playlistItems', { part: 'contentDetails', playlistId, maxResults: max }); return (d.items || []).map(x => ({ id: x.contentDetails?.videoId, at: x.contentDetails?.videoPublishedAt || '' })); }
 const YT_LOAD = {
-  search: async Y => { const d = await ytFetch('search', { part: 'id', type: 'video', maxResults: 25, q: Y.q, safeSearch: 'moderate' }); return ytVideos((d.items || []).map(x => x.id?.videoId)); },
+  search: async Y => { const d = await ytFetch('search', { part: 'id', type: 'video', maxResults: 50, q: Y.q, safeSearch: 'moderate' }); return ytVideos((d.items || []).map(x => x.id?.videoId)); },
   // Newest uploads from up to 50 subscribed channels (about 52 units of the daily allowance per refresh).
   subs: async () => {
     const d = await ytFetch('subscriptions', { part: 'snippet', mine: 'true', maxResults: 50, order: 'relevance' });
@@ -4848,12 +4848,14 @@ async function ytLoad(view, extra = {}) {
   catch (e) { Y.err = e.message; Y.signin = !!e.signin; }
   Y.busy = false; if (ui.yt === Y && Modal.isOpen() && $('#yt-modal')) ytModal();
 }
+// Shorts are at most 3 minutes long; YouTube has no other marker for them.
+const ytIsShort = v => v.secs > 0 && v.secs <= 180 && v.live === 'none';
 function ytRow(v, i, saved) {
-  const short = v.secs && v.secs <= 60, meta = [v.live === 'live' ? 'Live now' : v.live === 'upcoming' ? 'Upcoming' : ytClock(v.secs), v.date && fmtDate(v.date, { month: 'short', day: 'numeric', year: v.date.slice(0, 4) === ymd().slice(0, 4) ? undefined : 'numeric' })].filter(Boolean).join(' · ');
-  return `<div class="flex items-start gap-3 py-2.5">${v.thumb ? `<img src="${esc(webUrl(v.thumb))}" alt="" class="w-24 sm:w-32 aspect-video object-cover rounded-lg shrink-0" loading="lazy" referrerpolicy="no-referrer">` : ''}<div class="flex-1 min-w-0">
-    <div class="text-sm font-medium line-clamp-2">${esc(v.title)}</div>
-    <div class="text-xs muted mt-0.5">${v.channelId ? `<button type="button" class="hover:underline text-left" data-action="ytChannel" data-i="${i}">${esc(v.channel)}</button>` : esc(v.channel)}${meta ? ` · ${meta}` : ''}${short ? ' · <span class="chip text-[11px] py-0">Short</span>' : ''}</div>
-    <div class="flex flex-wrap gap-1.5 mt-1.5">${saved ? `<span class="chip chip-on">${icon('check', 'w-3 h-3')} In your library</span>` : `<button type="button" class="btn btn-sm" data-action="ytAdd" data-i="${i}" data-s="queue">Up next</button><button type="button" class="btn btn-sm btn-primary" data-action="ytAdd" data-i="${i}" data-s="active">${icon('play', 'w-3.5 h-3.5')} Watch</button>`}</div></div></div>`;
+  const meta = [v.live === 'live' ? 'Live now' : v.live === 'upcoming' ? 'Upcoming' : ytClock(v.secs), v.date && fmtDate(v.date, { month: 'short', day: 'numeric', year: v.date.slice(0, 4) === ymd().slice(0, 4) ? undefined : 'numeric' })].filter(Boolean).join(' · ');
+  return `<div class="flex flex-col gap-2 min-w-0">${v.thumb ? `<img src="${esc(webUrl(v.thumb))}" alt="" class="w-full aspect-video object-cover rounded-xl bg-slate-200 dark:bg-slate-800" loading="lazy" referrerpolicy="no-referrer">` : ''}
+    <div class="text-base font-semibold leading-snug line-clamp-2">${esc(v.title)}</div>
+    <div class="text-sm muted">${v.channelId ? `<button type="button" class="hover:underline text-left font-medium" data-action="ytChannel" data-i="${i}">${esc(v.channel)}</button>` : esc(v.channel)}${meta ? ` · ${meta}` : ''}${ytIsShort(v) ? ' · <span class="chip text-[11px] py-0">Short</span>' : ''}</div>
+    <div class="flex flex-wrap gap-1.5">${saved ? `<span class="chip chip-on">${icon('check', 'w-3 h-3')} In your library</span>` : `<button type="button" class="btn btn-sm" data-action="ytAdd" data-i="${i}" data-s="queue">Up next</button><button type="button" class="btn btn-sm btn-primary" data-action="ytAdd" data-i="${i}" data-s="active">${icon('play', 'w-3.5 h-3.5')} Watch</button>`}</div></div>`;
 }
 function ytModal() {
   const Y = ui.yt, connected = ytConnected(), m = ytMeta();
@@ -4869,14 +4871,16 @@ function ytModal() {
     const top = [['search', 'Search', 'search'], ['subs', 'Subscriptions', 'users'], ['lists', 'Playlists', 'list-video'], ['liked', 'Liked', 'thumbs-up']];
     const cur = Y.view === 'list' ? 'lists' : Y.view === 'channel' ? Y.from || 'search' : Y.view;
     const head = Y.view === 'list' || Y.view === 'channel' ? `<div class="flex items-center gap-2"><button type="button" class="btn btn-sm" data-action="ytBack" aria-label="Back">${icon('arrow-left', 'w-3.5 h-3.5')}</button><span class="font-semibold text-sm truncate">${esc(Y.title || '')}</span></div>` : '';
-    const list = Y.view === 'lists' ? (items.length ? items.map((p, i) => `<button type="button" class="w-full text-left flex items-center gap-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60" data-action="ytList" data-i="${i}">${p.thumb ? `<img src="${esc(webUrl(p.thumb))}" alt="" class="w-20 aspect-video object-cover rounded-lg shrink-0" loading="lazy" referrerpolicy="no-referrer">` : ''}<span class="flex-1 min-w-0"><span class="block text-sm font-medium truncate">${esc(p.title)}</span><span class="block text-xs muted">${p.n} video${p.n === 1 ? '' : 's'}</span></span>${icon('chevron-right', 'w-4 h-4 muted')}</button>`).join('') : (!Y.busy && Y.items ? '<p class="text-sm muted py-2">You have no playlists on YouTube.</p>' : ''))
-      : items.map((v, i) => ytRow(v, i, saved.has(v.id))).join('') || (!Y.busy && Y.items ? `<p class="text-sm muted py-2">${Y.view === 'subs' ? 'No new videos from your subscriptions.' : Y.view === 'liked' ? 'No liked videos yet.' : 'No videos found.'}</p>` : '');
+    const all = Y.view === 'lists' ? [] : items.map((v, i) => [v, i]), shown = S.ytShorts ? all : all.filter(([v]) => !ytIsShort(v)), hidden = all.length - shown.length;
+    const list = Y.view === 'lists' ? (items.length ? items.map((p, i) => `<button type="button" class="w-full text-left flex items-center gap-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60" data-action="ytList" data-i="${i}">${p.thumb ? `<img src="${esc(webUrl(p.thumb))}" alt="" class="w-32 sm:w-40 aspect-video object-cover rounded-xl shrink-0" loading="lazy" referrerpolicy="no-referrer">` : ''}<span class="flex-1 min-w-0"><span class="block text-base font-semibold line-clamp-2">${esc(p.title)}</span><span class="block text-sm muted">${p.n} video${p.n === 1 ? '' : 's'}</span></span>${icon('chevron-right', 'w-4 h-4 muted')}</button>`).join('') : (!Y.busy && Y.items ? '<p class="text-sm muted py-2">You have no playlists on YouTube.</p>' : ''))
+      : shown.map(([v, i]) => ytRow(v, i, saved.has(v.id))).join('') || (!Y.busy && Y.items ? `<p class="text-sm muted py-2">${hidden ? 'Only Shorts here.' : Y.view === 'subs' ? 'No new videos from your subscriptions.' : Y.view === 'liked' ? 'No liked videos yet.' : 'No videos found.'}</p>` : '');
     body = `<div role="group" aria-label="Find videos in" class="flex flex-wrap gap-1.5">${top.map(([k, l, ic]) => `<button type="button" class="chip ${cur === k ? 'chip-on' : ''}" aria-pressed="${cur === k}" data-action="ytView" data-v="${k}">${icon(ic, 'w-3.5 h-3.5')} ${l}</button>`).join('')}</div>
       ${Y.view === 'search' ? `<form class="flex gap-2" data-submit="ytSearch"><input name="q" class="input" placeholder="Search YouTube — e.g. BibleProject Romans" value="${esc(Y.q || '')}" ${Y.items ? '' : 'autofocus'} autocomplete="off" aria-label="Search YouTube"><button class="btn btn-primary shrink-0" aria-label="Search">${icon('search')}</button></form>` : ''}
       ${head}${Y.view === 'subs' && Y.items ? `<div class="flex items-center gap-2 text-xs muted"><span class="flex-1">Newest from your subscribed channels</span><button type="button" class="btn btn-sm btn-ghost" data-action="ytRefresh">${icon('refresh-cw', 'w-3.5 h-3.5')} Refresh</button></div>` : ''}
       ${Y.busy ? `<p class="text-sm muted">${icon('loader-circle', 'w-4 h-4 animate-spin inline')} Loading…</p>` : ''}
       ${Y.err ? `<p class="text-sm text-rose-600">${esc(Y.err)}</p>${Y.signin ? `<button type="button" class="btn btn-sm btn-primary" data-action="ytConnect">Reconnect YouTube</button>` : ''}` : ''}
-      <div class="divide-y divide-slate-100 dark:divide-slate-800 max-h-[55vh] overflow-y-auto">${list}</div>`;
+      ${Y.view !== 'lists' && Y.items && (hidden || S.ytShorts) ? `<div class="flex items-center gap-2 text-sm muted"><span class="flex-1">${S.ytShorts ? 'Showing Shorts' : `${hidden} Short${hidden === 1 ? '' : 's'} hidden`}</span><button type="button" class="btn btn-sm btn-ghost" data-action="ytShorts" aria-pressed="${!!S.ytShorts}">${S.ytShorts ? 'Hide Shorts' : 'Show Shorts'}</button></div>` : ''}
+      <div class="${Y.view === 'lists' ? 'divide-y divide-slate-100 dark:divide-slate-800' : 'grid sm:grid-cols-2 gap-x-4 gap-y-6'} max-h-[65vh] overflow-y-auto pr-1">${list}</div>`;
   }
   Modal.open(modalShell('Find a video', `<div id="yt-modal" class="space-y-3">${body}</div>`, connected ? `<button type="button" class="btn btn-ghost mr-auto" data-action="ytDisconnect">Disconnect YouTube</button><button type="button" class="btn" data-action="closeModal">Close</button>` : `<button type="button" class="btn" data-action="closeModal">Close</button>`), { wide: true });
 }
@@ -4929,6 +4933,7 @@ const A_MEDIA = {
   ytView: el => ytLoad(el.dataset.v, { q: el.dataset.v === 'search' ? ui.yt.q : '', from: '' }),
   ytSearch: f => { const q = (fd(f).q || '').trim(); if (q) ytLoad('search', { q }); },
   ytRefresh: () => ytLoad(ui.yt.view, { fresh: true }),
+  ytShorts: () => { S.ytShorts = !S.ytShorts; saveSettings(); ytModal(); },
   ytList: el => { const p = ui.yt.items[+el.dataset.i]; if (p) ytLoad('list', { listId: p.id, title: p.title, back: { view: 'lists' } }); },
   ytChannel: el => { const Y = ui.yt, v = Y.items[+el.dataset.i]; if (v) ytLoad('channel', { chanId: v.channelId, title: v.channel, from: Y.view === 'channel' ? Y.from : Y.view === 'list' ? 'lists' : Y.view, back: { view: Y.view, q: Y.q, listId: Y.listId, chanId: Y.chanId, title: Y.title } }); },
   ytBack: () => { const b = ui.yt.back || { view: 'search' }; ytLoad(b.view, { ...b, back: b.view === 'list' ? { view: 'lists' } : null }); },
@@ -7218,6 +7223,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16g', title: 'Find a video: bigger, and no Shorts', slides: [
+    { title: 'Bigger pictures, no Shorts', body: '<p>Find a video now shows results as large cards with a sharper picture and a bigger title. Shorts (videos of 3 minutes or less) are hidden. Tap <strong>Show Shorts</strong> above the results if you ever want them back.</p>', go: ['media', '', '', 'Open Media library'] }
+  ] },
   { id: '2026-10-16f', title: 'Meeting action items to Tasks', slides: [
     { title: 'From a meeting note to your task list', body: '<p>In Obsidian on the Mac, a meeting note’s title card has <strong>Send action items to Tasks</strong>. Tick the items that are yours. They arrive in Tasks linked to the meeting, and follow-ups become “waiting on” tasks. Each item is only sent once.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] }
   ] },
