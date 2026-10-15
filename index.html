@@ -3112,8 +3112,25 @@ const obsNoteList = () => inObsidian() && Array.isArray(window.LD_OBSIDIAN.notes
 // Messages from the plugin (it calls window.LD_FROM_OBSIDIAN). They wait until saved data has loaded.
 const obsInbox = { ready: false, queue: [] };
 window.LD_FROM_OBSIDIAN = msg => { obsInbox.queue.push(msg); if (obsInbox.ready) obsDrain(); return true; };
-function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.sermonPrep) sermonPrep(m.sermonPrep); } catch (e) { console.warn('Obsidian message', e); } } }
+function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.sermonPrep) sermonPrep(m.sermonPrep); if (m && m.addTasks) obsAddTasks(m.addTasks); } catch (e) { console.warn('Obsidian message', e); } } }
 window.addEventListener('ld-obsidian', () => render());
+// Action items picked in a meeting note → tasks linked to that note. Dates and tags in the text are read as
+// usual; follow-ups become "waiting on" tasks. A task already open from the same note and text is not added again.
+function obsAddTasks(m) {
+  const source = String(m.source || '').slice(0, 200), items = Array.isArray(m.items) ? m.items.slice(0, 100) : [];
+  const area = (AREAS.find(([k, l]) => [k, l.toLowerCase()].includes(String(m.area || '').trim().toLowerCase())) || [])[0]; // the meeting's area, when it names one
+  let n = 0;
+  for (const it of items) {
+    const raw = String(it && it.title || '').slice(0, 500).trim(); if (!raw) continue;
+    const p = parseTaskInput(raw);
+    if (TK().some(t => tOpen(t) && t.note === source && t.title === p.title)) continue;
+    const t = addParsedTask(p, { note: source || undefined, area }); if (!t) continue;
+    if (it.waiting) { t.waiting = true; t.waitSince = ymd(); }
+    n++;
+  }
+  if (n) { Store.save('tasks'); render(); }
+  toast(n ? `Added ${n} task${n === 1 ? '' : 's'} from ${source || 'Obsidian'}` : 'Those are already in Tasks');
+}
 // New sermon in Obsidian → a dashboard project with a "think, pray, write" task each day until the
 // preaching date (up to 21 days) and the preaching itself, each linked to its note.
 function sermonPrep(m) {
@@ -7201,6 +7218,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16f', title: 'Meeting action items to Tasks', slides: [
+    { title: 'From a meeting note to your task list', body: '<p>In Obsidian on the Mac, a meeting note’s title card has <strong>Send action items to Tasks</strong>. Tick the items that are yours. They arrive in Tasks linked to the meeting, and follow-ups become “waiting on” tasks. Each item is only sent once.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] }
+  ] },
   { id: '2026-10-16e', title: 'Tasks and notes, together with Obsidian', slides: [
     { title: 'Link a task to an Obsidian note', body: '<p>Type <strong>[[Note name]]</strong> when you add a task, or fill in <strong>Obsidian note</strong> when you edit it. The task then shows the note’s name; tap it to open the note in Obsidian. Projects have an Obsidian note too.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] },
     { title: 'Send to Obsidian', body: '<p>The old “Copy for Obsidian” buttons on Scripture notes, journal entries, media notes, word studies, topics and workouts now <strong>send</strong> the note to Obsidian. Add your vault name (and a folder, if you like) in <strong>Settings &amp; Sync → Obsidian</strong>. Without a vault name they copy the note as before.</p>' },

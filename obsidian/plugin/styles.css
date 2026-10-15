@@ -112,3 +112,6 @@
 .ldl-cover { overflow: hidden; aspect-ratio: 4 / 5; }
 .ldl-cover-title { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-size: 19px; }
 .ldl-card-title { text-align: left; }
+
+.ldl-done { opacity: .55; }
+.ldl-form .ldl-kicker { margin-top: 6px; }

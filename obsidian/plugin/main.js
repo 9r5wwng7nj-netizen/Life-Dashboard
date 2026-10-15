@@ -186,10 +186,26 @@ const core = (() => {
     };
   }
 
+  // A meeting note's open to-dos: unticked "- [ ]" lines under a heading about actions, follow-ups, next steps or to-dos.
+  // Items under a follow-up or waiting heading are things you are waiting on.
+  function actionItems(md) {
+    const out = []; let section = '', take = false, inFm = false;
+    String(md || '').split('\n').forEach((line, i) => {
+      if (i === 0 && line.trim() === '---') { inFm = true; return; }
+      if (inFm) { if (line.trim() === '---') inFm = false; return; }
+      const h = line.match(/^#{1,6}\s+(.*)$/);
+      if (h) { section = h[1].trim(); take = /action|follow|next step|to.?do|tasks?\b/i.test(section); return; }
+      const m = take && line.match(/^\s*[-*+]\s+\[ \]\s+(.+)$/);
+      if (m) { const text = m[1].replace(/\s+\^[\w-]+$/, '').trim(); if (text) out.push({ text, section, waiting: /follow|waiting/i.test(section) }); }
+    });
+    return out;
+  }
+  const meetingTasksMessage = (source, items, area) => ({ addTasks: { source, area: plain(area) || '', items: items.map(it => ({ title: it.text, waiting: !!it.waiting })) } });
+
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -302,6 +318,7 @@ const render = (() => {
     if (n.statusLabel || on.status) { const st = el(doc, 'button', 'ldl-chip ldl-st-' + (n.status || 'none'), n.statusLabel || 'Set status'); st.type = 'button'; st.title = 'Change status'; st.addEventListener('click', () => on.status(n.path)); actions.append(st); }
     if (hubNote) { const p = el(doc, 'button', 'ldl-link', `Part of ${hubNote.title}`); p.type = 'button'; p.addEventListener('click', () => on.hub(hubNote.path)); actions.append(p); }
     if (n.hub && n.count) { const p = el(doc, 'button', 'ldl-link', `${n.count} notes in this project`); p.type = 'button'; p.addEventListener('click', () => on.hub(n.path)); actions.append(p); }
+    if (n.family === 'meeting' && on.meetingTasks) { const b = el(doc, 'button', 'ldl-link', 'Send action items to Tasks'); b.type = 'button'; b.addEventListener('click', () => on.meetingTasks(n.path)); actions.append(b); }
     txt.append(actions);
     c.append(cover(doc, n), txt);
     return c;
@@ -382,6 +399,26 @@ class TextModal extends Modal {
   }
   onClose() { this.contentEl.empty(); }
 }
+// A list of items to tick; items already sent are shown greyed out.
+class PickModal extends Modal {
+  constructor(app, title, items, onSubmit) { super(app); this.title = title; this.items = items; this.onSubmit = onSubmit; }
+  onOpen() {
+    const { contentEl } = this; this.setTitle ? this.setTitle(this.title) : contentEl.createEl('h2', { text: this.title });
+    contentEl.createEl('p', { text: 'Tick the ones that are yours. Follow-ups become “waiting on” tasks.', cls: 'ldl-muted' });
+    const form = contentEl.createEl('form', { cls: 'ldl-form' }), boxes = [];
+    let last = null;
+    this.items.forEach(it => {
+      if (it.section !== last) { form.createEl('div', { text: it.section, cls: 'ldl-kicker' }); last = it.section; }
+      const lab = form.createEl('label', { cls: 'ldl-field ldl-field-check' + (it.done ? ' ldl-done' : '') });
+      const box = lab.createEl('input', { type: 'checkbox' }); box.disabled = !!it.done;
+      lab.createEl('span', { text: it.done ? `${it.text} (already sent)` : it.text });
+      boxes.push([box, it]);
+    });
+    form.createEl('button', { text: 'Send to Tasks', cls: 'mod-cta', type: 'submit' });
+    form.addEventListener('submit', e => { e.preventDefault(); const picked = boxes.filter(([b]) => b.checked && !b.disabled).map(([, it]) => it); this.close(); this.onSubmit(picked); });
+  }
+  onClose() { this.contentEl.empty(); }
+}
 class StatusModal extends SuggestModal {
   constructor(app, onPick) { super(app); this.onPick = onPick; this.setPlaceholder('Set status'); }
   getSuggestions(q) { return core.STATUS_CHOICES.filter(([, l]) => l.toLowerCase().includes(q.toLowerCase())); }
@@ -398,6 +435,7 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'open-library', name: 'Open the Library', callback: () => this.openLibrary() });
     this.addCommand({ id: 'open-dashboard', name: 'Open Life Dashboard in the sidebar', callback: () => this.openDashboard() });
     this.addCommand({ id: 'new-sermon', name: 'New sermon', callback: () => this.newSermon() });
+    this.addCommand({ id: 'meeting-tasks', name: 'Send this meeting’s action items to Tasks', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickActions(f.path); return true; } });
     this.addCommand({ id: 'set-status', name: 'Set status of this note', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickStatus(f.path); return true; } });
     this.addSettingTab(new LibrarySettings(this.app, this));
     const refresh = debounce(() => { this._notes = null; this.redraw(); }, 400, true);
@@ -438,7 +476,8 @@ class LifeDashboardPlugin extends Plugin {
       shelf: id => view.show({ name: 'shelf', id }),
       home: () => view.show({ name: 'home' }),
       search: q => { view.q = q; view.draw(); },
-      status: path => this.pickStatus(path)
+      status: path => this.pickStatus(path),
+      meetingTasks: path => this.pickActions(path)
     };
   }
   redraw() { for (const leaf of this.app.workspace.getLeavesOfType(VIEW_LIBRARY)) leaf.view.draw?.(); }
@@ -457,6 +496,20 @@ class LifeDashboardPlugin extends Plugin {
   pickStatus(path) {
     const f = this.app.vault.getAbstractFileByPath(path); if (!(f instanceof TFile)) return;
     new StatusModal(this.app, async word => { await this.app.fileManager.processFrontMatter(f, fm => { fm.status = word; }); new Notice(`Status set to ${word}`); }).open();
+  }
+  // Tick the action items that are yours; they go to the dashboard as tasks linked back to this meeting.
+  async pickActions(path) {
+    const f = this.app.vault.getAbstractFileByPath(path); if (!(f instanceof TFile)) return;
+    if (!Platform.isDesktopApp) return new Notice('Send action items from Obsidian on the Mac, where the dashboard is docked.');
+    const items = core.actionItems(await this.app.vault.cachedRead(f));
+    const fm = this.app.metadataCache.getFileCache(f)?.frontmatter || {}, sent = new Set([].concat(fm.tasks_sent || []).map(String));
+    if (!items.length) return new Notice('No open action items found under an Action items or Follow-ups heading.');
+    new PickModal(this.app, `Action items · ${f.basename}`, items.map(it => ({ ...it, done: sent.has(it.text) })), async picked => {
+      if (!picked.length) return;
+      await this.sendToDashboard(core.meetingTasksMessage(f.basename, picked, fm.areas || fm.area));
+      await this.app.fileManager.processFrontMatter(f, fm => { fm.tasks_sent = [...new Set([...[].concat(fm.tasks_sent || []), ...picked.map(it => it.text)])]; });
+      new Notice(`Sent ${picked.length} to Tasks`);
+    }).open();
   }
   newSermon() {
     const today = core.ymd(new Date());
