@@ -3,6 +3,7 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Touch screens: buttons and section tabs are at least 40px tall (small buttons 36px, chips 34px), tick boxes 20px, and no text is smaller than 12px. CSS only, under `@media (pointer: coarse)` in `src/app.css`.
 - Add from a link: a header button opens a sheet for a pasted link or text, suggests Media library (with the type: video, podcast, sermon, article, book), Recipe or Task, and files it there. Android's share menu opens the same sheet (manifest `share_target`).
 - Tasks → Today: tasks due today or overdue have Push +1 / +2 / +3 buttons that move the task that many days from today.
 - Barcode scanning works in Safari on iPhone (and Firefox): when the browser has no built-in barcode detector, the camera frames are read by the bundled ZXing library (`vendor/zxing/`).
