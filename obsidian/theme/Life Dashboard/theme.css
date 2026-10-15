@@ -1,0 +1,138 @@
+/* Life Dashboard — an Obsidian theme matching the Life Dashboard app: calm cool greys, teal accent,
+   rounded cards, a book-like serif for titles and reading, and roomier touch targets on phones.
+   Light and dark follow Obsidian's own setting (which can follow the system). */
+
+body {
+  --ldl-display: ui-serif, "New York", "Iowan Old Style", Georgia, serif;
+  --font-interface-theme: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-text-theme: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --radius-s: 8px;
+  --radius-m: 12px;
+  --radius-l: 16px;
+  --file-line-width: 44rem;
+  --line-height-normal: 1.65;
+  --h1-weight: 650;
+  --h2-weight: 650;
+  --h3-weight: 650;
+  --inline-title-weight: 650;
+  --tab-radius-active: 10px;
+  --nav-item-padding: 6px 10px;
+  --nav-item-radius: 8px;
+}
+
+.theme-light {
+  --ld-ground: #f3f5f6;
+  --ld-card: #ffffff;
+  --ld-line: #e2e8f0;
+  --ld-text: #0f172a;
+  --ld-muted: #64748b;
+  --ld-accent: #0f766e;
+  --ld-accent-hover: #115e59;
+  --ld-soft: #f0fdfa;
+  --background-primary: var(--ld-card);
+  --background-primary-alt: #f8fafc;
+  --background-secondary: var(--ld-ground);
+  --background-secondary-alt: #eceff1;
+  --background-modifier-border: var(--ld-line);
+  --background-modifier-hover: rgba(15, 23, 42, .05);
+  --background-modifier-active-hover: rgba(15, 118, 110, .10);
+  --text-normal: var(--ld-text);
+  --text-muted: var(--ld-muted);
+  --text-faint: #94a3b8;
+  --text-accent: var(--ld-accent);
+  --text-accent-hover: var(--ld-accent-hover);
+  --text-on-accent: #ffffff;
+  --interactive-accent: var(--ld-accent);
+  --interactive-accent-hover: var(--ld-accent-hover);
+  --color-accent: var(--ld-accent);
+  --color-accent-1: #0d9488;
+  --color-accent-2: var(--ld-accent-hover);
+  --text-selection: rgba(15, 118, 110, .18);
+}
+
+.theme-dark {
+  --ld-ground: #0e1116;
+  --ld-card: #171b22;
+  --ld-line: #2a313c;
+  --ld-text: #e7ebf0;
+  --ld-muted: #9aa4b2;
+  --ld-accent: #5eead4;
+  --ld-accent-hover: #99f6e4;
+  --ld-soft: #12302c;
+  --background-primary: var(--ld-card);
+  --background-primary-alt: #1b2028;
+  --background-secondary: var(--ld-ground);
+  --background-secondary-alt: #12161c;
+  --background-modifier-border: var(--ld-line);
+  --background-modifier-hover: rgba(231, 235, 240, .06);
+  --background-modifier-active-hover: rgba(94, 234, 212, .12);
+  --text-normal: var(--ld-text);
+  --text-muted: var(--ld-muted);
+  --text-faint: #6b7686;
+  --text-accent: var(--ld-accent);
+  --text-accent-hover: var(--ld-accent-hover);
+  --text-on-accent: #0b1f1d;
+  --interactive-accent: #2dd4bf;
+  --interactive-accent-hover: var(--ld-accent-hover);
+  --color-accent: #2dd4bf;
+  --color-accent-1: var(--ld-accent);
+  --color-accent-2: var(--ld-accent-hover);
+  --text-selection: rgba(94, 234, 212, .22);
+}
+
+/* Titles and headings in the book-like serif; body text stays easy to scan. */
+.inline-title,
+.markdown-rendered h1, .markdown-rendered h2, .markdown-rendered h3,
+.cm-header-1, .cm-header-2, .cm-header-3,
+.HyperMD-header-1, .HyperMD-header-2, .HyperMD-header-3 {
+  font-family: var(--ldl-display);
+  letter-spacing: -0.005em;
+}
+
+/* Notes read like pages: the note sits on a card over the grey ground. */
+.workspace-leaf-content[data-type="markdown"] .view-content { background: var(--background-secondary); }
+.markdown-reading-view .markdown-preview-sizer,
+.markdown-source-view.mod-cm6 .cm-sizer {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 20px;
+  margin-top: 16px !important;
+  margin-bottom: 32px !important;
+  padding: 24px 32px 48px !important;
+  box-sizing: border-box;
+}
+.markdown-source-view.mod-cm6.is-readable-line-width .cm-sizer { max-width: calc(var(--file-line-width) + 64px); }
+.markdown-preview-view.is-readable-line-width .markdown-preview-sizer { max-width: calc(var(--file-line-width) + 64px); }
+
+/* Quieter chrome: softer sidebars and tabs, rounded file rows. */
+.workspace-split.mod-left-split .workspace-leaf-content,
+.workspace-split.mod-right-split .workspace-leaf-content { background: var(--background-secondary); }
+.nav-file-title, .nav-folder-title, .tree-item-self { border-radius: var(--nav-item-radius); }
+.nav-file-title.is-active, .tree-item-self.is-active { background: var(--ld-soft); color: var(--text-accent); }
+.workspace-tab-header.is-active { box-shadow: none; }
+.status-bar { background: transparent; border-top: 0; color: var(--text-faint); }
+
+/* Callouts and quotes as soft cards (Scripture quotes read well this way). */
+.callout { border-radius: var(--radius-l); border: 1px solid var(--background-modifier-border); }
+.markdown-rendered blockquote { border-left: 0; border-radius: var(--radius-m); background: var(--background-secondary); padding: 10px 16px; font-family: var(--ldl-display); font-size: 1.05em; }
+
+/* Bases card views pick up the library look. */
+.bases-cards-item { border-radius: 16px !important; border: 1px solid var(--background-modifier-border) !important; background: var(--background-primary) !important; overflow: hidden; }
+
+/* iPhone and iPad: bigger rows, bigger text, a little more air. */
+.is-mobile {
+  --font-text-size: 17px;
+  --nav-item-padding: 10px 12px;
+  --file-line-width: 100%;
+}
+.is-mobile .markdown-reading-view .markdown-preview-sizer,
+.is-mobile .markdown-source-view.mod-cm6 .cm-sizer {
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  margin-top: 0 !important;
+  padding: 16px 20px 64px !important;
+}
+.is-mobile .nav-file-title, .is-mobile .nav-folder-title, .is-mobile .tree-item-self { min-height: 44px; align-items: center; }
+.is-mobile .mobile-toolbar { background: var(--background-primary); border-top: 1px solid var(--background-modifier-border); }
+.is-mobile .mobile-navbar { background: var(--background-primary); border-top: 1px solid var(--background-modifier-border); }

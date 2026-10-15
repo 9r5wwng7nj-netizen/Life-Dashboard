@@ -68,6 +68,8 @@ The `<head>` holds the theme pre-paint script, compiled `assets/app.css`, and th
 | `ACTIONS (event-delegated)` | the core `A` table and `Object.assign(A, A_FIT, A_NUT, …)` |
 | `EVENT WIRING & INIT` | global click/input/change/submit/drag listeners and `init()` |
 
+`obsidian/` holds an Obsidian theme and plugin (Life Dashboard Library) that sit beside the app; see `obsidian/README.md`. They never touch the app's data, and the plugin is plain CommonJS loaded by Obsidian as is.
+
 See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every stored collection.
 
 ### Core patterns (follow them)

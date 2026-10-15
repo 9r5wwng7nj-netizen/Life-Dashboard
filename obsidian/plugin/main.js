@@ -1,0 +1,557 @@
+/* Life Dashboard Library — an Obsidian plugin (plain JavaScript, no build step).
+ *
+ * Three layers, in this order:
+ *   1. core    — pure functions: what kind of note this is, its status, shelves, series, the bridge rules.
+ *   2. render  — builds the Library pages as DOM from core's data (no Obsidian calls, so tests run it in a browser).
+ *   3. plugin  — the Obsidian glue: views, commands, settings, title cards, the docked dashboard.
+ *
+ * It reads the properties notes already have (type, status, scripture, date, project, series) and never
+ * rewrites a note unless a command asks it to (Set status, New sermon).
+ */
+'use strict';
+const obsidian = require('obsidian');
+
+/* =============================== 1. core =============================== */
+const core = (() => {
+  // Note families: what a note is, by its `type` property. A project with project_kind "sermon" is a sermon's hub.
+  const FAMILIES = {
+    sermon: { label: 'Sermons', kind: 'Sermon', icon: 'mic', types: ['sermon', 'sermon-development', 'sermon-outline', 'sermon-manuscript'] },
+    study: { label: 'Studies & lessons', kind: 'Study', icon: 'book-open', types: ['study-session', 'study', 'lesson', 'bible-study', 'handout', 'class', 'teaching'] },
+    series: { label: 'Series & projects', kind: 'Series', icon: 'library', types: ['project', 'series'] },
+    meeting: { label: 'Meetings', kind: 'Meeting', icon: 'users', types: ['meeting', 'meeting-review', 'meeting-note'] },
+    person: { label: 'People', kind: 'Person', icon: 'user', types: ['person'] },
+    book: { label: 'Books', kind: 'Book', icon: 'book', types: ['book', 'book-note'] },
+    article: { label: 'Articles & media', kind: 'Source', icon: 'newspaper', types: ['article', 'podcast', 'video', 'source', 'historical-text'] },
+    area: { label: 'Areas', kind: 'Area', icon: 'compass', types: ['area'] }
+  };
+  const TYPE_FAMILY = Object.fromEntries(Object.entries(FAMILIES).flatMap(([f, d]) => d.types.map(t => [t, f])));
+  const TEACHING = ['sermon', 'study'];
+  // Deep cover colours with white text (all at least 7:1), picked per title so shelves look varied but stable.
+  const PALETTE = ['#134e4a', '#1e3a5f', '#5b2a4a', '#2f4a2a', '#7c4a12', '#3b3355', '#7f1d1d', '#1f4e5f'];
+
+  // Status words people use, folded into a few that read the same everywhere.
+  const STATUS_WORDS = {
+    idea: ['idea', 'planned', 'proposed', 'someday', 'backlog', 'unprocessed', 'new', 'not started'],
+    draft: ['draft', 'active', 'in-progress', 'in progress', 'writing', 'outlining', 'started', 'processing', 'drafting', 'review'],
+    ready: ['ready', 'final', 'scheduled', 'prepared'],
+    done: ['done', 'taught', 'preached', 'complete', 'completed', 'delivered', 'processed', 'archived', 'finished'],
+    toread: ['unread', 'saved', 'to-read', 'to read', 'queued'],
+    read: ['read']
+  };
+  const STATUS_OF = Object.fromEntries(Object.entries(STATUS_WORDS).flatMap(([k, ws]) => ws.map(w => [w, k])));
+  const STATUS_LABEL = { idea: 'Idea', draft: 'Draft', week: 'This week', ready: 'Ready', done: 'Done', toread: 'To read', read: 'Read' };
+  const DONE_LABEL = { sermon: 'Preached', study: 'Taught' };
+  // The order Set status offers, and the word it writes into the note.
+  const STATUS_CHOICES = [['idea', 'Idea', 'idea'], ['draft', 'Draft', 'draft'], ['ready', 'Ready', 'ready'], ['done', 'Done', 'done']];
+
+  const pad = n => String(n).padStart(2, '0');
+  const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); return ymd(new Date(y, m - 1, d + n)); };
+  const hash = s => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); };
+
+  // "[[Folder/Note|Alias]]" → "Folder/Note"; plain text stays as it is; lists use their first entry.
+  function linkTarget(v) {
+    if (Array.isArray(v)) v = v[0];
+    if (v == null || v === '') return null;
+    const s = String(v).trim(), m = s.match(/^\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]$/);
+    return (m ? m[1] : s).trim() || null;
+  }
+  const plain = v => { if (Array.isArray(v)) v = v.filter(Boolean).map(plain).join(', '); if (v == null) return ''; const s = String(v).trim(); const m = s.match(/^\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]$/); return m ? (m[2] || m[1].split('/').pop()) : s; };
+  // Dates arrive as "2026-10-28", "2026-10-28T09:00" or a Date; anything else is ignored.
+  function isoDate(v) {
+    if (v instanceof Date && !isNaN(v)) return ymd(v);
+    const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
+  }
+  const fmtDate = (s, today) => {
+    if (!s) return '';
+    const [y, m, d] = s.split('-').map(Number), dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(String(y) !== today.slice(0, 4) ? { year: 'numeric' } : {}) });
+  };
+  // A cover shows the passage when there is one ("John 13"), else the title without a trailing date.
+  function coverText(title, scripture) {
+    const s = plain(scripture);
+    if (s) return s.length > 22 ? s.slice(0, 21) + '…' : s;
+    return String(title).replace(/\s*[-–—]\s*(\w+ \d{1,2},? \d{4}|\d{4}-\d{2}-\d{2})$/, '').trim() || title;
+  }
+  function familyOf(fm) {
+    const type = String(fm.type || '').trim().toLowerCase();
+    if (type === 'project' && String(fm.project_kind || '').toLowerCase() === 'sermon') return 'sermon';
+    return TYPE_FAMILY[type] || null;
+  }
+  function statusOf(fm, family, date, today) {
+    const raw = String(fm.status || '').trim().toLowerCase(), type = String(fm.type || '').toLowerCase();
+    let key = STATUS_OF[raw] || (raw ? 'draft' : '');
+    // Teaching that is not finished and falls in the next 7 days is "This week".
+    if (TEACHING.includes(family) && key !== 'done' && date && date >= today && date <= addDays(today, 6)) key = 'week';
+    // "Preached" / "Taught" belong to the sermon or lesson itself; an outline or development note is just "Done".
+    const delivered = (family === 'sermon' && ['sermon', 'project'].includes(type)) || family === 'study';
+    const label = key === 'done' && delivered ? DONE_LABEL[family] : (STATUS_LABEL[key] || '');
+    return { key, label };
+  }
+
+  // One note → the facts the Library shows. `file`: { path, basename, folder, mtime }.
+  function noteInfo(file, fm, today) {
+    fm = fm || {};
+    const family = familyOf(fm);
+    const date = isoDate(fm.preaching_date || fm.date || fm.due || fm.published);
+    const status = statusOf(fm, family, date, today);
+    const title = String(fm.title || file.basename);
+    return {
+      path: file.path, folder: file.folder || '', title, family, type: String(fm.type || ''), date,
+      mtime: file.mtime || 0, scripture: plain(fm.scripture || fm.passage), series: plain(fm.series),
+      projectLink: linkTarget(fm.project), projectPath: null, status: status.key, statusLabel: status.label,
+      kind: family ? FAMILIES[family].kind : '', cover: coverText(title, fm.scripture || fm.passage),
+      color: PALETTE[hash(title) % PALETTE.length], hub: family === 'series' || String(fm.type || '').toLowerCase() === 'project'
+    };
+  }
+  const inFolder = (path, folders) => folders.some(f => f && (path === f || path.startsWith(f.replace(/\/+$/, '') + '/')));
+
+  // Everything the Library home needs, from the notes (already resolved: projectPath set where the link resolved).
+  function buildLibrary(notes, opts) {
+    const today = opts.today, ignore = opts.ignoreFolders || [], order = opts.shelves || Object.keys(FAMILIES);
+    const seen = notes.filter(n => !inFolder(n.path, ignore));
+    const byPath = new Map(seen.map(n => [n.path, n]));
+    // A hub (project note) gathers the notes that link to it with `project`, or sit in its folder.
+    const hubs = new Map();
+    for (const n of seen) if (n.hub) hubs.set(n.path, { note: n, members: [] });
+    for (const n of seen) {
+      if (n.hub) continue;
+      let hub = n.projectPath && hubs.get(n.projectPath);
+      if (!hub) for (const h of hubs.values()) if (h.note.folder && h.note.folder === n.folder) { hub = h; break; }
+      if (hub) { hub.members.push(n); n.hubPath = hub.note.path; }
+    }
+    for (const h of hubs.values()) {
+      h.members.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.title.localeCompare(b.title));
+      const fam = h.members.filter(m => m.family);
+      h.done = fam.filter(m => m.status === 'done').length; h.total = fam.length;
+      h.note.count = h.members.length;
+    }
+    const onShelf = n => n.family && !n.hubPath;
+    const newest = (a, b) => (b.date || '').localeCompare(a.date || '') || b.mtime - a.mtime;
+    const shelves = order.filter(f => FAMILIES[f]).map(f => ({ id: f, label: FAMILIES[f].label, items: seen.filter(n => onShelf(n) && n.family === f).sort(newest) })).filter(s => s.items.length);
+    // Working on now: the next unfinished sermon or study with a date from today on, else the latest one touched.
+    const open = seen.filter(n => TEACHING.includes(n.family) && !n.hubPath && n.status !== 'done' && n.status !== 'idea');
+    const upcoming = open.filter(n => n.date && n.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+    const working = upcoming[0] || open.filter(n => !n.date || n.date >= today).sort((a, b) => b.mtime - a.mtime)[0] || null;
+    const recent = seen.filter(n => n.family || n.mtime).sort((a, b) => b.mtime - a.mtime).slice(0, 6);
+    return { today, shelves, working, workingHub: working && hubs.get(working.path) || null, recent, hubs, byPath };
+  }
+  // Search: titles, passages and series; best matches first (title start, then title, then the rest).
+  function search(notes, q, ignore) {
+    const s = String(q || '').trim().toLowerCase(); if (!s) return [];
+    const rank = n => { const t = n.title.toLowerCase(); return t.startsWith(s) ? 0 : t.includes(s) ? 1 : (n.scripture || '').toLowerCase().includes(s) ? 2 : (n.series || '').toLowerCase().includes(s) ? 3 : 9; };
+    return notes.filter(n => !inFolder(n.path, ignore || [])).map(n => [rank(n), n]).filter(([r]) => r < 9).sort((a, b) => a[0] - b[0] || b[1].mtime - a[1].mtime).slice(0, 40).map(([, n]) => n);
+  }
+  const metaLine = (n, today) => [n.kind, n.scripture && n.scripture !== n.cover ? n.scripture : '', n.date ? fmtDate(n.date, today) : '', n.series].filter(Boolean).join(' · ');
+
+  // --- The bridge: messages from the docked dashboard arrive as "#ld-obsidian=<json>" in its address.
+  const BRIDGE_PREFIX = '#ld-obsidian=';
+  function originOf(u) { try { return new URL(u).origin; } catch (e) { return ''; } }
+  // Returns { open } or { create: { folder, name, content } }, or null for anything not from the dashboard or malformed.
+  function readBridge(url, dashboardUrl) {
+    const origin = originOf(url); if (!origin || origin !== originOf(dashboardUrl)) return null;
+    const i = String(url).indexOf(BRIDGE_PREFIX); if (i < 0) return null;
+    let msg; try { msg = JSON.parse(decodeURIComponent(String(url).slice(i + BRIDGE_PREFIX.length))); } catch (e) { return null; }
+    if (!msg || typeof msg !== 'object') return null;
+    if (typeof msg.open === 'string' && msg.open.trim() && msg.open.length < 500) return { open: msg.open.trim() };
+    const c = msg.create;
+    if (c && typeof c === 'object' && typeof c.name === 'string' && typeof (c.content ?? '') === 'string' && String(c.content || '').length <= 200000) {
+      const folder = safeFolder(c.folder || ''), name = safeName(c.name);
+      if (folder !== null && name) return { create: { folder, name, content: String(c.content || '') } };
+    }
+    return null;
+  }
+  // A vault folder path with no "..", no leading "/" or "." folders and no characters notes cannot use.
+  function safeFolder(f) {
+    const parts = String(f).replace(/\\/g, '/').split('/').map(p => p.trim()).filter(Boolean);
+    if (parts.some(p => p === '..' || p.startsWith('.') || /[*"<>:|?]/.test(p))) return null;
+    return parts.join('/');
+  }
+  const safeName = n => String(n).replace(/[\\/*"<>:|?#^[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+
+  // --- New sermon: a hub note (like a Sermon Project Dashboard) plus a manuscript that links to it.
+  // Plain lower-case words (type and status values) stay bare; everything else is quoted, which is always valid YAML.
+  function yamlValue(v) { const s = String(v ?? ''); return s === '' ? '' : /^[a-z][a-z-]*$/.test(s) ? s : JSON.stringify(s); }
+  function sermonNotes({ passage, title, date, series }, today) {
+    const name = safeName(`${passage || title || 'Sermon'}${date ? ' - ' + date : ''}`);
+    const hubName = name, msName = safeName(`${passage || title || 'Sermon'} - Manuscript`);
+    const fm = obj => '---\n' + Object.entries(obj).map(([k, v]) => `${k}: ${v === '' ? '' : yamlValue(v)}`.trimEnd()).join('\n') + '\n---\n';
+    return {
+      folder: name,
+      hub: { name: hubName, content: fm({ type: 'project', project_kind: 'sermon', status: 'planned', created: today, domain: 'ministry', preaching_date: date || '', scripture: passage || '', series: series || '', title: title || '' }) + `\n# ${title || passage || 'Sermon'}\n\n## Big idea\n\n## Prep\n- [ ] Read and pray through ${passage || 'the passage'}\n- [ ] Outline\n- [ ] Illustrations\n- [ ] Manuscript\n` },
+      manuscript: { name: msName, content: fm({ type: 'sermon', status: 'draft', created: today, date: date || '', project: `[[${hubName}]]`, scripture: passage || '', series: series || '' }) + `\n# ${title || passage || 'Sermon'}\n\n` }
+    };
+  }
+
+  // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
+  function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
+
+  return { sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+})();
+
+/* =============================== 2. render =============================== */
+// Builds DOM with the given document. `on` holds callbacks: open(path), hub(path), shelf(id), home(), search(q), status(path).
+const render = (() => {
+  function el(doc, tag, cls, text) { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function cover(doc, n, big) {
+    const c = el(doc, 'div', 'ldl-cover' + (big ? ' ldl-cover-big' : ''));
+    c.style.background = n.color;
+    c.append(el(doc, 'span', 'ldl-cover-kind', n.kind || 'Note'), el(doc, 'span', 'ldl-cover-title', n.cover || n.title));
+    return c;
+  }
+  function chip(doc, n) { const c = el(doc, 'span', 'ldl-chip ldl-st-' + (n.status || 'none'), n.statusLabel); return n.statusLabel ? c : null; }
+  function card(doc, n, on, today) {
+    const b = el(doc, 'button', 'ldl-card'); b.type = 'button';
+    b.setAttribute('aria-label', [n.title, n.kind, n.statusLabel].filter(Boolean).join(', '));
+    b.append(cover(doc, n), el(doc, 'span', 'ldl-card-title', n.title));
+    const meta = n.count ? `${n.count} note${n.count === 1 ? '' : 's'}` : core.metaLine({ ...n, kind: '' }, today);
+    if (meta) b.append(el(doc, 'span', 'ldl-card-meta', meta));
+    b.addEventListener('click', () => (n.hub && n.count ? on.hub(n.path) : on.open(n.path)));
+    return b;
+  }
+  function row(doc, n, on, today, num) {
+    const b = el(doc, 'button', 'ldl-row'); b.type = 'button';
+    if (num != null) b.append(el(doc, 'span', 'ldl-row-num', String(num)));
+    const mid = el(doc, 'span', 'ldl-row-text');
+    mid.append(el(doc, 'span', 'ldl-row-title', n.title));
+    const meta = core.metaLine(n, today); if (meta) mid.append(el(doc, 'span', 'ldl-row-meta', meta));
+    b.append(mid); const c = chip(doc, n); if (c) b.append(c);
+    b.addEventListener('click', () => on.open(n.path));
+    return b;
+  }
+  function head(doc, kicker, title, q, on) {
+    const h = el(doc, 'header', 'ldl-head');
+    const t = el(doc, 'div', 'ldl-head-text'); t.append(el(doc, 'div', 'ldl-kicker', kicker), el(doc, 'h1', 'ldl-h1', title));
+    const s = el(doc, 'input', 'ldl-search'); s.type = 'search'; s.placeholder = 'Search titles, passages, series…'; s.setAttribute('aria-label', 'Search the library'); s.value = q || '';
+    s.addEventListener('input', () => on.search(s.value));
+    h.append(t, s); return h;
+  }
+  function progress(doc, done, total) { const p = el(doc, 'div', 'ldl-progress'); const f = el(doc, 'div', 'ldl-progress-fill'); f.style.width = `${total ? Math.round(done / total * 100) : 0}%`; p.append(f); return p; }
+
+  function home(doc, lib, on, q, results) {
+    const root = el(doc, 'div', 'ldl-root');
+    root.append(head(doc, new Date().toLocaleDateString(undefined, { weekday: 'long' }), 'Library', q, on));
+    if (q) {
+      const box = el(doc, 'section', 'ldl-section');
+      box.append(el(doc, 'h2', 'ldl-h2', results.length ? `Results for “${q}”` : `Nothing matches “${q}”`));
+      const list = el(doc, 'div', 'ldl-list'); results.forEach(n => list.append(row(doc, n, on, lib.today))); box.append(list);
+      root.append(box); return root;
+    }
+    const w = lib.working;
+    if (w) {
+      const wc = el(doc, 'section', 'ldl-working'); wc.setAttribute('aria-label', 'Working on now');
+      const txt = el(doc, 'div', 'ldl-working-text');
+      txt.append(el(doc, 'div', 'ldl-kicker ldl-accent', 'Working on now'), el(doc, 'div', 'ldl-working-title', w.title));
+      const meta = core.metaLine(w, lib.today); if (meta) txt.append(el(doc, 'div', 'ldl-muted', meta));
+      const h = lib.workingHub; if (h && h.total) { txt.append(progress(doc, h.done, h.total), el(doc, 'div', 'ldl-muted ldl-small', `${h.done} of ${h.total} notes done`)); }
+      const go = el(doc, 'button', 'ldl-btn ldl-btn-primary', h && h.members.length ? 'Open the project' : 'Keep writing'); go.type = 'button';
+      go.addEventListener('click', () => (h && h.members.length ? on.hub(w.path) : on.open(w.path)));
+      txt.append(go); wc.append(cover(doc, w, true), txt); root.append(wc);
+    }
+    for (const s of lib.shelves) {
+      const sec = el(doc, 'section', 'ldl-section');
+      const top = el(doc, 'div', 'ldl-section-head'); top.append(el(doc, 'h2', 'ldl-h2', s.label));
+      if (s.items.length > 8) { const all = el(doc, 'button', 'ldl-link', 'See all'); all.type = 'button'; all.addEventListener('click', () => on.shelf(s.id)); top.append(all); }
+      const shelf = el(doc, 'div', 'ldl-shelf'); s.items.slice(0, 12).forEach(n => shelf.append(card(doc, n, on, lib.today)));
+      sec.append(top, shelf); root.append(sec);
+    }
+    if (lib.recent.length) {
+      const sec = el(doc, 'section', 'ldl-section'); sec.append(el(doc, 'h2', 'ldl-h2', 'Recently opened'));
+      const list = el(doc, 'div', 'ldl-list'); lib.recent.forEach(n => list.append(row(doc, n, on, lib.today))); sec.append(list); root.append(sec);
+    }
+    if (!w && !lib.shelves.length) root.append(el(doc, 'p', 'ldl-muted', 'Notes with a type property (sermon, study-session, project, person, book, meeting…) appear here as shelves.'));
+    return root;
+  }
+  function hub(doc, lib, path, on) {
+    const h = lib.hubs.get(path), n = h ? h.note : lib.byPath.get(path), root = el(doc, 'div', 'ldl-root ldl-hubpage');
+    const band = el(doc, 'header', 'ldl-band'); band.style.background = n ? n.color : '#1e3a5f';
+    const back = el(doc, 'button', 'ldl-back', '‹ Library'); back.type = 'button'; back.addEventListener('click', () => on.home());
+    band.append(back, el(doc, 'div', 'ldl-kicker', n ? n.kind || 'Project' : 'Project'), el(doc, 'h1', 'ldl-h1', n ? n.title : 'Not found'));
+    if (h) {
+      const chips = el(doc, 'div', 'ldl-band-chips');
+      chips.append(el(doc, 'span', 'ldl-band-chip', `${h.members.length} note${h.members.length === 1 ? '' : 's'}`));
+      if (h.total) chips.append(el(doc, 'span', 'ldl-band-chip', `${h.done} done`));
+      if (n.scripture) chips.append(el(doc, 'span', 'ldl-band-chip', n.scripture));
+      band.append(chips); if (h.total) band.append(progress(doc, h.done, h.total));
+    }
+    root.append(band);
+    const body = el(doc, 'section', 'ldl-section');
+    const top = el(doc, 'div', 'ldl-section-head'); top.append(el(doc, 'h2', 'ldl-h2', 'In this project'));
+    if (n) { const openHub = el(doc, 'button', 'ldl-link', 'Open the project note'); openHub.type = 'button'; openHub.addEventListener('click', () => on.open(n.path)); top.append(openHub); }
+    const list = el(doc, 'div', 'ldl-list'); (h ? h.members : []).forEach((m, i) => list.append(row(doc, m, on, lib.today, i + 1)));
+    body.append(top, list); root.append(body); return root;
+  }
+  function shelf(doc, lib, id, on) {
+    const s = lib.shelves.find(x => x.id === id), root = el(doc, 'div', 'ldl-root');
+    const back = el(doc, 'button', 'ldl-back ldl-back-plain', '‹ Library'); back.type = 'button'; back.addEventListener('click', () => on.home());
+    root.append(back, el(doc, 'h1', 'ldl-h1', s ? s.label : 'Shelf'));
+    const grid = el(doc, 'div', 'ldl-grid'); (s ? s.items : []).forEach(n => grid.append(card(doc, n, on, lib.today))); root.append(grid);
+    return root;
+  }
+  // The card at the top of a note in reading view.
+  function titleCard(doc, n, hubNote, on) {
+    const c = el(doc, 'div', 'ldl-titlecard');
+    const txt = el(doc, 'div', 'ldl-titlecard-text');
+    txt.append(el(doc, 'div', 'ldl-kicker', n.kind || 'Note'));
+    const meta = [n.scripture, n.date ? core.fmtDate(n.date, core.ymd(new Date())) : '', n.series].filter(Boolean).join(' · ');
+    if (meta) txt.append(el(doc, 'div', 'ldl-titlecard-meta', meta));
+    const actions = el(doc, 'div', 'ldl-titlecard-actions');
+    if (n.statusLabel || on.status) { const st = el(doc, 'button', 'ldl-chip ldl-st-' + (n.status || 'none'), n.statusLabel || 'Set status'); st.type = 'button'; st.title = 'Change status'; st.addEventListener('click', () => on.status(n.path)); actions.append(st); }
+    if (hubNote) { const p = el(doc, 'button', 'ldl-link', `Part of ${hubNote.title}`); p.type = 'button'; p.addEventListener('click', () => on.hub(hubNote.path)); actions.append(p); }
+    if (n.hub && n.count) { const p = el(doc, 'button', 'ldl-link', `${n.count} notes in this project`); p.type = 'button'; p.addEventListener('click', () => on.hub(n.path)); actions.append(p); }
+    txt.append(actions);
+    c.append(cover(doc, n), txt);
+    return c;
+  }
+  return { home, hub, shelf, titleCard };
+})();
+
+/* =============================== 3. plugin =============================== */
+const { Plugin, ItemView, PluginSettingTab, Setting, Modal, SuggestModal, Notice, Platform, TFile, MarkdownView, normalizePath, debounce } = obsidian;
+const VIEW_LIBRARY = 'life-dashboard-library', VIEW_DASH = 'life-dashboard-panel';
+const DEFAULTS = {
+  dashboardUrl: 'https://9r5wwng7nj-netizen.github.io/Life-Dashboard/',
+  ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
+  shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'article', 'person'],
+  sermonFolder: '',
+  titleCards: true,
+  hideProperties: true,
+  openOnStartup: false
+};
+
+class LibraryView extends ItemView {
+  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; this.page = { name: 'home' }; this.q = ''; }
+  getViewType() { return VIEW_LIBRARY; }
+  getDisplayText() { return 'Library'; }
+  getIcon() { return 'library'; }
+  async onOpen() { this.contentEl.addClass('ldl-view'); this.draw(); }
+  show(page) { this.page = page; this.q = ''; this.draw(); this.contentEl.scrollTop = 0; }
+  draw() {
+    const lib = this.plugin.library(), doc = this.contentEl.ownerDocument, on = this.plugin.handlers(this);
+    let node;
+    if (this.page.name === 'hub') node = render.hub(doc, lib, this.page.path, on);
+    else if (this.page.name === 'shelf') node = render.shelf(doc, lib, this.page.id, on);
+    else node = render.home(doc, lib, on, this.q, this.q ? core.search(this.plugin.notes(), this.q, this.plugin.settings.ignoreFolders) : []);
+    const focused = doc.activeElement && doc.activeElement.classList.contains('ldl-search');
+    this.contentEl.empty(); this.contentEl.append(node);
+    if (focused) { const s = this.contentEl.querySelector('.ldl-search'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }
+  }
+}
+
+// The Life Dashboard in a panel. On the Mac it is a built-in browser that shares storage with Obsidian's Web viewer.
+class DashboardView extends ItemView {
+  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; }
+  getViewType() { return VIEW_DASH; }
+  getDisplayText() { return 'Life Dashboard'; }
+  getIcon() { return 'layout-dashboard'; }
+  async onOpen() {
+    const url = this.plugin.settings.dashboardUrl, c = this.contentEl; c.empty(); c.addClass('ldl-dash');
+    if (!Platform.isDesktopApp) {
+      c.createEl('p', { text: 'On the phone, use the Life Dashboard home-screen app. This panel works in Obsidian on the Mac.', cls: 'ldl-muted' });
+      return;
+    }
+    const app = this.app, partition = (typeof app.getWebviewPartition === 'function' && app.getWebviewPartition()) || 'persist:life-dashboard';
+    // Ask Obsidian to set this browser session up the way its Web viewer does (ordinary browser identity), so Google sign-in works.
+    try { require('electron').ipcRenderer.send('create-browser-session', partition, false); } catch (e) { console.warn('Life Dashboard: browser session', e); }
+    const wv = c.ownerDocument.createElement('webview');
+    wv.setAttribute('partition', partition); wv.setAttribute('allowpopups', ''); wv.className = 'ldl-webview'; wv.setAttribute('src', url);
+    wv.addEventListener('did-navigate-in-page', e => { if (e.isMainFrame !== false) this.plugin.onBridge(e.url, wv); });
+    wv.addEventListener('dom-ready', () => this.plugin.greetDashboard(wv));
+    c.append(wv); this.webview = wv;
+  }
+  async onClose() { this.webview = null; }
+}
+
+class TextModal extends Modal {
+  constructor(app, title, fields, onSubmit) { super(app); this.title = title; this.fields = fields; this.onSubmit = onSubmit; }
+  onOpen() {
+    const { contentEl } = this; this.setTitle ? this.setTitle(this.title) : contentEl.createEl('h2', { text: this.title });
+    const form = contentEl.createEl('form', { cls: 'ldl-form' }), values = {};
+    for (const f of this.fields) {
+      const lab = form.createEl('label', { cls: 'ldl-field' }); lab.createEl('span', { text: f.label });
+      const input = lab.createEl('input', { type: f.type || 'text', attr: { placeholder: f.placeholder || '' } });
+      if (f.type === 'checkbox') { input.checked = !!f.value; lab.addClass('ldl-field-check'); lab.prepend(input); } else input.value = f.value || '';
+      values[f.key] = input;
+    }
+    form.createEl('button', { text: 'Create', cls: 'mod-cta', type: 'submit' });
+    form.addEventListener('submit', e => { e.preventDefault(); const out = Object.fromEntries(Object.entries(values).map(([k, i]) => [k, i.type === 'checkbox' ? i.checked : i.value.trim()])); this.close(); this.onSubmit(out); });
+    setTimeout(() => form.querySelector('input')?.focus(), 0);
+  }
+  onClose() { this.contentEl.empty(); }
+}
+class StatusModal extends SuggestModal {
+  constructor(app, onPick) { super(app); this.onPick = onPick; this.setPlaceholder('Set status'); }
+  getSuggestions(q) { return core.STATUS_CHOICES.filter(([, l]) => l.toLowerCase().includes(q.toLowerCase())); }
+  renderSuggestion([, label], el) { el.setText(label); }
+  onChooseSuggestion([, , word]) { this.onPick(word); }
+}
+
+class LifeDashboardPlugin extends Plugin {
+  async onload() {
+    this.settings = Object.assign({}, DEFAULTS, await this.loadData());
+    this.registerView(VIEW_LIBRARY, leaf => new LibraryView(leaf, this));
+    this.registerView(VIEW_DASH, leaf => new DashboardView(leaf, this));
+    this.addRibbonIcon('library', 'Open the Library', () => this.openLibrary());
+    this.addCommand({ id: 'open-library', name: 'Open the Library', callback: () => this.openLibrary() });
+    this.addCommand({ id: 'open-dashboard', name: 'Open Life Dashboard in the sidebar', callback: () => this.openDashboard() });
+    this.addCommand({ id: 'new-sermon', name: 'New sermon', callback: () => this.newSermon() });
+    this.addCommand({ id: 'set-status', name: 'Set status of this note', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickStatus(f.path); return true; } });
+    this.addSettingTab(new LibrarySettings(this.app, this));
+    const refresh = debounce(() => { this._notes = null; this.redraw(); }, 400, true);
+    this.registerEvent(this.app.metadataCache.on('changed', refresh));
+    this.registerEvent(this.app.vault.on('delete', refresh));
+    this.registerEvent(this.app.vault.on('rename', refresh));
+    this.registerEvent(this.app.workspace.on('layout-change', () => this.decorateAll()));
+    this.registerEvent(this.app.workspace.on('file-open', () => setTimeout(() => this.decorateAll(), 50)));
+    this.app.workspace.onLayoutReady(() => { this._notes = null; this.decorateAll(); if (this.settings.openOnStartup) this.openLibrary(); });
+  }
+  onunload() { document.querySelectorAll('.ldl-titlecard').forEach(e => e.remove()); document.querySelectorAll('.ldl-carded').forEach(e => e.classList.remove('ldl-carded')); }
+  async saveSettings() { await this.saveData(this.settings); this._notes = null; this.redraw(); this.decorateAll(); }
+
+  // Every Markdown note as core.noteInfo, with `project` links resolved to paths. Cached until the vault changes.
+  notes() {
+    if (this._notes) return this._notes;
+    const today = core.ymd(new Date()), mc = this.app.metadataCache;
+    this._notes = this.app.vault.getMarkdownFiles().map(f => {
+      const fm = mc.getFileCache(f)?.frontmatter;
+      const n = core.noteInfo({ path: f.path, basename: f.basename, folder: f.parent ? f.parent.path : '', mtime: f.stat.mtime }, fm, today);
+      if (n.projectLink) n.projectPath = mc.getFirstLinkpathDest(n.projectLink, f.path)?.path || null;
+      return n;
+    });
+    return this._notes;
+  }
+  library() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.settings.ignoreFolders, shelves: this.settings.shelves }); }
+  handlers(view) {
+    return {
+      open: path => this.openNote(path),
+      hub: path => view ? view.show({ name: 'hub', path }) : this.openLibrary({ name: 'hub', path }),
+      shelf: id => view.show({ name: 'shelf', id }),
+      home: () => view.show({ name: 'home' }),
+      search: q => { view.q = q; view.draw(); },
+      status: path => this.pickStatus(path)
+    };
+  }
+  redraw() { for (const leaf of this.app.workspace.getLeavesOfType(VIEW_LIBRARY)) leaf.view.draw?.(); }
+  async openNote(path) { const f = this.app.vault.getAbstractFileByPath(path); if (f instanceof TFile) await this.app.workspace.getLeaf(false).openFile(f); }
+  async openLibrary(page) {
+    let leaf = this.app.workspace.getLeavesOfType(VIEW_LIBRARY)[0];
+    if (!leaf) { leaf = this.app.workspace.getLeaf('tab'); await leaf.setViewState({ type: VIEW_LIBRARY, active: true }); }
+    this.app.workspace.revealLeaf(leaf);
+    if (page) leaf.view.show?.(page);
+  }
+  async openDashboard() {
+    let leaf = this.app.workspace.getLeavesOfType(VIEW_DASH)[0];
+    if (!leaf) { leaf = this.app.workspace.getRightLeaf(false); await leaf.setViewState({ type: VIEW_DASH, active: true }); }
+    this.app.workspace.revealLeaf(leaf);
+  }
+  pickStatus(path) {
+    const f = this.app.vault.getAbstractFileByPath(path); if (!(f instanceof TFile)) return;
+    new StatusModal(this.app, async word => { await this.app.fileManager.processFrontMatter(f, fm => { fm.status = word; }); new Notice(`Status set to ${word}`); }).open();
+  }
+  newSermon() {
+    const today = core.ymd(new Date());
+    new TextModal(this.app, 'New sermon', [
+      { key: 'passage', label: 'Passage', placeholder: 'e.g. Luke 15:11-32' },
+      { key: 'title', label: 'Title (optional)' },
+      { key: 'date', label: 'Preaching date', type: 'date' },
+      { key: 'series', label: 'Series (optional)' },
+      ...(Platform.isDesktopApp ? [{ key: 'tasks', label: 'Add the prep tasks to the Life Dashboard', type: 'checkbox', value: true }] : [])
+    ], async v => {
+      if (!v.passage && !v.title) return new Notice('Add a passage or a title');
+      const s = core.sermonNotes(v, today), base = core.safeFolder(this.settings.sermonFolder || '') || '';
+      const folder = normalizePath([base, s.folder].filter(Boolean).join('/'));
+      try {
+        if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+        const hub = await this.createUnique(folder, s.hub.name, s.hub.content);
+        await this.createUnique(folder, s.manuscript.name, s.manuscript.content);
+        await this.app.workspace.getLeaf(false).openFile(hub);
+        new Notice('Sermon created');
+        if (v.tasks) this.sendToDashboard(core.sermonPrepMessage(v, s));
+      } catch (e) { console.error(e); new Notice('Could not create the sermon: ' + e.message); }
+    }).open();
+  }
+  async createUnique(folder, name, content) {
+    let path = normalizePath(`${folder ? folder + '/' : ''}${name}.md`), i = 2;
+    while (this.app.vault.getAbstractFileByPath(path)) path = normalizePath(`${folder ? folder + '/' : ''}${name} ${i++}.md`);
+    return this.app.vault.create(path, content);
+  }
+
+  // Title cards: added to the top of notes in reading view.
+  decorateAll() { this.app.workspace.getLeavesOfType('markdown').forEach(l => this.decorate(l.view)); }
+  decorate(view) {
+    if (!(view instanceof MarkdownView)) return;
+    const root = view.containerEl, header = root.querySelector('.markdown-reading-view .mod-header');
+    root.querySelectorAll('.ldl-titlecard').forEach(e => e.remove()); root.classList.remove('ldl-carded');
+    if (!this.settings.titleCards || !header || !view.file) return;
+    const n = this.notes().find(x => x.path === view.file.path); if (!n || !n.family) return;
+    const lib = this.library(), hubNote = n.projectPath ? lib.byPath.get(n.projectPath) : null, self = lib.byPath.get(n.path) || n;
+    const card = render.titleCard(root.ownerDocument, self, hubNote, this.handlers(null));
+    const title = header.querySelector('.inline-title'); title ? title.after(card) : header.prepend(card);
+    if (this.settings.hideProperties) root.classList.add('ldl-carded');
+  }
+
+  // --- Bridge with the docked dashboard
+  async onBridge(url, wv) {
+    const msg = core.readBridge(url, this.settings.dashboardUrl); if (!msg) return;
+    try { await wv.executeJavaScript("history.replaceState(null, '', location.pathname + location.search)"); } catch (e) { /* page went away */ }
+    if (msg.open) {
+      const f = this.app.metadataCache.getFirstLinkpathDest(msg.open, '') || this.app.vault.getAbstractFileByPath(msg.open);
+      if (f instanceof TFile) return this.app.workspace.getLeaf(false).openFile(f);
+      return new Notice(`No note called “${msg.open}”`);
+    }
+    if (msg.create) {
+      const { folder, name, content } = msg.create;
+      if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+      const f = await this.createUnique(folder, name, content);
+      new Notice(`Saved to ${f.path}`); return this.app.workspace.getLeaf(false).openFile(f);
+    }
+  }
+  // Tell the dashboard it is inside Obsidian, with the note names it can link a task to; then deliver waiting messages.
+  greetDashboard(wv) {
+    const names = this.notes().filter(n => n.family && !core.inFolder(n.path, this.settings.ignoreFolders)).map(n => n.title).slice(0, 5000);
+    const info = { vault: this.app.vault.getName(), notes: names, prefix: core.BRIDGE_PREFIX };
+    wv.executeJavaScript(`window.LD_OBSIDIAN = ${JSON.stringify(info)}; window.dispatchEvent(new Event('ld-obsidian'));`).catch(() => { });
+    const waiting = this.pending || []; this.pending = [];
+    waiting.forEach(msg => this.deliver(wv, msg));
+  }
+  // The dashboard queues messages until its saved data has loaded, so a message can go as soon as the page is ready.
+  async deliver(wv, msg) {
+    try { return !!(await wv.executeJavaScript(`window.LD_FROM_OBSIDIAN ? window.LD_FROM_OBSIDIAN(${JSON.stringify(msg)}) : false`)); }
+    catch (e) { return false; }
+  }
+  async sendToDashboard(msg) {
+    if (!Platform.isDesktopApp) return;
+    const view = this.app.workspace.getLeavesOfType(VIEW_DASH)[0]?.view;
+    if (view?.webview && !view.webview.isLoading?.() && await this.deliver(view.webview, msg)) return;
+    (this.pending = this.pending || []).push(msg);
+    await this.openDashboard(); // its dom-ready delivers the waiting message
+  }
+}
+
+class LibrarySettings extends PluginSettingTab {
+  constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
+  display() {
+    const { containerEl } = this, s = this.plugin.settings, save = () => this.plugin.saveSettings();
+    containerEl.empty();
+    new Setting(containerEl).setName('Life Dashboard address').setDesc('Opened in the docked panel on the Mac.')
+      .addText(t => t.setValue(s.dashboardUrl).onChange(v => { s.dashboardUrl = v.trim(); save(); }));
+    new Setting(containerEl).setName('Folders to leave out').setDesc('One per line. Reference text such as imported Bible chapters stays in the vault but out of shelves, search and Recent.')
+      .addTextArea(t => t.setValue(s.ignoreFolders.join('\n')).onChange(v => { s.ignoreFolders = v.split('\n').map(x => x.trim()).filter(Boolean); save(); }));
+    new Setting(containerEl).setName('Shelves').setDesc(`In order, separated by commas. Choices: ${Object.keys(core.FAMILIES).join(', ')}.`)
+      .addText(t => t.setValue(s.shelves.join(', ')).onChange(v => { s.shelves = v.split(',').map(x => x.trim()).filter(x => core.FAMILIES[x]); save(); }));
+    new Setting(containerEl).setName('Folder for new sermons').setDesc('Each new sermon gets its own folder inside this one.')
+      .addText(t => t.setValue(s.sermonFolder).setPlaceholder('e.g. 02 Projects').onChange(v => { s.sermonFolder = v.trim(); save(); }));
+    new Setting(containerEl).setName('Title cards').setDesc('Show a card with the passage, date and status at the top of notes in reading view.')
+      .addToggle(t => t.setValue(s.titleCards).onChange(v => { s.titleCards = v; save(); }));
+    new Setting(containerEl).setName('Hide the properties box under title cards')
+      .addToggle(t => t.setValue(s.hideProperties).onChange(v => { s.hideProperties = v; save(); }));
+    new Setting(containerEl).setName('Open the Library when Obsidian starts')
+      .addToggle(t => t.setValue(s.openOnStartup).onChange(v => { s.openOnStartup = v; save(); }));
+  }
+}
+
+module.exports = LifeDashboardPlugin;
+module.exports.default = LifeDashboardPlugin;
+module.exports.core = core;
+module.exports.render = render;
