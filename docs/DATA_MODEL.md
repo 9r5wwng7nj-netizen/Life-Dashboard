@@ -16,6 +16,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 | localStorage | `ld.settings` → `hiddenTabs` | Section tabs the person hid, as `{ taskTab: ['stats'], … }`; synced between devices | ✅ (with settings) |
 | localStorage | `ld.settings` → `tabsV` | Which default-hidden tabs have been applied to saved settings (2 = Tasks People and Media Stats); synced | ✅ (with settings) |
 | localStorage | `ld.settings` → `hiddenCards` | Dashboard cards the person hid, by id from `DASH_CARDS` (`nutrition`, `weight`, `training`, `tasks`, `faith`, `family`, `meals`); synced | ✅ (with settings) |
+| localStorage | `ld.settings` → `vaultName`, `obsFolder` | The Obsidian vault's name and the folder that Send to Obsidian saves into (device only, not synced) | ✅ (with settings) |
 | localStorage | `ld.youtube` | YouTube connection for Find a video: `{ on, token, exp, state, view, error }`. The token is read-only and lasts about an hour | ❌ |
 | localStorage | `ld.sync` | Sync state for this device: on/off, the one-hour Google access token, last sync time, last error | ❌ |
 | localStorage | `ld.timer`, `ld.focus`, `ld.rd`, `ld.il`, `ld.votd`, `ld.bibles`, `ld.berean`, `ld.vault`, `ld.seeded`, `ld.libv`, `ld.srcv` | Small per-device state and one-time migration flags | ❌ |
@@ -58,9 +59,9 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 **Tasks**
 - `tasks`: `{ id, title, notes, status: todo|doing|done, priority: high|med|low, due, tags[], created, completedAt }` with optional fields:
   - `time`, `repeat {freq, n}` (`freq` is `day`, `weekday`, `week`, `month`, `monthNth`, `year`, or `days` with a `days` list of weekday numbers, 0 = Sunday), `remind` (minutes, `am` or `pm1`), `reminded`
-  - `area`, `project`, `person`, `waiting`, `waitSince`, `nudged`, `someday`, `est`, `pushed`
+  - `area`, `project`, `person`, `waiting`, `waitSince`, `nudged`, `someday`, `est`, `pushed`, `note` (the name of a linked Obsidian note)
   - `subtasks [{id,text,done}]`, `series`, `nextMade`
-- `projects`: `{ id, name, area, due, status: active|paused|done, notes, created }` with optional `repeat {freq, n}`, `nextMade` (id of the next round) and `series`. The next round and its tasks get ids of the form `<original id>.r<YYYY-MM-DD>`, so two synced devices create the same records.
+- `projects`: `{ id, name, area, due, status: active|paused|done, notes, created }` with optional `repeat {freq, n}`, `nextMade` (id of the next round), `series` and `note` (a linked Obsidian note). The next round and its tasks get ids of the form `<original id>.r<YYYY-MM-DD>`, so two synced devices create the same records.
 - `ttemplates` (the user's own checklist templates: `items [{off, text}]`, optional `lib` when copied from the built-in `TEMPLATE_LIBRARY`)
 - `tkit`: `{ weeks: { 'YYYY-MM-DD (Mon)': { big3[], notes, planned } }, focus[], seeded }`
 - `tblocks`: a `{ 'YYYY-MM-DD': [{ id, start 'HH:MM', mins, taskId?, label? }] }` map

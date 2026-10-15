@@ -162,7 +162,7 @@ const SETTINGS_DEFAULT = {
   name: '', theme: 'system', unit: 'lbs', restSeconds: 90, timerSound: true,
   targets: { cal: 2400, p: 180, c: 240, f: 75 },
   translation: 'web', esvKey: '', collapsed: false, view: 'dashboard', lastExport: null,
-  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: '', tour: '', newsSeen: '', taskHelp: false,
+  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', obsFolder: '', familyName: '', tour: '', newsSeen: '', taskHelp: false,
   hiddenTabs: { taskTab: ['stats', 'people'], medTab: ['stats'] }, // section tabs the person chose to hide, by section; see tabs()
   tabsV: 0, // which default-hidden tabs have been applied to saved settings (see below)
   hiddenCards: [] // dashboard cards the person chose to hide; see DASH_CARDS
@@ -1016,7 +1016,7 @@ function fitHistoryTab() {
       <div class="px-4 pb-4 border-t border-slate-100 dark:border-slate-800 pt-3 space-y-3">
         ${w.notes ? `<p class="text-sm italic muted">${esc(w.notes)}</p>` : ''}
         ${w.exercises.map((e, i) => { let n = 0; const type = exInfo(e.name).type; return `<div class="${g[i] ? 'border-l-4 border-l-violet-400 pl-2' : ''}"><div class="font-medium text-sm">${esc(e.name)}${g[i] ? ` <span class="text-[11px] text-violet-600 dark:text-violet-300">Superset ${g[i].label}</span>` : ''}</div>${e.notes ? `<div class="text-xs muted">${esc(e.notes)}</div>` : ''}<div class="flex flex-wrap gap-1.5 mt-1">${e.sets.map(s => { if (s.type !== 'warmup') n++; const [lab] = setBadge(s, n); return `<span class="chip">${lab}: ${setLabel(s, type)}${s.pr && s.pr.length ? ' 🏆' : ''}</span>`; }).join('')}</div></div>`; }).join('')}
-        <div class="flex flex-wrap gap-2 pt-2"><button class="btn btn-sm" data-action="workoutEdit" data-id="${w.id}">${icon('pencil', 'w-3.5 h-3.5')} Edit</button><button class="btn btn-sm" data-action="repeatWorkout" data-id="${w.id}">${icon('repeat', 'w-3.5 h-3.5')} Repeat</button><button class="btn btn-sm" data-action="workoutToRoutine" data-id="${w.id}">${icon('clipboard-plus', 'w-3.5 h-3.5')} Save as routine</button><button class="btn btn-sm" data-action="workoutObsidian" data-id="${w.id}">${icon('copy', 'w-3.5 h-3.5')} Copy for Obsidian</button><button class="btn btn-sm btn-danger ml-auto" data-action="workoutDelete" data-id="${w.id}">${icon('trash-2', 'w-3.5 h-3.5')} Delete</button></div>
+        <div class="flex flex-wrap gap-2 pt-2"><button class="btn btn-sm" data-action="workoutEdit" data-id="${w.id}">${icon('pencil', 'w-3.5 h-3.5')} Edit</button><button class="btn btn-sm" data-action="repeatWorkout" data-id="${w.id}">${icon('repeat', 'w-3.5 h-3.5')} Repeat</button><button class="btn btn-sm" data-action="workoutToRoutine" data-id="${w.id}">${icon('clipboard-plus', 'w-3.5 h-3.5')} Save as routine</button><button class="btn btn-sm" data-action="workoutObsidian" data-id="${w.id}">${icon('send', 'w-3.5 h-3.5')} Send to Obsidian</button><button class="btn btn-sm btn-danger ml-auto" data-action="workoutDelete" data-id="${w.id}">${icon('trash-2', 'w-3.5 h-3.5')} Delete</button></div>
       </div></details>`;
   }
   if (ws.length > ui.histLimit) out += `<button class="btn w-full mt-2" data-action="histMore">Show more (${ws.length - ui.histLimit} older)</button>`;
@@ -1172,7 +1172,7 @@ function workoutSummaryModal(w) {
     ${prs.length ? `<div><div class="label">New personal records</div>${prs.map(({ e, s }) => { const t = exInfo(e.name).type; return `<div class="flex flex-wrap items-baseline gap-x-2 text-sm py-1 border-t border-slate-100 dark:border-slate-800">🏆 <span class="font-medium">${esc(e.name)}</span><span class="muted">${setLabel(s, t)} — ${s.pr.map(k => PR_LABELS[k]).join(', ')}</span></div>`; }).join('')}</div>` : ''}
     ${ms.length ? `<div><div class="label">Muscles worked (sets)</div><div class="flex flex-wrap gap-1.5">${ms.map(([m, v]) => `<span class="chip">${m} ${fmtNum(v, 1)}</span>`).join('')}</div></div>` : ''}
     <p class="text-sm muted">Weekly streak: ${weeklyStreak()} week${weeklyStreak() === 1 ? '' : 's'} · ${W().filter(x => wDate(x) >= startOfWeek()).length} workout(s) this week.</p>`,
-    `<button type="button" class="btn" data-action="workoutObsidian" data-id="${w.id}">${icon('copy', 'w-3.5 h-3.5')} Copy for Obsidian</button><button type="button" class="btn btn-primary" data-action="closeModal">Done</button>`));
+    `<button type="button" class="btn" data-action="workoutObsidian" data-id="${w.id}">${icon('send', 'w-3.5 h-3.5')} Send to Obsidian</button><button type="button" class="btn btn-primary" data-action="closeModal">Done</button>`));
 }
 
 // --- CSV (RFC 4180-ish) + Hevy mapping ---
@@ -1319,7 +1319,7 @@ const A_FIT = {
   // history
   histMore: () => { ui.histLimit += 25; render(); },
   workoutDelete: el => { if (!confirm('Delete this workout permanently?')) return; Store.set('workouts', W().filter(w => w.id !== el.dataset.id)); render(); },
-  workoutObsidian: el => { const w = W().find(x => x.id === el.dataset.id); if (w) copyText(workoutMarkdown(w), 'Workout copied as Obsidian Markdown'); },
+  workoutObsidian: el => { const w = W().find(x => x.id === el.dataset.id); if (w) sendToObsidian(`${w.name || 'Workout'} ${wDate(w)}`, workoutMarkdown(w)); },
   workoutToRoutine: el => { const w = W().find(x => x.id === el.dataset.id); if (!w) return; ui.rDraft = { id: null, name: w.name, folder: '', notes: '', exercises: w.exercises.map(e => { const t = exInfo(e.name).type, b = bestSet(e, t); return { name: e.name, sets: workSets(e).length || e.sets.length, reps: t === 'duration' || t === 'weight_duration' ? (b?.duration ? fmtClock(b.duration) : '') : String(b?.reps ?? ''), rest: S.restSeconds, ss: !!e.ss }; }) }; drawRoutineModal(); },
   // routines, folders, programs
   routineEdit: el => { const r = Store.get('routines').find(x => x.id === el.dataset.id); ui.rDraft = structuredClone(r || { id: null, name: '', folder: '', notes: '', exercises: [] }); drawRoutineModal(); },
@@ -2261,6 +2261,10 @@ function openSettings() {
       <div class="grid sm:grid-cols-2 gap-3"><div><label class="label">Default translation</label><select name="translation" class="input">${TRANSLATIONS.map(([v, l]) => `<option value="${v}" ${S.translation === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div><label class="label">ESV API key (optional)</label><input name="esvKey" type="password" class="input" value="${esc(S.esvKey)}" placeholder="From api.esv.org" autocomplete="off"></div></div>
       <p class="text-xs muted">Public-domain translations load from bible-api.com with no key. For ESV, create a free key at api.esv.org. The key stays in this browser and is left out of exports.</p></section>
+    <section class="space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 p-4"><h4 class="font-semibold text-sm flex items-center gap-2">${icon('notebook-text', 'w-4 h-4')} Obsidian</h4>
+      <div class="grid sm:grid-cols-2 gap-3"><div><label class="label" for="set-vault">Vault name</label><input id="set-vault" name="vaultName" class="input" value="${esc(S.vaultName || '')}" placeholder="As Obsidian shows it" autocomplete="off"></div>
+      <div><label class="label" for="set-obsfolder">Folder for notes you send</label><input id="set-obsfolder" name="obsFolder" class="input" value="${esc(S.obsFolder || '')}" placeholder="e.g. Inbox (blank: the vault’s top level)" autocomplete="off"></div></div>
+      <p class="text-xs muted">${inObsidian() ? 'Connected: this dashboard is open inside Obsidian, so notes open and save there directly.' : 'With the vault name, “Send to Obsidian” creates the note and task notes open in Obsidian. Inside Obsidian with the Life Dashboard Library plugin, this happens without leaving the page.'}</p></section>
     <section class="space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 p-4"><h4 class="font-semibold text-sm flex items-center gap-2">${icon('database', 'w-4 h-4')} Data &amp; sync</h4>
       <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-primary" data-action="exportAll">${icon('download')} Back up personal data + photos</button><button type="button" class="btn" data-action="importAll">${icon('upload')} Import backup…</button><button type="button" class="btn" data-action="hevyImport">${icon('dumbbell')} Import Hevy CSV…</button><button type="button" class="btn" data-action="mfImport">${icon('apple')} Import MacroFactor…</button></div>
       <div class="flex flex-wrap items-center gap-2"><span class="text-sm muted">Export workouts:</span><button type="button" class="btn btn-sm" data-action="hevyExport">${icon('sheet', 'w-3.5 h-3.5')} CSV (Hevy format)</button><button type="button" class="btn btn-sm" data-action="fitJsonExport">${icon('braces', 'w-3.5 h-3.5')} JSON</button></div>
@@ -2497,7 +2501,7 @@ function noteFooter(coll, o, doneAction = 'closeModal', doneLabel = 'Done') {
   return `<span id="save-state" class="text-xs muted mr-auto self-center">${isSaved(coll, o.id) ? 'Saved' : 'Saves automatically as you type'}</span>
     <button type="button" class="btn btn-sm btn-danger" data-action="noteDelete" data-coll="${coll}" data-id="${o.id}" title="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button>
     <button type="button" class="btn btn-sm" data-action="noteMd" data-coll="${coll}" data-id="${o.id}" title="Download .md">${icon('download', 'w-3.5 h-3.5')} .md</button>
-    <button type="button" class="btn btn-sm" data-action="noteObsidian" data-coll="${coll}" data-id="${o.id}">${icon('copy', 'w-3.5 h-3.5')} Copy as Obsidian Markdown</button>
+    <button type="button" class="btn btn-sm" data-action="noteObsidian" data-coll="${coll}" data-id="${o.id}">${icon('send', 'w-3.5 h-3.5')} Send to Obsidian</button>
     <button type="button" class="btn btn-sm btn-primary" data-action="${doneAction}">${doneLabel}</button>`;
 }
 function noteTitle(coll, o) {
@@ -3079,6 +3083,53 @@ async function searchVault(I, keyRefs) {
   return V.map(d => { const sc = scoreDoc(d.set, d.tset, W, [], keyRefs); return sc >= 3 ? { kind: 'vault', title: d.t, path: d.p, sub: d.p.includes('/') ? d.p.replace(/\/[^/]*$/, '') : '', sc, snip: docSnippet(d.x, W) } : null; })
     .filter(Boolean).sort((a, b) => b.sc - a.sc).slice(0, 10);
 }
+// --- Obsidian bridge. Inside Obsidian (the Life Dashboard Library plugin's panel) the plugin sets
+// window.LD_OBSIDIAN and reads "#ld-obsidian=<json>" messages from this page's address. Elsewhere,
+// obsidian:// links do the same, using the vault name from Settings & Sync.
+const OBS = { go: url => { location.href = url; } }; // one place that leaves the page, so tests can watch it
+const inObsidian = () => !!(window.LD_OBSIDIAN && window.LD_OBSIDIAN.prefix);
+const obsSafeName = n => String(n || 'Note').replace(/[\\/*"<>:|?#^[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Note';
+function obsBridge(msg) { location.hash = window.LD_OBSIDIAN.prefix.replace(/^#/, '') + encodeURIComponent(JSON.stringify(msg)); }
+function openInObsidian(name) {
+  name = String(name || '').trim(); if (!name) return toast('No note is linked yet', 'error');
+  if (inObsidian()) return obsBridge({ open: name });
+  if (!S.vaultName) return toast('Add your vault name in Settings & Sync → Obsidian to open notes', 'error');
+  OBS.go(obsidianUrl(S.vaultName, name));
+}
+// Creates a note in the vault (in Settings' folder). Without a vault name it copies the Markdown, as before.
+async function sendToObsidian(title, md) {
+  const name = obsSafeName(title), folder = (S.obsFolder || '').trim();
+  if (inObsidian()) { obsBridge({ create: { folder, name, content: md } }); return toast('Saved to Obsidian'); }
+  if (!S.vaultName) return copyText(md, 'Copied as Obsidian Markdown. Add your vault name in Settings & Sync to send notes straight to Obsidian.');
+  const file = encodeURIComponent((folder ? folder + '/' : '') + name), vault = encodeURIComponent(S.vaultName);
+  if (md.length <= 6000) return OBS.go(`obsidian://new?vault=${vault}&file=${file}&content=${encodeURIComponent(md)}`);
+  await copyText(md, 'Opening Obsidian…'); // long notes travel by clipboard
+  OBS.go(`obsidian://new?vault=${vault}&file=${file}&clipboard=true`);
+}
+const obsNoteChip = note => note ? `<button class="chip text-[11px] hover:ring-1 ring-brand-400" data-action="obsOpen" data-note="${esc(note)}" title="Open in Obsidian">${icon('notebook-text', 'w-3 h-3')} ${esc(note)}</button>` : '';
+// Note names to pick from when linking (only known inside Obsidian).
+const obsNoteList = () => inObsidian() && Array.isArray(window.LD_OBSIDIAN.notes) ? `<datalist id="obs-notes">${window.LD_OBSIDIAN.notes.slice(0, 3000).map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>` : '';
+// Messages from the plugin (it calls window.LD_FROM_OBSIDIAN). They wait until saved data has loaded.
+const obsInbox = { ready: false, queue: [] };
+window.LD_FROM_OBSIDIAN = msg => { obsInbox.queue.push(msg); if (obsInbox.ready) obsDrain(); return true; };
+function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.sermonPrep) sermonPrep(m.sermonPrep); } catch (e) { console.warn('Obsidian message', e); } } }
+window.addEventListener('ld-obsidian', () => render());
+// New sermon in Obsidian → a dashboard project with a "think, pray, write" task each day until the
+// preaching date (up to 21 days) and the preaching itself, each linked to its note.
+function sermonPrep(m) {
+  const passage = String(m.passage || '').slice(0, 80), title = String(m.title || '').slice(0, 120), date = /^\d{4}-\d{2}-\d{2}$/.test(m.date || '') ? m.date : null;
+  const hub = String(m.hub || '').slice(0, 200), manuscript = String(m.manuscript || hub).slice(0, 200), ps = Store.get('projects');
+  if (!passage && !title) return;
+  if (hub && ps.some(p => p.note === hub)) return toast('Those sermon tasks are already in your dashboard');
+  const p = { id: uid(), name: `Sermon · ${passage || title}`, area: 'ministry', status: 'active', notes: title, due: date, note: hub || null, created: new Date().toISOString() };
+  ps.push(p); Store.save('projects');
+  const today = ymd(), last = date ? addDays(date, -1) : today, days = [];
+  for (let d = date ? Math.max(0, daysBetween(today, last) - 20) : 0; days.length < 21; d++) { const day = addDays(today, d); if (day > last) break; days.push(day); }
+  const extra = { area: 'ministry', project: p.id, note: manuscript };
+  days.forEach(d => addParsedTask({ title: 'Sermon: think, pray, write', tags: [] }, { ...extra, due: d }));
+  if (date) addParsedTask({ title: `Preach: ${title || passage}`, tags: [] }, { ...extra, due: date, note: hub || manuscript });
+  render(); toast(`Added the sermon to Tasks: ${days.length + (date ? 1 : 0)} tasks`);
+}
 const obsidianUrl = (vault, path) => `obsidian://open?vault=${encodeURIComponent(vault || '')}&file=${encodeURIComponent(String(path || '').replace(/\.md$/i, ''))}`;
 function vaultDoc(p, text, m) {
   let body = String(text || ''), tags = [];
@@ -3524,7 +3575,7 @@ function wsDraw() {
     <div class="divide-y divide-slate-100 dark:divide-slate-800 -mx-1">${list.slice(0, n).map(vi => { const b = BT.vb[vi], c = BT.vc[vi], v = BT.vv[vi], r = { b, c, v1: v }, t = bible && bible[b] && bible[b][c - 1] ? bible[b][c - 1][v - 1] : '';
       return `<button class="w-full text-left px-1 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded" data-action="refOpen" data-ref="${esc(refLabel(r))}"><div class="text-xs font-semibold text-brand-600 dark:text-brand-400">${esc(refLabel(r))}</div><div class="text-sm font-serif leading-6">${t ? markWords(t, vs.get(vi).flatMap(g => g.split(' ').filter(w => w.length > 2 && !STOP.has(w.toLowerCase())))) : esc(vs.get(vi).join(' · '))}</div></button>`; }).join('')}</div>
     ${list.length > n ? `<button class="btn btn-sm w-full" data-action="wsMore">Show more (${fmtNum(list.length - n)} more verses)</button>` : ''}`;
-  Modal.open(modalShell(`Word study · ${sLabel(code)}`, body, `<button type="button" class="btn" data-action="wsCopy">${icon('copy', 'w-4 h-4')} Copy for Obsidian</button><button type="button" class="btn btn-primary" data-action="closeModal">Done</button>`), { wide: true });
+  Modal.open(modalShell(`Word study · ${sLabel(code)}`, body, `<button type="button" class="btn" data-action="wsCopy">${icon('send', 'w-4 h-4')} Send to Obsidian</button><button type="button" class="btn btn-primary" data-action="closeModal">Done</button>`), { wide: true });
 }
 // Study tab
 function scrStudy() {
@@ -3544,7 +3595,7 @@ function stTopics() {
 }
 function stTopicView(i) {
   const t = TI[i], refs = t.refs.split(';'), bible = bibleNow(textTr());
-  return `<div class="flex flex-wrap items-center gap-2 mb-3"><button class="btn btn-sm" data-action="tiBack">${icon('arrow-left', 'w-3.5 h-3.5')} Topics</button><span class="flex-1"></span><button class="btn btn-sm" data-action="tiSave" data-i="${i}">${icon('notebook-pen', 'w-3.5 h-3.5')} Save as study note</button><button class="btn btn-sm" data-action="tiCopy" data-i="${i}">${icon('copy', 'w-3.5 h-3.5')} Copy for Obsidian</button></div>
+  return `<div class="flex flex-wrap items-center gap-2 mb-3"><button class="btn btn-sm" data-action="tiBack">${icon('arrow-left', 'w-3.5 h-3.5')} Topics</button><span class="flex-1"></span><button class="btn btn-sm" data-action="tiSave" data-i="${i}">${icon('notebook-pen', 'w-3.5 h-3.5')} Save as study note</button><button class="btn btn-sm" data-action="tiCopy" data-i="${i}">${icon('send', 'w-3.5 h-3.5')} Send to Obsidian</button></div>
     <div class="card"><h2 class="text-lg font-semibold">${esc(t.n)}</h2><p class="text-xs muted mb-3">${TI_SRC[t.s]} · ${refs.length} passage${refs.length === 1 ? '' : 's'}</p>
     <div class="divide-y divide-slate-100 dark:divide-slate-800">${refs.map(x => { const r = parseRef(x); return `<button class="w-full text-left py-2 px-1 -mx-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800/60" data-action="refOpen" data-ref="${esc(x)}"><div class="text-xs font-semibold text-brand-600 dark:text-brand-400">${esc(refLabel(r))}</div>${bible ? `<div class="text-sm font-serif leading-6">${esc(passageSnippet(bible, r, 420))}</div>` : ''}</button>`; }).join('')}</div>
     ${bible ? '' : '<p class="text-xs muted mt-2">Download a Bible in Library to see verse text here.</p>'}</div>`;
@@ -3602,7 +3653,7 @@ function topicNoteBody(t) { const bible = BibleMem[textTr()]; return `*${TI_SRC[
 const A_BEREAN = {
   wordStudy: el => openWordStudy(+el.dataset.s),
   wsMore: () => { ui.ws.n += 300; const sc = $('#modal .overflow-y-auto') || $('#modal'); const y = sc ? sc.scrollTop : 0; wsDraw(); const sc2 = $('#modal .overflow-y-auto') || $('#modal'); if (sc2) sc2.scrollTop = y; },
-  wsCopy: () => ui.ws && copyText(wordStudyMd(ui.ws.code), 'Word study copied for Obsidian'),
+  wsCopy: () => ui.ws && sendToObsidian(`Word study - ${sLabel(ui.ws.code)}`, wordStudyMd(ui.ws.code)),
   rdInter: () => { IL.on = !IL.on; saveIL(); ui.rd.cmp = IL.on ? [] : ui.rd.cmp; render(); },
   rdIlOrder: () => { IL.order = IL.order === 'orig' ? 'eng' : 'orig'; saveIL(); render(); },
   stTab: el => { ui.stTab = el.dataset.v; render(); },
@@ -3613,7 +3664,7 @@ const A_BEREAN = {
   tiOpen: el => { ui.ti.open = +el.dataset.i; ui.stTab = 'topics'; if (ui.scrTab !== 'study' || S.view !== 'scripture') { ui.scrTab = 'study'; go('scripture'); } else render(); const vw = $('#view'); if (vw) vw.scrollTop = 0; },
   tiBack: () => { ui.ti.open = null; render(); },
   tiSave: el => { const t = TI[+el.dataset.i]; if (!t) return; const o = newScriptureNote('teaching', t.refs.split(';')[0], '', BIBLES[textTr()] ? BIBLES[textTr()].short : ''); o.title = t.n; o.body = topicNoteBody(t); o.tags = ['topical', 'topical-index']; Store.get('scripture').push(o); Store.save('scripture'); toast('Saved to your study notes'); scrNoteEditor(o); },
-  tiCopy: el => { const t = TI[+el.dataset.i]; if (t) copyText(obsidianMd({ title: t.n, date: ymd(), type: 'topical-index', tags: ['scripture', 'topical'], props: { source: TI_SRC[t.s] }, body: `# ${t.n}\n\n${topicNoteBody(t)}` }), 'Topic copied for Obsidian'); },
+  tiCopy: el => { const t = TI[+el.dataset.i]; if (t) sendToObsidian(t.n, obsidianMd({ title: t.n, date: ymd(), type: 'topical-index', tags: ['scripture', 'topical'], props: { source: TI_SRC[t.s] }, body: `# ${t.n}\n\n${topicNoteBody(t)}` })); },
   owRun: f => { const v = fd(f); ui.ow.q = v.q.trim(); ui.ow.test = v.test; ui.ow.res = origSearch(ui.ow.q, v.test); render(); },
   owEx: el => { ui.ow.q = el.dataset.q; ui.ow.res = origSearch(ui.ow.q, ui.ow.test); render(); },
   ccQ: el => { ui.cc.q = el.value; ui.cc.word = null; rerender(); },
@@ -4570,7 +4621,7 @@ function mediaDetail(o) {
   const player = src ? `<div id="m-player-slot" data-id="${o.id}"></div><div class="flex flex-wrap items-center gap-2 mt-2"><button class="btn btn-sm" data-action="mSkip" data-v="-15">${icon('rotate-ccw', 'w-3.5 h-3.5')} 15</button><button class="btn btn-sm" data-action="mSkip" data-v="30">30 ${icon('rotate-cw', 'w-3.5 h-3.5')}</button><select class="input w-auto py-1 text-sm" data-change="mSpeed" aria-label="Playback speed">${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}" ${+(S.mSpeed || 1) === v ? 'selected' : ''}>${v}×</option>`).join('')}</select><span class="text-xs muted">${o.pos ? `Resumes at ${fmtT(o.pos)}` : ''}</span></div>` : mediaEmbed(o);
   return `<div class="flex flex-wrap items-center gap-2 mb-3"><button class="btn btn-sm" data-action="mBack">${icon('arrow-left', 'w-3.5 h-3.5')} Library</button><span class="flex-1"></span>
       ${o.url ? `<a href="${esc(webUrl(o.url))}" target="_blank" rel="noopener" class="btn btn-sm">${icon('external-link', 'w-3.5 h-3.5')} Open</a>` : ''}<button class="btn btn-sm" data-action="mShare" data-id="${o.id}">${icon('share-2', 'w-3.5 h-3.5')} Share blurb</button>
-      <button class="btn btn-sm" data-action="noteObsidian" data-coll="media" data-id="${o.id}">${icon('copy', 'w-3.5 h-3.5')} Obsidian</button><button class="btn btn-sm" data-action="noteMd" data-coll="media" data-id="${o.id}">${icon('download', 'w-3.5 h-3.5')} .md</button><button class="btn btn-sm btn-danger" data-action="noteDelete" data-coll="media" data-id="${o.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div>
+      <button class="btn btn-sm" data-action="noteObsidian" data-coll="media" data-id="${o.id}">${icon('send', 'w-3.5 h-3.5')} Obsidian</button><button class="btn btn-sm" data-action="noteMd" data-coll="media" data-id="${o.id}">${icon('download', 'w-3.5 h-3.5')} .md</button><button class="btn btn-sm btn-danger" data-action="noteDelete" data-coll="media" data-id="${o.id}" aria-label="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div>
     <div class="grid lg:grid-cols-5 gap-4 items-start"><div class="lg:col-span-3 space-y-3 min-w-0">
       <div class="card space-y-3"><input id="m-title" class="input text-lg font-semibold" value="${esc(o.title)}" ${nf('media', o, 'title')} placeholder="Title" ${o.title ? '' : 'autofocus'}>
         <div class="grid sm:grid-cols-3 gap-2"><select class="input text-sm" data-change="mField" data-id="${o.id}" data-f="kind" aria-label="Format">${Object.entries(MEDIA_KINDS).map(([k, [l]]) => `<option value="${k}" ${o.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -4997,7 +5048,7 @@ const A_FAITH = {
     if (coll === 'journal') ui.jId = null; if (coll === 'media') { ui.medOpen = null; if (MP.id === id) A_MEDIA.mpStop(); }
     if (Modal.isOpen()) Modal.close(); else render(); toast('Deleted');
   },
-  noteObsidian: el => { const o = findNote(el.dataset.coll, el.dataset.id); if (o) copyText(noteToObsidian(el.dataset.coll, o), 'Copied as Obsidian Markdown — paste into a new note'); },
+  noteObsidian: el => { const o = findNote(el.dataset.coll, el.dataset.id); if (o) sendToObsidian(noteTitle(el.dataset.coll, o), noteToObsidian(el.dataset.coll, o)); },
   noteMd: el => { const { coll, id } = el.dataset, o = findNote(coll, id); if (o) download(mdFilename(o.date, noteTitle(coll, o)), noteToObsidian(coll, o), 'text/markdown'); },
   // journal
   journalOpen: el => { ui.jId = el.dataset.id; ui.jPreview = false; render(); },
@@ -6405,10 +6456,12 @@ const WDS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const WD_RE = '(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?)';
 const nextWd = (i, strictNext) => { const today = new Date().getDay(); let k = (i - today + 7) % 7; if (k === 0 && strictNext) k = 7; return addDays(ymd(), k); };
 function parseTaskInput(s, relative = false) {
-  let tags = [], pri = null, due = null, time = null, repeat = null, project = null, person = null, someday = false, est = null, offset = null, src = ` ${s} `;
+  let tags = [], pri = null, due = null, time = null, repeat = null, project = null, person = null, someday = false, est = null, offset = null, note = null, src = ` ${s} `;
   const cut = (re, fn) => { src = src.replace(re, (...m) => { const r = fn(...m); return r == null ? ' ' : r; }); };
   // Anything in (parentheses) is a note: it leaves the title and is not read for dates or tags.
   const notes = []; for (let prev; prev !== src;) { prev = src; src = src.replace(/\(([^()]*)\)/, (m, n) => { if (n.trim()) notes.push(n.trim().replace(/\s+/g, ' ')); return ' '; }); }
+  // [[Note name]] links the task to that Obsidian note.
+  cut(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/, (m, n) => { note = n.trim(); });
   if (relative) cut(/(^|\s)([+-]\d{1,3})(w|d)?(?=\s)/i, (m, a, n, u) => { offset = +n * (/w/i.test(u || '') ? 7 : 1); return a; });
   cut(/(^|\s)#([\w-]+)/g, (m, a, t) => { tags.push(t.toLowerCase()); return a; });
   cut(/(^|\s)!(high|medium|med|low|h|m|l)\b/i, (m, a, p) => { pri = { h: 'high', high: 'high', m: 'med', med: 'med', medium: 'med', l: 'low', low: 'low' }[p.toLowerCase()]; return a; });
@@ -6439,7 +6492,7 @@ function parseTaskInput(s, relative = false) {
   if (time && !due && !repeat && offset == null) { const nm = new Date().getHours() * 60 + new Date().getMinutes(); due = hmToMin(time) > nm ? ymd() : addDays(ymd(), 1); }
   if (repeat && !due) due = repeat.freq === 'weekday' ? ([0, 6].includes(new Date().getDay()) ? nextWd(1) : ymd()) : ymd();
   const title = src.replace(/\s+/g, ' ').trim().replace(/\s+(on|at|by|due|in|for|every)$/i, '').trim();
-  return { title, tags, pri, due, time, repeat, project, person, someday, est, offset, notes: notes.join('\n') };
+  return { title, tags, pri, due, time, repeat, project, person, someday, est, offset, note, notes: notes.join('\n') };
 }
 // Several tasks in one entry, separated by "|". The first sets the starting date. A later one can
 // say +2 or -1 (days; +1w for a week) to be dated from it, or give its own date. Later tasks also
@@ -6452,7 +6505,7 @@ function parseTaskBlocks(raw) {
   return [first, ...list.slice(1).map(x => {
     const p = parseTaskInput(x, true);
     if (!p.due && p.offset != null) p.due = addDays(base, p.offset);
-    if (!p.person) p.person = first.person; if (!p.project) p.project = first.project; if (!p.tags.length) p.tags = [...first.tags];
+    if (!p.person) p.person = first.person; if (!p.project) p.project = first.project; if (!p.note) p.note = first.note; if (!p.tags.length) p.tags = [...first.tags];
     return p;
   })].filter(p => p.title);
 }
@@ -6464,7 +6517,7 @@ function nlPreviewHtml(s, rep = null) {
   return bits.length ? `<span class="muted">→</span> <strong>${esc(p.title)}</strong> ${bits.map(b => `<span class="chip text-[11px]">${b}</span>`).join(' ')}` : '';
 }
 function nlBits(p) {
-  return [p.due ? `📅 ${daysBetween(ymd(), p.due) === 0 ? 'Today' : daysBetween(ymd(), p.due) === 1 ? 'Tomorrow' : fmtDate(p.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : '', p.time ? `🕒 ${fmtTime(p.time)}` : '', p.repeat ? `🔁 ${repeatLabel(p.repeat, p.due)}` : '', p.project ? `📁 ${esc(p.project)}${Store.get('projects').some(x => x.name.toLowerCase().replace(/\s+/g, '').startsWith(p.project.toLowerCase().replace(/\s+/g, ''))) ? '' : ' (new)'}` : '', p.person ? `👤 ${esc(p.person)}` : '', p.est ? `⏱ ${p.est}m` : '', p.someday ? '💭 Someday' : '', p.pri ? `! ${PRI[p.pri][0]}` : '', ...p.tags.map(t => `#${esc(t)}`), p.notes ? `📝 ${esc(p.notes.length > 48 ? p.notes.slice(0, 48) + '…' : p.notes)}` : ''].filter(Boolean);
+  return [p.due ? `📅 ${daysBetween(ymd(), p.due) === 0 ? 'Today' : daysBetween(ymd(), p.due) === 1 ? 'Tomorrow' : fmtDate(p.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : '', p.time ? `🕒 ${fmtTime(p.time)}` : '', p.repeat ? `🔁 ${repeatLabel(p.repeat, p.due)}` : '', p.project ? `📁 ${esc(p.project)}${Store.get('projects').some(x => x.name.toLowerCase().replace(/\s+/g, '').startsWith(p.project.toLowerCase().replace(/\s+/g, ''))) ? '' : ' (new)'}` : '', p.person ? `👤 ${esc(p.person)}` : '', p.note ? `📓 ${esc(p.note)}` : '', p.est ? `⏱ ${p.est}m` : '', p.someday ? '💭 Someday' : '', p.pri ? `! ${PRI[p.pri][0]}` : '', ...p.tags.map(t => `#${esc(t)}`), p.notes ? `📝 ${esc(p.notes.length > 48 ? p.notes.slice(0, 48) + '…' : p.notes)}` : ''].filter(Boolean);
 }
 function findOrMakeProject(name, area) { if (!name) return null; const key = name.toLowerCase().replace(/\s+/g, ''), ps = Store.get('projects'); let p = ps.find(x => x.name.toLowerCase().replace(/\s+/g, '') === key) || ps.find(x => x.status !== 'done' && x.name.toLowerCase().replace(/\s+/g, '').startsWith(key)); if (!p) { p = { id: uid(), name: name.replace(/\b\w/g, c => c.toUpperCase()), area: area || null, status: 'active', notes: '', due: null, created: new Date().toISOString() }; ps.push(p); Store.save('projects'); } return p.id; }
 function addTask(raw, extra = {}) { return addParsedTask(applyRepeat(parseTaskInput(raw), extra.repeat), extra); }
@@ -6492,6 +6545,7 @@ function addParsedTask(p, extra = {}) {
   if (p.time || extra.time) t.time = extra.time || p.time;
   if (p.repeat) t.repeat = p.repeat; if (p.est) t.est = p.est; if (p.someday || extra.someday) t.someday = true;
   if (p.person || extra.person) t.person = extra.person || p.person;
+  if (p.note || extra.note) t.note = extra.note || p.note;
   if (extra.area) t.area = extra.area;
   const pid = extra.project || (p.project ? findOrMakeProject(p.project, extra.area) : null); if (pid) t.project = pid;
   if (t.time) t.remind = 0;
@@ -6603,7 +6657,7 @@ const sortT = (a, b) => priRank(a) - priRank(b) || (a.due || '9999').localeCompa
 const knownPeople = () => [...new Map([...TK().map(t => t.person), ...FP().map(p => p.name)].filter(Boolean).map(n => [n.toLowerCase(), n])).values()].sort((a, b) => a.localeCompare(b));
 function taskMeta(t, { noDue } = {}) {
   const p = t.project && projFind(t.project), a = areaOf(t), st = t.subtasks || [], sd = st.filter(s => s.done).length;
-  return `${a ? `<span class="chip text-[11px]"><span class="w-1.5 h-1.5 rounded-full ${AREA_CLS[a]}"></span>${areaLabel(a)}</span>` : ''}${!noDue ? dueChip(t) : t.time ? `<span class="chip">${icon('clock', 'w-3 h-3')} ${fmtTime(t.time)}</span>` : ''}${t.repeat ? `<span class="chip" title="Repeats ${repeatLabel(t.repeat, t.due)}">${icon('repeat', 'w-3 h-3')} ${repeatLabel(t.repeat, t.due)}</span>` : ''}${p ? `<button class="chip hover:ring-1 ring-brand-400" data-action="projOpen" data-id="${p.id}">${icon('folder', 'w-3 h-3')} ${esc(p.name)}</button>` : ''}${t.person ? `<span class="chip">${icon('user', 'w-3 h-3')} ${esc(t.person)}</span>` : ''}${t.waiting ? `<span class="chip bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">⏳ waiting ${daysBetween(t.waitSince || ymd(new Date(t.created)), ymd())}d</span>` : ''}${st.length ? `<span class="chip">${icon('list-todo', 'w-3 h-3')} ${sd}/${st.length}</span>` : ''}${t.est ? `<span class="chip">⏱ ${t.est}m</span>` : ''}${(t.pushed || 0) >= 2 && tOpen(t) ? `<span class="chip" title="Pushed back ${t.pushed} times">↻ ${t.pushed}×</span>` : ''}`;
+  return `${obsNoteChip(t.note)}${a ? `<span class="chip text-[11px]"><span class="w-1.5 h-1.5 rounded-full ${AREA_CLS[a]}"></span>${areaLabel(a)}</span>` : ''}${!noDue ? dueChip(t) : t.time ? `<span class="chip">${icon('clock', 'w-3 h-3')} ${fmtTime(t.time)}</span>` : ''}${t.repeat ? `<span class="chip" title="Repeats ${repeatLabel(t.repeat, t.due)}">${icon('repeat', 'w-3 h-3')} ${repeatLabel(t.repeat, t.due)}</span>` : ''}${p ? `<button class="chip hover:ring-1 ring-brand-400" data-action="projOpen" data-id="${p.id}">${icon('folder', 'w-3 h-3')} ${esc(p.name)}</button>` : ''}${t.person ? `<span class="chip">${icon('user', 'w-3 h-3')} ${esc(t.person)}</span>` : ''}${t.waiting ? `<span class="chip bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">⏳ waiting ${daysBetween(t.waitSince || ymd(new Date(t.created)), ymd())}d</span>` : ''}${st.length ? `<span class="chip">${icon('list-todo', 'w-3 h-3')} ${sd}/${st.length}</span>` : ''}${t.est ? `<span class="chip">⏱ ${t.est}m</span>` : ''}${(t.pushed || 0) >= 2 && tOpen(t) ? `<span class="chip" title="Pushed back ${t.pushed} times">↻ ${t.pushed}×</span>` : ''}`;
 }
 // Select mode (ui.taskSel is a Set of task ids): the tick box on every task picks it instead of completing it.
 const taskTick = (t, cls = 'mt-0.5 w-4 h-4 accent-brand-600 shrink-0') => ui.taskSel
@@ -6641,13 +6695,13 @@ function renderTasks() {
       <div id="nl-prev" class="text-sm mt-2 flex flex-wrap items-center gap-1 empty:hidden"></div>
       <button type="button" class="text-xs muted mt-2 inline-flex items-center gap-1 hover:underline" data-action="taskHelp" aria-expanded="${!!S.taskHelp}" aria-controls="task-rules">${icon('info', 'w-3 h-3')} <span id="task-rules-label">${S.taskHelp ? 'Hide' : 'Show'} the rules for adding tasks</span></button>
       <div id="task-rules" class="text-xs muted mt-2 space-y-3 ${S.taskHelp ? '' : 'hidden'}">
-        <div><div class="font-semibold mb-1">One task: type it the way you’d say it</div><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code></span><span><code>for 45m</code> time estimate · <code>someday</code></span><span class="sm:col-span-2"><code>(anything in parentheses)</code> is left out of the title and saved in the task’s notes.</span></div></div>
+        <div><div class="font-semibold mb-1">One task: type it the way you’d say it</div><div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-1"><span><code>tomorrow at 3pm</code> · <code>fri</code> · <code>next week</code> · <code>oct 20</code> · <code>in 2 weeks</code> · <code>tonight</code></span><span><code>every monday</code> · <code>every weekday</code> · <code>every 2nd tuesday</code> · <code>monthly</code></span><span><code>#ministry</code> tag/area · <code>!high</code> priority · <code>+Project</code> · <code>~Person</code></span><span><code>for 45m</code> time estimate · <code>someday</code></span><span class="sm:col-span-2"><code>(anything in parentheses)</code> is left out of the title and saved in the task’s notes.</span><span class="sm:col-span-2"><code>[[Note name]]</code> links the task to that Obsidian note.</span></div></div>
         <div><div class="font-semibold mb-1">Several tasks in one entry</div><ul class="list-disc pl-5 space-y-1">
           <li><code>|</code> starts a new task.</li>
           <li>The first task sets the starting date.</li>
           <li><code>+1</code> is the day after the first task and <code>-1</code> the day before. Any number works, and <code>+1w</code> is a week.</li>
           <li>A later task can use its own date instead: <code>today</code>, <code>fri</code>, <code>12/20</code>.</li>
-          <li>Later tasks copy the first task’s <code>~Person</code>, <code>+Project</code> and <code>#tags</code> unless you give them their own.</li>
+          <li>Later tasks copy the first task’s <code>~Person</code>, <code>+Project</code>, <code>[[Note]]</code> and <code>#tags</code> unless you give them their own.</li>
           <li>A task with no date goes to the Inbox.</li>
           <li>Tick <strong>Repeat</strong> to make every task in the entry repeat: daily, weekly, monthly, on certain days of the week (such as Mon, Thu and Sat), or a custom number of days, weeks, months or years.</li></ul>
           <p class="mt-2">Example: <code>Meet Sam wed at 3pm ~Sam #work | Text Sam to confirm today | Follow up +1 | Check in +1w</code></p></div></div></form>
@@ -6718,6 +6772,7 @@ function projDetail(p) {
       ${dn.length ? `<details class="mt-3"><summary class="text-xs muted cursor-pointer list-none">Done · ${dn.length}</summary><div class="space-y-2 mt-2">${dn.map(x => taskRow(x)).join('')}</div></details>` : ''}</div></div>
     <div class="card space-y-3 h-fit"><div class="grid grid-cols-2 gap-2"><div><label class="label">Area</label><select class="input" data-change="projField" data-id="${p.id}" data-f="area"><option value="">None</option>${AREAS.map(([k, l]) => `<option value="${k}" ${p.area === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Status</label><select class="input" data-change="projField" data-id="${p.id}" data-f="status">${[['active', 'Active'], ['paused', 'Paused'], ['done', 'Done']].map(([k, l]) => `<option value="${k}" ${(p.status || 'active') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
       <div><label class="label">Due</label><input type="date" class="input" value="${p.due || ''}" data-change="projField" data-id="${p.id}" data-f="due"></div>
+      <div><label class="label" for="proj-note">Obsidian note</label><div class="flex gap-2"><input id="proj-note" class="input" value="${esc(p.note || '')}" data-change="projField" data-id="${p.id}" data-f="note" list="obs-notes" placeholder="The project’s note" autocomplete="off"><button type="button" class="btn shrink-0" data-action="projNoteOpen" data-id="${p.id}" aria-label="Open the project’s note in Obsidian">${icon('notebook-text')}</button></div>${obsNoteList()}</div>
       <div><label class="label">Repeat</label><select class="input" data-change="projRepeat" data-id="${p.id}">${repeatOptions(p.repeat, p.due, PROJ_REPEATS)}</select>
         <p class="text-xs muted mt-1">${p.repeat ? (p.nextMade && projFind(p.nextMade) ? `The next round is ready: <button type="button" class="underline" data-action="projOpen" data-id="${p.nextMade}">${esc(projFind(p.nextMade).name)}</button>.` : `Repeats ${repeatLabel(p.repeat, p.due)}. The next round appears on the due date, or sooner if you finish every task, with each task moved forward.`) : 'Turn this on for anything you do on a schedule. Each round copies every task and moves its date forward.'}</p></div>
       <div><label class="label">Notes</label><textarea class="input text-sm" rows="6" data-change="projField" data-id="${p.id}" data-f="notes" placeholder="Goal, key people, links…">${esc(p.notes || '')}</textarea></div>
@@ -6804,6 +6859,7 @@ function taskModal(t) {
     <div id="task-rep-days" class="${t.repeat && t.repeat.freq === 'days' ? 'flex' : 'hidden'} flex-wrap items-center gap-x-3 gap-y-1 text-sm" role="group" aria-label="Days it repeats on"><span class="label mb-0">Repeat on</span>${repeatDayBoxes(t.repeat && t.repeat.freq === 'days' ? t.repeat.days : [])}</div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2"><div><label class="label">Status</label><select name="status" class="input">${STATUSES.map(([k, l]) => `<option value="${k}" ${t.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Priority</label><select name="priority" class="input">${Object.entries(PRI).map(([k, [l]]) => `<option value="${k}" ${(t.priority || 'med') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Area</label><select name="area" class="input"><option value="">${!t.area && areaOf(t) ? `Auto (${areaLabel(areaOf(t))})` : 'None'}</option>${AREAS.map(([k, l]) => `<option value="${k}" ${t.area === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div><label class="label">Estimate (min)</label><input type="number" name="est" min="0" step="5" class="input" value="${t.est || ''}"></div></div>
     <div class="grid grid-cols-2 gap-2"><div><label class="label">Project</label><select name="project" class="input"><option value="">None</option>${ps.map(p => `<option value="${p.id}" ${t.project === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div><div><label class="label">Person</label><input name="person" class="input" value="${esc(t.person || '')}" list="ppl-list-m" placeholder="Follow-up with…"><datalist id="ppl-list-m">${knownPeople().map(n => `<option value="${esc(n)}">`).join('')}</datalist></div></div>
+    <div><label class="label" for="task-note">Obsidian note</label><div class="flex gap-2"><input id="task-note" name="note" class="input" value="${esc(t.note || '')}" list="obs-notes" placeholder="Note name, e.g. Luke 15 - Manuscript" autocomplete="off">${t.note ? `<button type="button" class="btn shrink-0" data-action="obsOpen" data-note="${esc(t.note)}">${icon('notebook-text')} Open</button>` : ''}</div>${obsNoteList()}</div>
     <div class="flex flex-wrap gap-4 text-sm"><label class="flex items-center gap-2"><input type="checkbox" name="waiting" value="1" class="accent-brand-600" ${t.waiting ? 'checked' : ''}> Waiting on them</label><label class="flex items-center gap-2"><input type="checkbox" name="someday" value="1" class="accent-brand-600" ${t.someday ? 'checked' : ''}> Someday</label></div>
     <div><div class="label">Checklist</div><div id="st-list" class="space-y-1.5">${(t.subtasks || []).map(stRow).join('')}</div><div class="flex gap-2 mt-1.5"><input id="st-new" class="input py-1 text-sm" placeholder="Add a step…" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();A.stAdd()}"><button type="button" class="btn btn-sm" data-action="stAdd" aria-label="Add step">${icon('plus', 'w-3.5 h-3.5')}</button></div></div>
     <div><label class="label">Tags</label><input id="task-tags" name="tags" class="input" value="${esc((t.tags || []).join(', '))}" placeholder="home, work…"><div class="flex flex-wrap gap-1 mt-2">${TASK_TAGS.map(x => `<button type="button" class="chip ${(t.tags || []).includes(x) ? 'chip-on' : ''}" data-action="taskTagToggle" data-v="${x}">#${x}</button>`).join('')}</div></div>`,
@@ -6847,6 +6903,8 @@ const A_TASKS = {
   taskRepKind: el => { const row = $('#task-rep-days'), on = el.value === 'days'; row.classList.toggle('hidden', !on); row.classList.toggle('flex', on); },
   taskHelp: el => { S.taskHelp = !S.taskHelp; saveSettings(); $('#task-rules').classList.toggle('hidden', !S.taskHelp); el.setAttribute('aria-expanded', String(S.taskHelp)); $('#task-rules-label').textContent = S.taskHelp ? 'Hide the rules for adding tasks' : 'Show the rules for adding tasks'; },
   taskSomedayToggle: () => { ui.taskSomeday = !ui.taskSomeday; render(); },
+  obsOpen: el => openInObsidian(el.dataset.note),
+  projNoteOpen: el => { const p = projFind(el.dataset.id); openInObsidian(p && p.note); },
   goTaskTab: el => { ui.taskTab = el.dataset.tab; go('tasks'); },
   goWeekPlan: () => { ui.taskTab = 'plan'; ui.planWk = null; Modal.close(); go('tasks'); },
   taskAreaSet: el => { ui.taskArea = el.dataset.v || null; render(); },
@@ -6856,6 +6914,7 @@ const A_TASKS = {
     const oldDue = t.due, oldTime = t.time, oldRem = t.remind;
     Object.assign(t, { title: v.title.trim() || t.title, notes: v.notes.trim(), priority: v.priority, tags: parseTags(v.tags), time: v.time || null, repeat: days ? { freq: 'days', n: 1, days } : repeatFromKey(v.repeat), remind: v.remind === '' ? null : (v.remind === 'am' || v.remind === 'pm1' ? v.remind : +v.remind), area: v.area || null, est: num(v.est) || null, project: v.project || null, person: v.person.trim() || null, someday: v.someday === '1', updated: new Date().toISOString() });
     if (v.waiting === '1' && !t.waiting) t.waitSince = ymd(); t.waiting = v.waiting === '1';
+    if (v.note != null) { const n = v.note.trim(); if (n) t.note = n; else delete t.note; }
     if ((v.due || null) !== oldDue) setDue(t, v.due || null); if (t.time !== oldTime || t.remind !== oldRem) t.reminded = false;
     t.subtasks = [...f.querySelectorAll('[data-st]')].map(r => ({ id: r.dataset.st, text: (r.querySelector('[name^="sttext_"]').value || '').trim(), done: r.querySelector('[name^="stdone_"]').checked })).filter(s => s.text);
     if (t.status !== v.status) setTaskStatus(t, v.status);
@@ -7137,6 +7196,11 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16e', title: 'Tasks and notes, together with Obsidian', slides: [
+    { title: 'Link a task to an Obsidian note', body: '<p>Type <strong>[[Note name]]</strong> when you add a task, or fill in <strong>Obsidian note</strong> when you edit it. The task then shows the note’s name; tap it to open the note in Obsidian. Projects have an Obsidian note too.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] },
+    { title: 'Send to Obsidian', body: '<p>The old “Copy for Obsidian” buttons on Scripture notes, journal entries, media notes, word studies, topics and workouts now <strong>send</strong> the note to Obsidian. Add your vault name (and a folder, if you like) in <strong>Settings &amp; Sync → Obsidian</strong>. Without a vault name they copy the note as before.</p>' },
+    { title: 'Inside Obsidian', body: '<p>With the Life Dashboard Library plugin, this dashboard can sit in Obsidian’s sidebar. Notes then open and save there directly, and <strong>New sermon</strong> in Obsidian adds a project to Tasks with a “think, pray, write” task each day until you preach.</p>' }
+  ] },
   { id: '2026-10-16d', title: 'Find YouTube videos', slides: [
     { title: 'Find a video', body: '<p>Media Library has a new <strong>Find a video</strong> button, like Find a podcast. Connect your YouTube account once, then search YouTube and tap <strong>Watch</strong> or <strong>Up next</strong>. The video plays right inside the app.</p>', go: ['media', '', '', 'Open Media library'] },
     { title: 'Your subscriptions, playlists and likes', body: '<p>In Find a video, <strong>Subscriptions</strong> shows the newest videos from channels you follow. <strong>Playlists</strong> and <strong>Liked</strong> show your own lists. Tap a channel’s name to see its latest videos.</p><p>The app can only look. It can’t post, like or change anything on YouTube. The connection lasts about an hour, then one tap reconnects it.</p>' }
@@ -7551,7 +7615,7 @@ const A = {
 
   saveSettings: f => {
     const v = fd(f);
-    Object.assign(S, { name: v.name.trim(), familyName: (v.familyName || '').trim(), theme: v.theme, unit: v.unit, restSeconds: +v.restSeconds, bwFallback: num(v.bwFallback) ? (v.unit === 'lbs' ? num(v.bwFallback) * LB : num(v.bwFallback)) : null, timerSound: v.timerSound === '1', translation: v.translation, esvKey: v.esvKey.trim(), fdcKey: (v.fdcKey || '').trim(), targets: { cal: num(v.t_cal) || 2000, p: num(v.t_p) || 0, c: num(v.t_c) || 0, f: num(v.t_f) || 0 } });
+    Object.assign(S, { name: v.name.trim(), familyName: (v.familyName || '').trim(), theme: v.theme, unit: v.unit, restSeconds: +v.restSeconds, bwFallback: num(v.bwFallback) ? (v.unit === 'lbs' ? num(v.bwFallback) * LB : num(v.bwFallback)) : null, timerSound: v.timerSound === '1', translation: v.translation, esvKey: v.esvKey.trim(), vaultName: (v.vaultName || '').trim(), obsFolder: (v.obsFolder || '').trim().replace(/^\/+|\/+$/g, ''), fdcKey: (v.fdcKey || '').trim(), targets: { cal: num(v.t_cal) || 2000, p: num(v.t_p) || 0, c: num(v.t_c) || 0, f: num(v.t_f) || 0 } });
     saveSettings(); applyTheme(); Modal.close(); toast('Settings saved'); render();
   }
 };
@@ -7610,6 +7674,7 @@ async function init() {
   // A browser that has never opened the app gets the start-here card instead of old release notes.
   if (!localStorage.getItem('ld.seeded') && !localStorage.getItem('ld.settings')) { S.tour = 'new'; S.newsSeen = RELEASES[0].id; saveSettings(); }
   await Store.init(); ensureSeeds(); sortWorkouts();
+  obsInbox.ready = true; obsDrain();
   render(); Timer.restore();
   if (ytBack) { const v = ytMeta().view; ui.yt = { view: v || 'search', q: '' }; if (S.view !== 'media') go('media'); A.ytFind(); } // back from the YouTube sign-in
   try { if (navigator.storage && navigator.storage.persisted && !(await navigator.storage.persisted())) navigator.storage.persist(); } catch (e) {}

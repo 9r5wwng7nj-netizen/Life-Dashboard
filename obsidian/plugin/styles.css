@@ -85,6 +85,8 @@
 .ldl-form { display: flex; flex-direction: column; gap: 12px; }
 .ldl-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
 .ldl-field input { height: 40px; font-size: 15px; }
+.ldl-field-check { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; color: var(--text-normal); }
+.ldl-field-check input { width: 18px; height: 18px; }
 .ldl-form .mod-cta { align-self: flex-end; }
 
 /* Wide panes: covers in a grid instead of a sideways shelf, bigger type. */

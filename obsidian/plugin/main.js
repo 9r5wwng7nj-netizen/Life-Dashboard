@@ -184,7 +184,10 @@ const core = (() => {
     };
   }
 
-  return { FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
+  function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
+
+  return { sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -368,10 +371,11 @@ class TextModal extends Modal {
     for (const f of this.fields) {
       const lab = form.createEl('label', { cls: 'ldl-field' }); lab.createEl('span', { text: f.label });
       const input = lab.createEl('input', { type: f.type || 'text', attr: { placeholder: f.placeholder || '' } });
-      input.value = f.value || ''; values[f.key] = input;
+      if (f.type === 'checkbox') { input.checked = !!f.value; lab.addClass('ldl-field-check'); lab.prepend(input); } else input.value = f.value || '';
+      values[f.key] = input;
     }
     form.createEl('button', { text: 'Create', cls: 'mod-cta', type: 'submit' });
-    form.addEventListener('submit', e => { e.preventDefault(); const out = Object.fromEntries(Object.entries(values).map(([k, i]) => [k, i.value.trim()])); this.close(); this.onSubmit(out); });
+    form.addEventListener('submit', e => { e.preventDefault(); const out = Object.fromEntries(Object.entries(values).map(([k, i]) => [k, i.type === 'checkbox' ? i.checked : i.value.trim()])); this.close(); this.onSubmit(out); });
     setTimeout(() => form.querySelector('input')?.focus(), 0);
   }
   onClose() { this.contentEl.empty(); }
@@ -451,7 +455,8 @@ class LifeDashboardPlugin extends Plugin {
       { key: 'passage', label: 'Passage', placeholder: 'e.g. Luke 15:11-32' },
       { key: 'title', label: 'Title (optional)' },
       { key: 'date', label: 'Preaching date', type: 'date' },
-      { key: 'series', label: 'Series (optional)' }
+      { key: 'series', label: 'Series (optional)' },
+      ...(Platform.isDesktopApp ? [{ key: 'tasks', label: 'Add the prep tasks to the Life Dashboard', type: 'checkbox', value: true }] : [])
     ], async v => {
       if (!v.passage && !v.title) return new Notice('Add a passage or a title');
       const s = core.sermonNotes(v, today), base = core.safeFolder(this.settings.sermonFolder || '') || '';
@@ -462,6 +467,7 @@ class LifeDashboardPlugin extends Plugin {
         await this.createUnique(folder, s.manuscript.name, s.manuscript.content);
         await this.app.workspace.getLeaf(false).openFile(hub);
         new Notice('Sermon created');
+        if (v.tasks) this.sendToDashboard(core.sermonPrepMessage(v, s));
       } catch (e) { console.error(e); new Notice('Could not create the sermon: ' + e.message); }
     }).open();
   }
@@ -501,11 +507,25 @@ class LifeDashboardPlugin extends Plugin {
       new Notice(`Saved to ${f.path}`); return this.app.workspace.getLeaf(false).openFile(f);
     }
   }
-  // Tell the dashboard it is inside Obsidian, with the note names it can link a task to.
+  // Tell the dashboard it is inside Obsidian, with the note names it can link a task to; then deliver waiting messages.
   greetDashboard(wv) {
     const names = this.notes().filter(n => n.family && !core.inFolder(n.path, this.settings.ignoreFolders)).map(n => n.title).slice(0, 5000);
     const info = { vault: this.app.vault.getName(), notes: names, prefix: core.BRIDGE_PREFIX };
     wv.executeJavaScript(`window.LD_OBSIDIAN = ${JSON.stringify(info)}; window.dispatchEvent(new Event('ld-obsidian'));`).catch(() => { });
+    const waiting = this.pending || []; this.pending = [];
+    waiting.forEach(msg => this.deliver(wv, msg));
+  }
+  // The dashboard queues messages until its saved data has loaded, so a message can go as soon as the page is ready.
+  async deliver(wv, msg) {
+    try { return !!(await wv.executeJavaScript(`window.LD_FROM_OBSIDIAN ? window.LD_FROM_OBSIDIAN(${JSON.stringify(msg)}) : false`)); }
+    catch (e) { return false; }
+  }
+  async sendToDashboard(msg) {
+    if (!Platform.isDesktopApp) return;
+    const view = this.app.workspace.getLeavesOfType(VIEW_DASH)[0]?.view;
+    if (view?.webview && !view.webview.isLoading?.() && await this.deliver(view.webview, msg)) return;
+    (this.pending = this.pending || []).push(msg);
+    await this.openDashboard(); // its dom-ready delivers the waiting message
   }
 }
 
