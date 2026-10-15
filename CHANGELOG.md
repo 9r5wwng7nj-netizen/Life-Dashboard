@@ -3,6 +3,8 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Every tab row ends with a Show or hide tabs button; hidden tabs are stored in `S.hiddenTabs` (synced) and Tasks → Stats starts hidden. A hidden tab that was open falls back to the section's first tab.
+- Recipes & Meals: Hosting & meal trains is now Hosting. Bringing and receiving meal-train meals is no longer offered; saved `bring` and `receive` records are kept but not shown.
 - Plan my week (Recipes & Meals → Meal plan): choose days, meals, people, budget and cooking time; it picks a varied week from the user's recipes and a 34-recipe ready-made library (`RECIPE_LIBRARY`, estimated costs and nutrition), shows the estimated total against the budget, allows swapping or dropping any meal, and on Looks great fills the meal plan, copies used library recipes into the recipe box once, and builds the grocery list.
 - Touch screens: buttons and section tabs are at least 40px tall (small buttons 36px, chips 34px), tick boxes 20px, and no text is smaller than 12px. CSS only, under `@media (pointer: coarse)` in `src/app.css`.
 - Add from a link: a header button opens a sheet for a pasted link or text, suggests Media library (with the type: video, podcast, sermon, article, book), Recipe or Task, and files it there. Android's share menu opens the same sheet (manifest `share_target`).

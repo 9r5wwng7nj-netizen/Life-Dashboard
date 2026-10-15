@@ -165,3 +165,49 @@ test('on a touch screen, buttons and tabs are finger-sized and no text is under 
   expect(problems).toEqual([]);
   await context.close();
 });
+
+test('section tabs can be hidden and shown again, and Tasks hides Stats to start', async ({ page }) => {
+  const errors = await open(page);
+  await page.evaluate(() => { ui.taskTab = 'stats'; go('tasks'); });
+  const tab = id => page.locator(`#view [data-action="setTab"][data-key="taskTab"][data-val="${id}"]`);
+  await expect(tab('stats')).toHaveCount(0);
+  await expect(tab('today')).toHaveAttribute('aria-pressed', 'true'); // a hidden tab that was open falls back to the first
+  await expect(page.locator('#view')).toContainText('Big 3');
+
+  await page.click('#view [data-action="tabsEdit"][data-key="taskTab"]');
+  const box = id => page.locator(`#modal [data-change="tabsToggle"][data-val="${id}"]`);
+  await expect(box('stats')).not.toBeChecked();
+  await box('stats').check();
+  await box('someday').uncheck();
+  await page.click('#modal button:has-text("Done")');
+  await expect(tab('stats')).toHaveCount(1);
+  await expect(tab('someday')).toHaveCount(0);
+  expect(await page.evaluate(() => S.hiddenTabs.taskTab)).toEqual(['someday']);
+
+  // Every tab cannot be hidden.
+  await page.evaluate(() => go('recipes'));
+  await page.click('#view [data-action="tabsEdit"][data-key="recTab"]');
+  for (const id of ['recipes', 'plan', 'grocery', 'pantry']) await box(id).uncheck();
+  await box('hosting').click(); // refused: it is the last one
+  await expect(box('hosting')).toBeChecked();
+  expect(await page.evaluate(() => S.hiddenTabs.recTab.length)).toBe(4);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('Hosting no longer offers meal trains, and older meal-train records are kept', async ({ page }) => {
+  const errors = await open(page);
+  await page.evaluate(() => {
+    const d = addDays(ymd(), 2);
+    Store.set('hosting', [{ id: 'h1', kind: 'host', who: 'Freshman small group', date: d }, { id: 'h2', kind: 'bring', who: 'The Millers', date: d }, { id: 'h3', kind: 'receive', who: 'Grace', date: d }]);
+    ui.recTab = 'hosting'; go('recipes');
+  });
+  await expect(page.locator('#view [data-action="setTab"][data-val="hosting"]')).toHaveText('Hosting');
+  await expect(page.locator('#view')).toContainText('Freshman small group');
+  await expect(page.locator('#view')).not.toContainText('The Millers');
+  await expect(page.locator('#view')).not.toContainText('Grace');
+  await expect(page.locator('#view [data-action="hostNew"]')).toHaveCount(1);
+  expect(await page.evaluate(() => Store.get('hosting').length)).toBe(3);
+  await page.evaluate(() => go('dashboard'));
+  await expect(page.locator('#view')).not.toContainText('The Millers');
+  expect(errors, errors.join('\n')).toEqual([]);
+});

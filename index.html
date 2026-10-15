@@ -162,7 +162,8 @@ const SETTINGS_DEFAULT = {
   name: '', theme: 'system', unit: 'lbs', restSeconds: 90, timerSound: true,
   targets: { cal: 2400, p: 180, c: 240, f: 75 },
   translation: 'web', esvKey: '', collapsed: false, view: 'dashboard', lastExport: null,
-  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: '', tour: '', newsSeen: '', taskHelp: false
+  aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', familyName: '', tour: '', newsSeen: '', taskHelp: false,
+  hiddenTabs: { taskTab: ['stats'] } // section tabs the person chose to hide, by section; see tabs()
 };
 let S = loadSettings();
 function loadSettings() {
@@ -375,9 +376,20 @@ function modalShell(title, body, footer = '', formAction = '') {
     ${footer ? `<div class="px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap justify-end gap-2 sticky bottom-0 bg-white dark:bg-slate-900 rounded-b-2xl">${footer}</div>` : ''}`;
   return formAction ? `<form data-submit="${formAction}">${inner}</form>` : inner;
 }
+// Section tabs. Tabs the person hid (S.hiddenTabs) are left out, and the last button opens Edit tabs.
+const TAB_LISTS = {};
+const hiddenTabsFor = key => ((S.hiddenTabs || {})[key] || []);
 function tabs(key, items) {
-  return `<div role="group" aria-label="View sections" class="flex gap-1 p-1 rounded-xl bg-slate-200/60 dark:bg-slate-900 overflow-x-auto scroll-thin mb-5 w-full sm:w-fit max-w-full">${items.map(([id, label, ic]) =>
-    `<button class="tab ${ui[key] === id ? 'tab-active' : ''}" aria-pressed="${ui[key] === id}" data-action="setTab" data-key="${key}" data-val="${id}">${ic ? icon(ic, 'w-4 h-4 inline -mt-0.5 mr-1') : ''}${label}</button>`).join('')}</div>`;
+  TAB_LISTS[key] = items.map(([id, label, ic]) => [id, String(label).replace(/\s*\(\d+\)$/, ''), ic]);
+  const shown = items.filter(([id]) => !hiddenTabsFor(key).includes(id)), active = shown.some(([id]) => id === ui[key]) ? ui[key] : (shown[0] || [])[0];
+  return `<div role="group" aria-label="View sections" class="flex gap-1 p-1 rounded-xl bg-slate-200/60 dark:bg-slate-900 overflow-x-auto scroll-thin mb-5 w-full sm:w-fit max-w-full">${shown.map(([id, label, ic]) =>
+    `<button class="tab ${active === id ? 'tab-active' : ''}" aria-pressed="${active === id}" data-action="setTab" data-key="${key}" data-val="${id}">${ic ? icon(ic, 'w-4 h-4 inline -mt-0.5 mr-1') : ''}${label}</button>`).join('')}<button class="tab shrink-0" data-action="tabsEdit" data-key="${key}" title="Show or hide tabs" aria-label="Show or hide tabs">${icon('sliders-horizontal', 'w-4 h-4')}</button></div>`;
+}
+function tabsEditModal(key) {
+  const list = TAB_LISTS[key] || [], hidden = hiddenTabsFor(key);
+  Modal.open(modalShell('Show or hide tabs', `<p class="text-sm muted">Hidden tabs keep everything in them. Show them again here at any time.</p>
+    <div class="space-y-1">${list.map(([id, label, ic]) => `<label class="flex items-center gap-3 py-1.5"><input type="checkbox" class="accent-brand-600" data-change="tabsToggle" data-key="${key}" data-val="${id}" ${hidden.includes(id) ? '' : 'checked'}> ${ic ? icon(ic, 'w-4 h-4 muted') : ''}<span>${esc(label)}</span></label>`).join('')}</div>`,
+    `<button type="button" class="btn btn-primary" data-action="closeModal">Done</button>`), { onClose: () => render() });
 }
 function cardHead(ic, title, right = '') {
   return `<div class="flex items-center gap-2 mb-3"><div class="w-7 h-7 rounded-lg bg-brand-50 dark:bg-brand-950 text-brand-600 dark:text-brand-400 grid place-items-center">${icon(ic, 'w-4 h-4')}</div><h3 class="font-semibold">${title}</h3><div class="ml-auto flex items-center gap-1">${right}</div></div>`;
@@ -527,6 +539,7 @@ function renderNow() {
   _trC = null; _expC = null;
   try { autoCheckin(); } catch (e) { console.warn(e); }
   try { projRepeatTick(); } catch (e) { console.warn(e); }
+  for (const [key, ids] of Object.entries(S.hiddenTabs || {})) if (ids.includes(ui[key])) ui[key] = null;
   const v = VIEWS.find(x => x.id === S.view) || VIEWS[0];
   const main = $('#view'), keep = lastRendered === v.id ? main.scrollTop : 0;
   $('#view-title').textContent = v.label;
@@ -5480,7 +5493,7 @@ const hostFind = id => Store.get('hosting').find(h => h.id === id);
 
 function renderRecipes() {
   const open = Store.get('grocery').filter(x => !x.checked).length;
-  return tabs('recTab', [['recipes', 'Recipe box', 'book-heart'], ['plan', 'Meal plan', 'calendar-days'], ['grocery', `Grocery list${open ? ` (${open})` : ''}`, 'shopping-cart'], ['pantry', 'Pantry & freezer', 'refrigerator'], ['hosting', 'Hosting & meal trains', 'hand-platter']])
+  return tabs('recTab', [['recipes', 'Recipe box', 'book-heart'], ['plan', 'Meal plan', 'calendar-days'], ['grocery', `Grocery list${open ? ` (${open})` : ''}`, 'shopping-cart'], ['pantry', 'Pantry & freezer', 'refrigerator'], ['hosting', 'Hosting', 'hand-platter']])
     + ({ recipes: recList, plan: recPlan, grocery: recGrocery, pantry: recPantry, hosting: recHosting }[ui.recTab] || recList)();
 }
 // ---------- Recipe box ----------
@@ -5850,14 +5863,13 @@ function recPantry() {
 }
 // ---------- Hosting & meal trains ----------
 function recHosting() {
-  const t = ymd(), all = Store.get('hosting').slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')), up = all.filter(h => !h.date || h.date >= t), past = all.filter(h => h.date && h.date < t).reverse();
-  const rec = all.filter(h => h.kind === 'receive'), owed = rec.filter(h => !h.thanked).length;
+  const t = ymd(), all = Store.get('hosting').filter(h => (h.kind || 'host') === 'host').slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')), up = all.filter(h => !h.date || h.date >= t), past = all.filter(h => h.date && h.date < t).reverse();
   const card = h => { const [lab, ic, cls] = HKIND[h.kind] || HKIND.host, rs = (h.recipes || []).map(recFind).filter(Boolean), d = h.date ? daysBetween(t, h.date) : null; return `<div class="card"><div class="flex items-start gap-2"><span class="chip text-[10px] ${cls}">${icon(ic, 'w-3 h-3')} ${lab}</span><span class="flex-1"></span>${d != null && d >= 0 ? `<span class="text-xs ${d <= 2 ? 'text-rose-600 dark:text-rose-400 font-semibold' : 'muted'}">${d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : `in ${d} days`}</span>` : ''}</div>
       <button class="text-left w-full mt-1" data-action="hostOpen" data-id="${h.id}"><div class="font-semibold">${esc(h.who || 'Untitled')}</div><div class="text-xs muted">${h.date ? fmtDate(h.date, { weekday: 'short', month: 'short', day: 'numeric' }) : 'No date'}${h.time ? ` · ${esc(h.time)}` : ''}${h.kind !== 'receive' && h.guests ? ` · ${h.guests} people` : ''}${h.diet ? ` · ${esc(h.diet)}` : ''}</div>
       ${rs.length || h.dish ? `<div class="text-sm mt-1.5">${[...rs.map(r => esc(r.title)), h.dish ? esc(h.dish) : ''].filter(Boolean).join(' · ')}</div>` : ''}${h.notes ? `<div class="text-xs muted mt-1 line-clamp-2">${esc(h.notes)}</div>` : ''}</button>
       <div class="flex flex-wrap gap-1.5 mt-3">${h.kind === 'receive' ? `<button class="btn btn-sm ${h.thanked ? 'btn-primary' : ''}" data-action="hostThanks" data-id="${h.id}">${h.thanked ? '✓ Thank-you sent' : 'Thank-you sent?'}</button>` : `${rs.length ? `<button class="btn btn-sm" data-action="hostGroc" data-id="${h.id}">${icon('shopping-cart', 'w-3.5 h-3.5')} Groceries</button>` : ''}${rs.length && h.date ? `<button class="btn btn-sm" data-action="hostPlan" data-id="${h.id}">${icon('calendar-plus', 'w-3.5 h-3.5')} Plan</button>` : ''}<button class="btn btn-sm" data-action="hostTask" data-id="${h.id}">${icon('list-plus', 'w-3.5 h-3.5')} Reminder</button>`}</div></div>`; };
-  return `<div class="flex flex-wrap items-center gap-2 mb-4"><button class="btn btn-primary" data-action="hostNew" data-k="host">${icon('house')} Host a meal</button><button class="btn" data-action="hostNew" data-k="bring">${icon('car')} Bring a meal</button><button class="btn" data-action="hostNew" data-k="receive">${icon('gift')} Log a meal we received</button>${owed ? `<span class="text-sm text-amber-700 dark:text-amber-300 ml-auto">${owed} thank-you note${owed === 1 ? '' : 's'} to send</span>` : ''}</div>
-    ${up.length ? `<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">${up.map(card).join('')}</div>` : emptyState('hand-platter', 'Nothing coming up', 'Plan a dinner for a small group or new students, sign up for a church meal train, or track meals friends bring you.', '')}
+  return `<div class="flex flex-wrap items-center gap-2 mb-4"><button class="btn btn-primary" data-action="hostNew" data-k="host">${icon('house')} Host a meal</button></div>
+    ${up.length ? `<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">${up.map(card).join('')}</div>` : emptyState('hand-platter', 'Nothing coming up', 'Plan a dinner for a small group, new students or friends: who is coming, the menu from your recipe box, groceries and a reminder.', '')}
     ${past.length ? `<details class="card"><summary class="cursor-pointer font-semibold list-none">Past (${past.length})</summary><div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">${past.map(card).join('')}</div></details>` : ''}`;
 }
 function hostModal(h) {
@@ -5877,7 +5889,7 @@ function hostModal(h) {
 }
 // ---------- Dashboard card ----------
 function dashMeals() {
-  const t = ymd(), din = tonightMeals(), thaw = thawSoon().filter(x => x.tomorrow), left = Store.get('grocery').filter(x => !x.checked).length, host = Store.get('hosting').filter(h => h.kind !== 'receive' && h.date && h.date >= t && daysBetween(t, h.date) <= 3), tb = tableToday();
+  const t = ymd(), din = tonightMeals(), thaw = thawSoon().filter(x => x.tomorrow), left = Store.get('grocery').filter(x => !x.checked).length, host = Store.get('hosting').filter(h => (h.kind || 'host') === 'host' && h.date && h.date >= t && daysBetween(t, h.date) <= 3), tb = tableToday();
   return `<div class="card">${cardHead('chef-hat', 'Meals', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="recipes">Plan ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
     <div class="text-xs muted">Tonight</div>${din.length ? din.slice(0, 2).map(it => { const r = it.recipeId && recFind(it.recipeId); return `<div class="flex items-center gap-2"><span class="font-semibold flex-1 truncate">${it.freezerId ? '🧊 ' : it.left ? '♻ ' : ''}${esc(planItemLabel(it))}</span>${r ? `<button class="btn btn-sm" data-action="cookStart" data-id="${r.id}">${icon('chef-hat', 'w-3.5 h-3.5')} Cook</button>` : ''}</div>`; }).join('') : `<button class="text-sm text-brand-600 hover:underline" data-action="goRecTab" data-tab="plan">Nothing planned — pick dinner</button>`}
     <div class="space-y-1.5 text-sm mt-3">${thaw.map(x => `<div class="flex gap-2 text-sky-700 dark:text-sky-300">${icon('snowflake', 'w-4 h-4 shrink-0')}<span>Thaw ${esc(x.fz.name)} tonight</span></div>`).join('')}
@@ -6915,6 +6927,10 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16b', title: 'Choose which tabs you see', slides: [
+    { title: 'Show or hide tabs', body: '<p>Every section’s row of tabs now ends with a <strong>sliders</strong> button. Tap it to hide tabs you don’t use, or bring them back. Hidden tabs keep everything in them, and your choice follows you to your other devices.</p><p>Tasks → Stats is hidden to start.</p>' },
+    { title: 'Hosting, without meal trains', body: '<p>Recipes &amp; Meals → <strong>Hosting</strong> is now just for meals you host: who is coming, the menu, groceries and a reminder. Bringing and receiving meal-train meals has been removed. Anything you saved before is still kept.</p>' }
+  ] },
   { id: '2026-10-15d', title: 'Plan your week of meals in one tap', slides: [
     { title: 'Plan my week', img: '2026-10-plan-my-week.png', alt: 'Your week is ready: an estimated total against the budget, a grocery list count, and each meal with its cost, time and calories.',
       body: '<p>Recipes &amp; Meals → Meal plan → <strong>Plan my week</strong>. Choose the days, which meals, how many people and your budget. It picks a varied week from your recipes and 34 ready-made budget meals, showing the estimated cost, time and calories of each.</p><p>Tap the swap button to change any meal, then <strong>Looks great</strong> to fill your meal plan and build the grocery list.</p>', go: ['recipes', 'recTab', 'plan', 'Open Meal plan'] }
@@ -7016,7 +7032,7 @@ const A_HELP = {
 // edits and deletions from either device survive. Photos, API keys and downloaded libraries stay
 // on the device. Sign-in is a plain redirect, so no Google script is loaded.
 const DRIVE = { clientId: '868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.googleusercontent.com', scope: 'https://www.googleapis.com/auth/drive.appdata', file: 'life-dashboard-sync.json', api: 'https://www.googleapis.com', auth: 'https://accounts.google.com/o/oauth2/v2/auth' };
-const SYNC_SETTINGS = ['name', 'familyName', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
+const SYNC_SETTINGS = ['name', 'familyName', 'hiddenTabs', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
 const SYNC_SKIP = ['photoMeta'];
 const SYNC_BASE = 'sync.base';
 // A sync that would remove more than this many records (outside the lists that are routinely
@@ -7261,6 +7277,14 @@ const A = {
   // shell
   go: el => go(el.dataset.view),
   setTab: el => { ui[el.dataset.key] = el.dataset.val; render(); },
+  tabsEdit: el => tabsEditModal(el.dataset.key),
+  tabsToggle: el => {
+    const key = el.dataset.key, id = el.dataset.val, all = (TAB_LISTS[key] || []).map(t => t[0]), H = S.hiddenTabs = { ...(S.hiddenTabs || {}) };
+    const next = el.checked ? hiddenTabsFor(key).filter(x => x !== id) : [...new Set([...hiddenTabsFor(key), id])];
+    if (next.length >= all.length) { el.checked = true; return toast('Keep at least one tab', 'error'); }
+    H[key] = next; if (!next.length) delete H[key]; saveSettings(); syncTouch();
+    if (next.includes(ui[key])) ui[key] = null;
+  },
   openSidebar,
   closeSidebar, closeModal: () => Modal.close(),
   cycleTheme: () => { S.theme = { system: 'light', light: 'dark', dark: 'system' }[S.theme] || 'system'; saveSettings(); applyTheme(); },
