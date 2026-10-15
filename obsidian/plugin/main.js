@@ -16,12 +16,14 @@ const core = (() => {
   // Note families: what a note is, by its `type` property. A project with project_kind "sermon" is a sermon's hub.
   const FAMILIES = {
     sermon: { label: 'Sermons', kind: 'Sermon', icon: 'mic', types: ['sermon', 'sermon-development', 'sermon-outline', 'sermon-manuscript'] },
-    study: { label: 'Studies & lessons', kind: 'Study', icon: 'book-open', types: ['study-session', 'study', 'lesson', 'bible-study', 'handout', 'class', 'teaching'] },
+    study: { label: 'Studies & lessons', kind: 'Study', icon: 'book-open', types: ['study-session', 'session-preparation', 'study', 'lesson', 'bible-study', 'handout', 'class', 'teaching'] },
     series: { label: 'Series & projects', kind: 'Series', icon: 'library', types: ['project', 'series'] },
-    meeting: { label: 'Meetings', kind: 'Meeting', icon: 'users', types: ['meeting', 'meeting-review', 'meeting-note'] },
+    meeting: { label: 'Meetings', kind: 'Meeting', icon: 'users', types: ['meeting', 'meeting-review', 'meeting-note', 'meeting-source'] },
     person: { label: 'People', kind: 'Person', icon: 'user', types: ['person'] },
     book: { label: 'Books', kind: 'Book', icon: 'book', types: ['book', 'book-note'] },
-    article: { label: 'Articles & media', kind: 'Source', icon: 'newspaper', types: ['article', 'podcast', 'video', 'source', 'historical-text'] },
+    // A classic work or collection is one cover; its chapters (historical-text) stay out of the shelves but in search.
+    classic: { label: 'Historical theology', kind: 'Classic', icon: 'scroll', types: ['work-index', 'collection'] },
+    article: { label: 'Articles & media', kind: 'Source', icon: 'newspaper', types: ['article', 'podcast', 'video', 'source'] },
     area: { label: 'Areas', kind: 'Area', icon: 'compass', types: ['area'] }
   };
   const TYPE_FAMILY = Object.fromEntries(Object.entries(FAMILIES).flatMap(([f, d]) => d.types.map(t => [t, f])));
@@ -313,7 +315,7 @@ const VIEW_LIBRARY = 'life-dashboard-library', VIEW_DASH = 'life-dashboard-panel
 const DEFAULTS = {
   dashboardUrl: 'https://9r5wwng7nj-netizen.github.io/Life-Dashboard/',
   ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
-  shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'article', 'person'],
+  shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'classic', 'article', 'person'],
   sermonFolder: '',
   titleCards: true,
   hideProperties: true,
@@ -332,7 +334,7 @@ class LibraryView extends ItemView {
     let node;
     if (this.page.name === 'hub') node = render.hub(doc, lib, this.page.path, on);
     else if (this.page.name === 'shelf') node = render.shelf(doc, lib, this.page.id, on);
-    else node = render.home(doc, lib, on, this.q, this.q ? core.search(this.plugin.notes(), this.q, this.plugin.settings.ignoreFolders) : []);
+    else node = render.home(doc, lib, on, this.q, this.q ? core.search(this.plugin.notes(), this.q, this.plugin.ignored()) : []);
     const focused = doc.activeElement && doc.activeElement.classList.contains('ldl-search');
     this.contentEl.empty(); this.contentEl.append(node);
     if (focused) { const s = this.contentEl.querySelector('.ldl-search'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }
@@ -421,7 +423,14 @@ class LifeDashboardPlugin extends Plugin {
     });
     return this._notes;
   }
-  library() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.settings.ignoreFolders, shelves: this.settings.shelves }); }
+  // Folders left out of the Library: the person's list plus the template folders (core Templates and Templater).
+  ignored() {
+    const out = [...(this.settings.ignoreFolders || [])], add = f => { f = String(f || '').trim().replace(/^\/+|\/+$/g, ''); if (f && !out.includes(f)) out.push(f); };
+    try { add(this.app.internalPlugins?.plugins?.templates?.instance?.options?.folder); } catch (e) { }
+    try { add(this.app.plugins?.plugins?.['templater-obsidian']?.settings?.templates_folder); } catch (e) { }
+    return out;
+  }
+  library() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.ignored(), shelves: this.settings.shelves }); }
   handlers(view) {
     return {
       open: path => this.openNote(path),
@@ -509,7 +518,7 @@ class LifeDashboardPlugin extends Plugin {
   }
   // Tell the dashboard it is inside Obsidian, with the note names it can link a task to; then deliver waiting messages.
   greetDashboard(wv) {
-    const names = this.notes().filter(n => n.family && !core.inFolder(n.path, this.settings.ignoreFolders)).map(n => n.title).slice(0, 5000);
+    const names = this.notes().filter(n => n.family && !core.inFolder(n.path, this.ignored())).map(n => n.title).slice(0, 5000);
     const info = { vault: this.app.vault.getName(), notes: names, prefix: core.BRIDGE_PREFIX };
     wv.executeJavaScript(`window.LD_OBSIDIAN = ${JSON.stringify(info)}; window.dispatchEvent(new Event('ld-obsidian'));`).catch(() => { });
     const waiting = this.pending || []; this.pending = [];

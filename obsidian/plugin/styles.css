@@ -102,3 +102,13 @@
 /* Phones: bigger touch targets. */
 .is-mobile .ldl-row { min-height: 64px; }
 .is-mobile .ldl-card { flex-basis: 128px; }
+
+/* Obsidian styles every button (no wrapping, centred, fixed height) with a stronger selector than a single
+   class, so the Library's buttons restate their layout here with higher specificity. */
+.ldl-root button, .ldl-titlecard button { white-space: normal; }
+.ldl-root button.ldl-card { display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; text-align: left; height: auto; padding: 0; background: none; border: 0; box-shadow: none; }
+.ldl-root button.ldl-row { justify-content: flex-start; }
+.ldl-root button.ldl-btn, .ldl-root button.ldl-link, .ldl-root button.ldl-back, .ldl-titlecard button { justify-content: flex-start; }
+.ldl-cover { overflow: hidden; aspect-ratio: 4 / 5; }
+.ldl-cover-title { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-size: 19px; }
+.ldl-card-title { text-align: left; }

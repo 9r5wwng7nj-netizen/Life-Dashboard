@@ -14,12 +14,13 @@ The plugin reads the properties notes already have: `type`, `status`, `scripture
 | `type` | Shelf |
 |---|---|
 | `sermon`, `sermon-development`, `sermon-outline`; a `project` with `project_kind: sermon` | Sermons |
-| `study-session`, `study`, `lesson`, `bible-study`, `handout`, `class` | Studies & lessons |
+| `study-session`, `session-preparation`, `study`, `lesson`, `bible-study`, `handout`, `class` | Studies & lessons |
 | `project`, `series` | Series & projects |
-| `meeting`, `meeting-review` | Meetings |
+| `meeting`, `meeting-review`, `meeting-source` | Meetings |
 | `person` | People |
 | `book` | Books |
-| `article`, `podcast`, `video`, `source`, `historical-text` | Articles & media |
+| `work-index`, `collection` (a classic work's chapters, `historical-text`, stay off the shelves but are searchable) | Historical theology |
+| `article`, `podcast`, `video`, `source` | Articles & media |
 | `area` | Areas |
 
 A project note gathers the notes whose `project` links to it, plus the notes in its folder. Those notes appear on the project's page rather than on shelves, so a sermon shows as one cover, not four.
