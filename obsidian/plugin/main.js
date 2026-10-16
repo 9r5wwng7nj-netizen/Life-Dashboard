@@ -219,6 +219,54 @@ const core = (() => {
   const taughtBefore = (n, notes) => !n.scriptureKey ? [] : notes.filter(x => x.path !== n.path && x.scriptureKey === n.scriptureKey && (x.taught || []).length)
     .flatMap(x => x.taught.map(t => ({ note: x, ...t }))).sort((a, b) => b.date.localeCompare(a.date));
 
+  // --- Bible references. Book names as the vault's Bible chapters are named ("John 13 (WEB)"), with common short forms.
+  const BIBLE = ['Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy', 'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel', '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra', 'Nehemiah', 'Esther', 'Job', 'Psalms', 'Proverbs', 'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah', 'Lamentations', 'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos', 'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
+    'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans', '1 Corinthians', '2 Corinthians', 'Galatians', 'Ephesians', 'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians', '1 Timothy', '2 Timothy', 'Titus', 'Philemon', 'Hebrews', 'James', '1 Peter', '2 Peter', '1 John', '2 John', '3 John', 'Jude', 'Revelation'];
+  const SINGLE_CHAPTER = new Set(['Obadiah', 'Philemon', '2 John', '3 John', 'Jude']);
+  // Short forms. Two-letter forms that are also ordinary words (is, am, ex) are left out on purpose.
+  const SHORT = { Genesis: ['gen', 'gn'], Exodus: ['exod', 'exo'], Leviticus: ['lev'], Numbers: ['num'], Deuteronomy: ['deut', 'dt'], Joshua: ['josh'], Judges: ['judg', 'jdg'], Ruth: ['rth'], Samuel: ['sam'], Kings: ['kgs', 'kin'], Chronicles: ['chr', 'chron'], Ezra: ['ezr'], Nehemiah: ['neh'], Esther: ['esth', 'est'], Psalms: ['psalm', 'ps', 'psa', 'pss'], Proverbs: ['prov', 'prv'], Ecclesiastes: ['eccl', 'eccles', 'ecc', 'qoh'], 'Song of Solomon': ['song of songs', 'song', 'sos'], Isaiah: ['isa'], Jeremiah: ['jer'], Lamentations: ['lam'], Ezekiel: ['ezek', 'ezk'], Daniel: ['dan'], Hosea: ['hos'], Obadiah: ['obad'], Jonah: ['jnh'], Micah: ['mic'], Nahum: ['nah'], Habakkuk: ['hab'], Zephaniah: ['zeph', 'zep'], Haggai: ['hag'], Zechariah: ['zech', 'zec'], Malachi: ['mal'],
+    Matthew: ['matt', 'mt'], Mark: ['mk', 'mrk'], Luke: ['lk', 'luk'], John: ['jn', 'jhn'], Romans: ['rom', 'rm'], Corinthians: ['cor'], Galatians: ['gal'], Ephesians: ['eph'], Philippians: ['phil', 'php'], Colossians: ['col'], Thessalonians: ['thess', 'thes'], Timothy: ['tim'], Titus: ['tit'], Philemon: ['philem', 'phlm', 'phm'], Hebrews: ['heb'], James: ['jas'], Peter: ['pet', 'pt'], Jude: ['jud'], Revelation: ['rev', 'revelations'] };
+  const BOOK_OF = (() => {
+    const map = new Map(), num = { 1: ['1 ', '1', 'i ', 'first '], 2: ['2 ', '2', 'ii ', 'second '], 3: ['3 ', '3', 'iii ', 'third '] };
+    for (const name of BIBLE) {
+      const m = name.match(/^([123]) (.+)$/), base = m ? m[2] : name, forms = [base.toLowerCase(), ...(SHORT[base] || SHORT[name] || [])];
+      if (m) num[m[1]].forEach(pre => forms.forEach(f => map.set(pre + f, name)));
+      else forms.forEach(f => map.set(f, name));
+    }
+    return map;
+  })();
+  const REF_RE = new RegExp(`(?<![\\w])(${[...BOOK_OF.keys()].sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+')).join('|')})\\.?\\s*(\\d{1,3})(?:\\s*:\\s*(\\d{1,3})(?:\\s*[-–]\\s*(\\d{1,3}))?)?(?:\\s*[-–]\\s*(\\d{1,3}))?(?![\\w])`, 'gi');
+  const refLabel = r => {
+    const name = r.book === 'Psalms' && !r.c2 ? 'Psalm' : r.book;
+    if (SINGLE_CHAPTER.has(r.book)) return r.v1 ? `${name} ${r.v1}${r.v2 && r.v2 !== r.v1 ? `–${r.v2}` : ''}` : name;
+    return `${name} ${r.c}${r.c2 ? `–${r.c2}` : ''}${r.v1 ? `:${r.v1}${r.v2 && r.v2 !== r.v1 ? `–${r.v2}` : ''}` : ''}`;
+  };
+  // Every Bible reference in a piece of text, with where it sits. A lowercase book name ("mark 5") is ordinary text.
+  function findRefs(text) {
+    const out = []; REF_RE.lastIndex = 0; let m;
+    while ((m = REF_RE.exec(String(text)))) {
+      if (/^[a-z]/.test(m[1])) continue;
+      const book = BOOK_OF.get(m[1].toLowerCase().replace(/\s+/g, ' ')); if (!book) continue;
+      let c = +m[2], v1 = m[3] ? +m[3] : null, v2 = m[4] ? +m[4] : null, c2 = m[5] ? +m[5] : null;
+      if (SINGLE_CHAPTER.has(book) && !v1) { v1 = c; v2 = c2; c = 1; c2 = null; }
+      if (!c || (v1 && v2 && v2 < v1) || (c2 && c2 <= c)) continue;
+      const r = { book, c, v1, v2: v1 ? (v2 || v1) : null, c2: v1 ? null : c2 };
+      out.push({ ...r, start: m.index, end: m.index + m[0].length, text: m[0], label: refLabel(r) });
+    }
+    return out;
+  }
+  const parseRefText = t => findRefs(String(t || '').trim().replace(/^./, x => x.toUpperCase()))[0] || null;
+  // A chapter note's verses: "### 16" headings, each verse's text below it (block ids like ^v16 removed).
+  function chapterVerses(md) {
+    const out = []; const re = /^###\s+(\d+)\s*$\n([\s\S]*?)(?=^###\s+\d+\s*$|(?![\s\S]))/gm; let m;
+    while ((m = re.exec(String(md)))) out.push([+m[1], m[2].replace(/\s*\^v\d+\s*$/gm, '').replace(/\s+/g, ' ').trim()]);
+    return out;
+  }
+  const versesFor = (verses, r) => r.v1 ? verses.filter(([n]) => n >= r.v1 && n <= r.v2) : verses;
+  // The passage as a quote callout for inserting into a note.
+  const passageCallout = (r, verses, translation) => `> [!quote] ${r.label}${translation ? ` (${translation})` : ''}\n${verses.map(([n, t]) => `> **${n}** ${t}`).join('\n')}\n`;
+  const passageNoteText = (book, c, today) => `---\ntype: scripture-note\ncreated: ${today}\nscripture: "${book} ${c}"\nbook: ${book}\ntestament: ${BIBLE.indexOf(book) >= 39 ? 'New Testament' : 'Old Testament'}\n---\n\n# ${book} ${c}\n\n## Notes\n\n## Canonical connections\n\n## Related notes\n\n`;
+
   // A meeting note's open to-dos: the top-level bullets under a heading about actions, follow-ups, next steps or
   // to-dos. Plain bullets and unticked "- [ ]" both count; ticked items and callouts (> lines) do not. A bullet's
   // indented lines (Granola puts details under a **bold** item) go into the task's notes, in parentheses.
@@ -257,7 +305,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -494,7 +542,22 @@ const render = (() => {
     }
     return root;
   }
-  return { home, hub, shelf, folder, taught, titleCard, followUps };
+  // A passage preview. data: { label, translation, verses: [[n, text]], more, missing }
+  function versePreview(doc, data, on) {
+    const box = el(doc, 'div', 'ldl-verses'); box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', data.label);
+    const head = el(doc, 'div', 'ldl-verses-head'); head.append(el(doc, 'span', 'ldl-verses-title', data.label)); if (data.translation) head.append(el(doc, 'span', 'ldl-muted ldl-small', data.translation));
+    box.append(head);
+    const body = el(doc, 'div', 'ldl-verses-body');
+    if (data.missing) body.append(el(doc, 'p', 'ldl-muted', data.missing));
+    data.verses.forEach(([n, t]) => { const p = el(doc, 'p', 'ldl-verse'); p.append(el(doc, 'sup', '', String(n)), doc.createTextNode(' ' + t)); body.append(p); });
+    if (data.more) body.append(el(doc, 'p', 'ldl-muted ldl-small', `${data.more} more verse${data.more === 1 ? '' : 's'}`));
+    box.append(body);
+    const acts = el(doc, 'div', 'ldl-verses-actions');
+    [['Open in reader', on.reader], ['Passage note', on.note], ['Read the chapter', on.chapter]].forEach(([label, fn]) => { if (!fn) return; const b = el(doc, 'button', 'ldl-link', label); b.type = 'button'; b.addEventListener('click', () => fn()); acts.append(b); });
+    box.append(acts);
+    return box;
+  }
+  return { home, hub, shelf, folder, taught, titleCard, followUps, versePreview };
 })();
 
 /* =============================== 3. plugin =============================== */
@@ -505,6 +568,10 @@ const DEFAULTS = {
   ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
   shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'classic', 'article', 'person'],
   sermonFolder: '',
+  versePreviews: true, // Bible references in notes show their verses
+  bibleSuffix: 'WEB', // chapter notes are named "John 13 (WEB)"
+  passageFolder: '', // where passage notes live, one folder per book like the Bible's
+  passageArchive: '', // archived passage notes, brought back when you open one
   groups: [], // teaching groups, one per line; "(inactive)" after a name for one not taught right now
   peopleFolder: '', // where profiles made from @Name in the dashboard go
   personTemplate: '', // a note whose text new profiles start from
@@ -618,6 +685,12 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'open-dashboard', name: 'Open Life Dashboard in the sidebar', callback: () => this.openDashboard() });
     this.addCommand({ id: 'new-sermon', name: 'New sermon', callback: () => this.newSermon() });
     this.addCommand({ id: 'meeting-tasks', name: 'Send this meeting’s action items to Tasks', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickActions(f.path); return true; } });
+    this.addCommand({ id: 'insert-passage', name: 'Insert a Bible passage', editorCallback: editor => this.insertPassage(editor) });
+    this.addCommand({ id: 'passage-note', name: 'Open or start a passage note', callback: () => this.askPassageNote() });
+    this.registerMarkdownPostProcessor((el, ctx) => this.markRefs(el, ctx.sourcePath));
+    this.registerDomEvent(document, 'mouseover', e => this.refHover(e));
+    this.registerDomEvent(document, 'click', e => this.refClick(e), true);
+    this.registerDomEvent(document, 'keydown', e => { if (e.key === 'Escape') this.hideVerses(); });
     this.addCommand({ id: 'set-status', name: 'Set status of this note', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickStatus(f.path); return true; } });
     this.addSettingTab(new LibrarySettings(this.app, this));
     const refresh = debounce(() => { this._notes = null; this.redraw(); }, 400, true);
@@ -803,6 +876,84 @@ class LifeDashboardPlugin extends Plugin {
     if (!wv || wv.isLoading?.()) return null;
     try { return await wv.executeJavaScript(`window.LD_QUERY ? window.LD_QUERY(${JSON.stringify(q)}) : null`); } catch (e) { return null; }
   }
+  // --- Verse previews
+  // The chapter note for a reference ("John 13 (WEB)"), found by name wherever the Bible lives.
+  chapterFile(book, c) { const f = this.app.metadataCache.getFirstLinkpathDest(`${book} ${c} (${this.settings.bibleSuffix || 'WEB'})`, ''); return f instanceof TFile ? f : null; }
+  markRefs(el, sourcePath) {
+    if (!this.settings.versePreviews) return;
+    const bible = this.chapterFile('John', 1); if (!bible || (sourcePath && sourcePath.startsWith(bible.parent?.parent?.path + '/'))) return; // no Bible here, or a Bible chapter itself
+    const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT, { acceptNode: n => n.parentElement && n.parentElement.closest('code, pre, a, .ldl-ref, .ldl-titlecard, .frontmatter, .metadata-container') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+    const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const refs = core.findRefs(node.nodeValue).filter(r => this.chapterFile(r.book, r.c)); if (!refs.length) continue;
+      const frag = el.ownerDocument.createDocumentFragment(); let at = 0;
+      for (const r of refs) {
+        frag.append(node.nodeValue.slice(at, r.start));
+        const span = el.ownerDocument.createElement('span'); span.className = 'ldl-ref'; span.textContent = r.text; span.tabIndex = 0; span.setAttribute('role', 'button');
+        span.dataset.ref = JSON.stringify({ book: r.book, c: r.c, v1: r.v1, v2: r.v2, c2: r.c2, label: r.label }); frag.append(span); at = r.end;
+      }
+      frag.append(node.nodeValue.slice(at)); node.replaceWith(frag);
+    }
+  }
+  refHover(e) {
+    const t = e.target instanceof Element && e.target.closest('.ldl-ref');
+    if (t && !Platform.isMobile) { clearTimeout(this._vt); this._vt = setTimeout(() => this.showVerses(t), 250); return; }
+    if (this._pop && !(e.target instanceof Element && e.target.closest('.ldl-verses'))) { clearTimeout(this._vt); this._vt = setTimeout(() => this.hideVerses(), 400); }
+  }
+  refClick(e) {
+    const t = e.target instanceof Element && e.target.closest('.ldl-ref');
+    if (t) { e.preventDefault(); e.stopPropagation(); this.showVerses(t); return; }
+    if (this._pop && !(e.target instanceof Element && e.target.closest('.ldl-verses'))) this.hideVerses();
+  }
+  hideVerses() { clearTimeout(this._vt); this._pop?.remove(); this._pop = null; this._popFor = null; }
+  async showVerses(anchor) {
+    if (this._popFor === anchor && this._pop) return;
+    let r; try { r = JSON.parse(anchor.dataset.ref); } catch (e) { return; }
+    const f = this.chapterFile(r.book, r.c); if (!f) return;
+    const all = core.chapterVerses(await this.app.vault.cachedRead(f)), picked = core.versesFor(all, r), shown = picked.slice(0, 12);
+    const data = { label: r.label, translation: this.settings.bibleSuffix || '', verses: shown, more: picked.length - shown.length, missing: picked.length ? '' : 'Those verses aren’t in this chapter.' };
+    this.hideVerses();
+    const pop = render.versePreview(anchor.ownerDocument, data, {
+      reader: Platform.isDesktopApp ? () => { this.hideVerses(); this.sendToDashboard({ openPassage: r.label }); } : null,
+      note: () => { this.hideVerses(); this.openPassageNote(r.book, r.c); },
+      chapter: () => { this.hideVerses(); this.app.workspace.openLinkText(`${f.basename}${r.v1 ? `#^v${r.v1}` : ''}`, '', false); }
+    });
+    pop.addEventListener('mouseleave', () => { clearTimeout(this._vt); this._vt = setTimeout(() => this.hideVerses(), 400); });
+    pop.addEventListener('mouseenter', () => clearTimeout(this._vt));
+    anchor.ownerDocument.body.append(pop); this._pop = pop; this._popFor = anchor;
+    if (Platform.isMobile) { pop.classList.add('ldl-verses-sheet'); return; }
+    const rect = anchor.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight, win = anchor.ownerDocument.defaultView;
+    pop.style.left = `${Math.max(8, Math.min(rect.left, win.innerWidth - w - 8))}px`;
+    pop.style.top = `${rect.bottom + h + 12 < win.innerHeight ? rect.bottom + 6 : Math.max(8, rect.top - h - 6)}px`;
+  }
+  // A chapter's passage note: open it, bring it back from the archive, or start one (named like "John 13").
+  async openPassageNote(book, c) {
+    const name = `${book} ${c}`, base = core.safeFolder(this.settings.passageFolder || '') || '', arc = core.safeFolder(this.settings.passageArchive || '') || '';
+    const files = this.app.vault.getMarkdownFiles().filter(f => f.basename === name);
+    const live = files.find(f => base && f.path.startsWith(base + '/')), archived = files.find(f => arc && f.path.startsWith(arc + '/'));
+    if (live) return this.app.workspace.getLeaf(false).openFile(live);
+    const bookFolder = this.chapterFile(book, c)?.parent?.name || book, folder = normalizePath([base, bookFolder].filter(Boolean).join('/'));
+    if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    if (archived) { await this.app.fileManager.renameFile(archived, normalizePath(`${folder}/${name}.md`)); new Notice(`${name}: brought back from the archive`); return this.app.workspace.getLeaf(false).openFile(archived); }
+    const created = await this.createUnique(folder, name, core.passageNoteText(book, c, core.ymd(new Date())) + `- [[${book} ${c} (${this.settings.bibleSuffix || 'WEB'})|${book} ${c} — ${this.settings.bibleSuffix || 'WEB'} text]]\n`);
+    return this.app.workspace.getLeaf(false).openFile(created);
+  }
+  askPassageNote() {
+    new TextModal(this.app, 'Passage note', [{ key: 'ref', label: 'Chapter', placeholder: 'e.g. John 13' }], v => {
+      const r = core.parseRefText(v.ref); if (!r || !this.chapterFile(r.book, r.c)) return new Notice('That chapter isn’t in your Bible folder');
+      this.openPassageNote(r.book, r.c);
+    }, 'Open').open();
+  }
+  // Insert a passage as a quote at the cursor; a selected reference is used as the starting text.
+  insertPassage(editor) {
+    new TextModal(this.app, 'Insert a Bible passage', [{ key: 'ref', label: 'Passage', placeholder: 'e.g. John 13:1-5', value: editor.getSelection() }], async v => {
+      const r = core.parseRefText(v.ref), f = r && this.chapterFile(r.book, r.c);
+      if (!f) return new Notice('That passage isn’t in your Bible folder');
+      const verses = core.versesFor(core.chapterVerses(await this.app.vault.cachedRead(f)), r);
+      if (!verses.length) return new Notice('Those verses aren’t in this chapter');
+      editor.replaceSelection(core.passageCallout(r, verses, this.settings.bibleSuffix));
+    }, 'Insert').open();
+  }
   // --- Bridge with the docked dashboard
   async onBridge(url, wv) {
     const msg = core.readBridge(url, this.settings.dashboardUrl); if (!msg) return;
@@ -875,6 +1026,14 @@ class LibrarySettings extends PluginSettingTab {
       .addText(t => t.setValue(s.peopleFolder).setPlaceholder('e.g. 04 People').onChange(v => { s.peopleFolder = v.trim(); save(); }));
     new Setting(containerEl).setName('Template for new people').setDesc('A note new profiles start from. {{title}} and {{date}} are filled in.')
       .addText(t => t.setValue(s.personTemplate).setPlaceholder('e.g. Templates/Person').onChange(v => { s.personTemplate = v.trim(); save(); }));
+    new Setting(containerEl).setName('Verse previews').setDesc('Bible references in notes show their verses when you point at or tap them.')
+      .addToggle(t => t.setValue(s.versePreviews).onChange(v => { s.versePreviews = v; save(); }));
+    new Setting(containerEl).setName('Bible translation in chapter names').setDesc('Chapter notes are named like “John 13 (WEB)”; this is the part in brackets.')
+      .addText(t => t.setValue(s.bibleSuffix).onChange(v => { s.bibleSuffix = v.trim() || 'WEB'; save(); }));
+    new Setting(containerEl).setName('Passage notes folder').setDesc('New passage notes go here, in a folder per book like your Bible’s.')
+      .addText(t => t.setValue(s.passageFolder).setPlaceholder('e.g. Scripture/Passage Notes').onChange(v => { s.passageFolder = v.trim(); save(); }));
+    new Setting(containerEl).setName('Archived passage notes').setDesc('A passage note found here is moved back when you open it.')
+      .addText(t => t.setValue(s.passageArchive).setPlaceholder('e.g. Archive/Passage Notes').onChange(v => { s.passageArchive = v.trim(); save(); }));
     new Setting(containerEl).setName('Title cards').setDesc('Show a card with the passage, date and status at the top of notes in reading view.')
       .addToggle(t => t.setValue(s.titleCards).onChange(v => { s.titleCards = v; save(); }));
     new Setting(containerEl).setName('Hide the properties box under title cards')

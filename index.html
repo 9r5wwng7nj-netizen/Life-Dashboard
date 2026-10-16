@@ -3112,7 +3112,7 @@ const obsNoteList = () => inObsidian() && Array.isArray(window.LD_OBSIDIAN.notes
 // Messages from the plugin (it calls window.LD_FROM_OBSIDIAN). They wait until saved data has loaded.
 const obsInbox = { ready: false, queue: [] };
 window.LD_FROM_OBSIDIAN = msg => { obsInbox.queue.push(msg); if (obsInbox.ready) obsDrain(); return true; };
-function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.sermonPrep) sermonPrep(m.sermonPrep); if (m && m.addTasks) obsAddTasks(m.addTasks); if (m && m.completeTask) obsComplete(m.completeTask); } catch (e) { console.warn('Obsidian message', e); } } }
+function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.sermonPrep) sermonPrep(m.sermonPrep); if (m && m.addTasks) obsAddTasks(m.addTasks); if (m && m.completeTask) obsComplete(m.completeTask); if (m && m.openPassage) obsOpenPassage(m.openPassage); } catch (e) { console.warn('Obsidian message', e); } } }
 window.addEventListener('ld-obsidian', () => { render(); obsSyncPeople(); });
 // Tasks added with @Name whose person has no Obsidian profile yet: ask the plugin to create them, once.
 let _obsPeopleT = null;
@@ -3144,6 +3144,8 @@ function obsAddTasks(m) {
   if (n) { Store.save('tasks'); render(); }
   toast(n ? `Added ${n} task${n === 1 ? '' : 's'} from ${source || 'Obsidian'}` : 'Those are already in Tasks');
 }
+// "Open in reader" from a verse preview in Obsidian: the Bible reader at that passage.
+function obsOpenPassage(ref) { const r = parseRef(String(ref || '').replace(/–/g, '-')); if (r) rdGo(r.b, r.c, r.v1 ? [r.v1, r.v2 || r.v1] : null); }
 function obsComplete(id) { const t = tFind(String(id)); if (!t || !tOpen(t)) return; setTaskStatus(t, 'done'); Store.save('tasks'); render(); toast(`Done: ${t.title}`); }
 // Questions from the plugin, answered straight away (null until saved data has loaded).
 // personTasks: open tasks with this person (by any of their names) or linked to their note, and when one was last finished.
@@ -7270,6 +7272,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16j', title: 'Verses in your notes', slides: [
+    { title: 'Point at a reference to read it', body: '<p>In Obsidian, Bible references in your notes (John 13:1–17, Rom 8:28, Ps 23) are underlined. Point at one on the Mac, or tap it on the iPhone, to read the verses. <strong>Open in reader</strong> opens this dashboard’s Bible at that passage.</p><p>Insert a Bible passage (Cmd+P) puts the verses into your note as a quote, and Passage note opens or starts your notes on that chapter.</p>' }
+  ] },
   { id: '2026-10-16i', title: '@ a person', slides: [
     { title: 'Type @ and a name', body: '<p>When you add a task, <strong>@Sam</strong> (or <strong>@Sam Rivera</strong>) links it to that person, so it shows on their page in Obsidian. If they don’t have a profile yet, Obsidian makes one from your Person template, right away inside Obsidian or the next time the dashboard opens there. <strong>@fri</strong>, <strong>@today</strong> and other days still set the date.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] }
   ] },

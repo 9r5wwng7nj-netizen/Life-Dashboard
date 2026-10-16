@@ -177,3 +177,10 @@ test('@Name finds the existing profile, and asks Obsidian to create missing ones
   expect(await page.evaluate(() => TK().find(t => t.title === 'Thank Sam').person)).toBe('Sam Rivera'); // shown as typed, linked to the full profile
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('Open in reader from Obsidian opens the Bible reader at that passage', async ({ page }) => {
+  const errors = await open(page, { obsidian: true });
+  const r = await page.evaluate(() => { LD_FROM_OBSIDIAN({ openPassage: 'John 13:1–17' }); return { view: S.view, tab: ui.scrTab, book: BOOKS[ui.rd.b][0], c: ui.rd.c, focus: ui.rd.focus }; });
+  expect(r).toEqual({ view: 'scripture', tab: 'read', book: 'John', c: 13, focus: [1, 17] });
+  expect(errors, errors.join('\n')).toEqual([]);
+});

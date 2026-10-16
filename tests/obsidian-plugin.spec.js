@@ -270,3 +270,43 @@ test('the Library leaves out a quick action that has no handler (e.g. Today’s 
   }, code);
   expect(labels).toEqual(['New note', 'New sermon']);
 });
+
+test('Bible references are found the way people write them, and ordinary words are left alone', () => {
+  const refs = t => core.findRefs(t).map(r => r.label);
+  expect(refs('Read John 13:1-17 and Rom 8:28, then Ps 23 and 1 Cor 13.')).toEqual(['John 13:1–17', 'Romans 8:28', 'Psalm 23', '1 Corinthians 13']);
+  expect(refs('First John 4:8; II Timothy 3:16-17; Song of Songs 2; Jude 3; Gen. 1')).toEqual(['1 John 4:8', '2 Timothy 3:16–17', 'Song of Solomon 2', 'Jude 3', 'Genesis 1']);
+  expect(refs('John 13-14 and Phil 4:13')).toEqual(['John 13–14', 'Philippians 4:13']);
+  expect(refs('mark 5 boxes; Is 4 enough? The job 3 times; Johnny 3; Acts')).toEqual([]);
+  const j = core.findRefs('see John 3:16 now')[0];
+  expect([j.book, j.c, j.v1, j.v2, j.start, j.end]).toEqual(['John', 3, 16, 16, 4, 13]);
+  expect(core.parseRefText('rom 8:28').label).toBe('Romans 8:28'); // typed into a box, lowercase is fine
+});
+
+test('verses come out of a chapter note, and a passage becomes a quote', () => {
+  const md = '---\ntype: scripture\n---\n\n# John 13\n\n[[John 12 (WEB)|John 12]]\n\n### 1\nNow before the feast. ^v1\n\n### 2\nDuring supper, ^v2\n\n### 3\nJesus, knowing ^v3\n';
+  const verses = core.chapterVerses(md);
+  expect(verses).toEqual([[1, 'Now before the feast.'], [2, 'During supper,'], [3, 'Jesus, knowing']]);
+  const r = core.findRefs('John 13:2-3')[0];
+  expect(core.versesFor(verses, r)).toEqual([[2, 'During supper,'], [3, 'Jesus, knowing']]);
+  expect(core.passageCallout(r, core.versesFor(verses, r), 'WEB')).toBe('> [!quote] John 13:2–3 (WEB)\n> **2** During supper,\n> **3** Jesus, knowing\n');
+  expect(core.passageNoteText('John', 13, '2026-10-15')).toContain('type: scripture-note\ncreated: 2026-10-15\nscripture: "John 13"\nbook: John\ntestament: New Testament');
+});
+
+test('the verse preview card shows the verses and its actions', async ({ page }) => {
+  const code = fs.readFileSync(MAIN, 'utf8'), css = fs.readFileSync('obsidian/theme/Life Dashboard/theme.css', 'utf8') + fs.readFileSync('obsidian/plugin/styles.css', 'utf8');
+  await page.setContent(`<!doctype html><html><head><style>body{--font-interface:var(--font-interface-theme)} ${css}</style></head><body class="theme-dark"></body></html>`);
+  const out = await page.evaluate(code => {
+    const module = { exports: {} }; class Base { }
+    const fake = { Plugin: Base, ItemView: Base, PluginSettingTab: Base, Setting: Base, Modal: Base, SuggestModal: Base, Notice: Base, Platform: {}, TFile: Base, MarkdownView: Base, normalizePath: p => p, debounce: f => f };
+    new Function('module', 'exports', 'require', code)(module, module.exports, n => (n === 'obsidian' ? fake : null));
+    const calls = [], pop = module.exports.render.versePreview(document, { label: 'John 13:1–2', translation: 'WEB', verses: [[1, 'Now before the feast.'], [2, 'During supper,']], more: 3 }, { reader: () => calls.push('reader'), note: () => calls.push('note'), chapter: () => calls.push('chapter') });
+    document.body.append(pop); pop.style.left = '8px'; pop.style.top = '8px';
+    [...pop.querySelectorAll('button')].forEach(b => b.click());
+    return { text: pop.textContent, calls, buttons: [...pop.querySelectorAll('button')].map(b => b.textContent) };
+  }, code);
+  expect(out.text).toContain('1 Now before the feast.');
+  expect(out.text).toContain('3 more verses');
+  expect(out.buttons).toEqual(['Open in reader', 'Passage note', 'Read the chapter']);
+  expect(out.calls).toEqual(['reader', 'note', 'chapter']);
+  if (process.env.LDL_SHOTS) await page.screenshot({ path: `${process.env.LDL_SHOTS}/verse-preview.png`, clip: { x: 0, y: 0, width: 440, height: 260 } });
+});
