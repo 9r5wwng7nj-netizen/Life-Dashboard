@@ -98,6 +98,9 @@ test('New sermon makes a hub note and a manuscript that links to it, in the vaul
   expect(s.hub.content).toContain('scripture: "Luke 15:11-32"');
   expect(s.manuscript.content).toContain('type: sermon\nstatus: draft');
   expect(s.manuscript.content).toContain(`project: "[[${s.hub.name}]]"`);
+  expect(s.hub.content).not.toContain('area:');
+  const linked = core.sermonNotes({ passage: 'Luke 15:11-32' }, TODAY, '[[Preaching]]');
+  expect(linked.hub.content).toContain('domain: ministry\narea: "[[Preaching]]"\n');
   const fm = core.noteInfo({ path: 'x.md', basename: 'x' }, { type: 'project', project_kind: 'sermon', preaching_date: '2026-11-08' }, TODAY);
   expect(fm.family).toBe('sermon');
 });

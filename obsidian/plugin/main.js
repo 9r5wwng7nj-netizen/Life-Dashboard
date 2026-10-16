@@ -238,13 +238,13 @@ const core = (() => {
   // --- New sermon: a hub note (like a Sermon Project Dashboard) plus a manuscript that links to it.
   // Plain lower-case words (type and status values) stay bare; everything else is quoted, which is always valid YAML.
   function yamlValue(v) { const s = String(v ?? ''); return s === '' ? '' : /^[a-z][a-z-]*$/.test(s) ? s : JSON.stringify(s); }
-  function sermonNotes({ passage, title, date, series }, today) {
+  function sermonNotes({ passage, title, date, series }, today, area) {
     const name = safeName(`${passage || title || 'Sermon'}${date ? ' - ' + date : ''}`);
     const hubName = name, msName = safeName(`${passage || title || 'Sermon'} - Manuscript`);
     const fm = obj => '---\n' + Object.entries(obj).map(([k, v]) => `${k}: ${v === '' ? '' : yamlValue(v)}`.trimEnd()).join('\n') + '\n---\n';
     return {
       folder: name,
-      hub: { name: hubName, content: fm({ type: 'project', project_kind: 'sermon', status: 'planned', created: today, domain: 'ministry', preaching_date: date || '', scripture: passage || '', series: series || '', title: title || '' }) + `\n# ${title || passage || 'Sermon'}\n\n## Big idea\n\n## Prep\n- [ ] Read and pray through ${passage || 'the passage'}\n- [ ] Outline\n- [ ] Illustrations\n- [ ] Manuscript\n` },
+      hub: { name: hubName, content: fm({ type: 'project', project_kind: 'sermon', status: 'planned', created: today, domain: 'ministry', ...(plain(area) ? { area: `[[${plain(area)}]]` } : {}), preaching_date: date || '', scripture: passage || '', series: series || '', title: title || '' }) + `\n# ${title || passage || 'Sermon'}\n\n## Big idea\n\n## Prep\n- [ ] Read and pray through ${passage || 'the passage'}\n- [ ] Outline\n- [ ] Illustrations\n- [ ] Manuscript\n` },
       manuscript: { name: msName, content: fm({ type: 'sermon', status: 'draft', created: today, date: date || '', project: `[[${hubName}]]`, scripture: passage || '', series: series || '' }) + `\n# ${title || passage || 'Sermon'}\n\n` }
     };
   }
@@ -787,6 +787,7 @@ const DEFAULTS = {
   ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
   shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'classic', 'article', 'person'],
   sermonFolder: '',
+  sermonArea: '',
   reviewFolder: '',
   fileRules: [], // "type: folder" lines for File the inbox
   archiveFolder: '', // where finished projects go
@@ -1103,7 +1104,7 @@ class LifeDashboardPlugin extends Plugin {
       ...(Platform.isDesktopApp ? [{ key: 'tasks', label: 'Add the prep tasks to the Life Dashboard', type: 'checkbox', value: true }] : [])
     ], async v => {
       if (!v.passage && !v.title) return new Notice('Add a passage or a title');
-      const s = core.sermonNotes(v, today), base = core.safeFolder(this.settings.sermonFolder || '') || '';
+      const s = core.sermonNotes(v, today, this.settings.sermonArea), base = core.safeFolder(this.settings.sermonFolder || '') || '';
       const folder = normalizePath([base, s.folder].filter(Boolean).join('/'));
       try {
         if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
@@ -1466,6 +1467,8 @@ class LibrarySettings extends PluginSettingTab {
       .addText(t => t.setValue(s.shelves.join(', ')).onChange(v => { s.shelves = v.split(',').map(x => x.trim()).filter(x => core.FAMILIES[x]); save(); }));
     new Setting(containerEl).setName('Folder for new sermons').setDesc('Each new sermon gets its own folder inside this one.')
       .addText(t => t.setValue(s.sermonFolder).setPlaceholder('e.g. 02 Projects').onChange(v => { s.sermonFolder = v.trim(); save(); }));
+    new Setting(containerEl).setName('Area for new sermons').setDesc('The area note each new sermon project links to (its area property), so it shows on that area’s page. Leave empty for none.')
+      .addText(t => t.setValue(s.sermonArea).setPlaceholder('e.g. Preaching and Teaching').onChange(v => { s.sermonArea = v.trim(); save(); }));
     new Setting(containerEl).setName('Teaching groups').setDesc('One per line. Add (inactive) after a group you aren’t teaching right now; its history stays.')
       .addTextArea(t => t.setValue(s.groups.join('\n')).setPlaceholder('Connect Group\nCollege Night\nYouth (inactive)').onChange(v => { s.groups = v.split('\n').map(x => x.trim()).filter(Boolean); save(); }));
     new Setting(containerEl).setName('Folder for new people').setDesc('Where a profile goes when you type @Name in a dashboard task and they have none.')
