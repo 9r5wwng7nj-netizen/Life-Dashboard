@@ -327,6 +327,18 @@ const core = (() => {
   const passageCallout = (r, verses, translation) => `> [!quote] ${r.label}${translation ? ` (${translation})` : ''}\n${verses.map(([n, t]) => `> **${n}** ${t}`).join('\n')}\n`;
   const passageNoteText = (book, c, today) => `---\ntype: scripture-note\ncreated: ${today}\nscripture: "${book} ${c}"\nbook: ${book}\ntestament: ${BIBLE.indexOf(book) >= 39 ? 'New Testament' : 'Old Testament'}\n---\n\n# ${book} ${c}\n\n## Notes\n\n## Canonical connections\n\n## Related notes\n\n`;
 
+  // --- Quick capture. A thought becomes a note in the inbox: typed by kind, titled from its first words, with any
+  // Bible passage it mentions recorded.
+  const CAPTURE_KINDS = [['idea', 'Idea'], ['illustration', 'Illustration'], ['sermon-seed', 'Sermon seed'], ['quote', 'Quote']];
+  function captureNote(text, kind, now) {
+    const body = String(text || '').replace(/\r/g, '').trim(); if (!body) return null;
+    const k = CAPTURE_KINDS.some(([id]) => id === kind) ? kind : 'idea', stamp = `${ymd(now)} ${pad(now.getHours())}${pad(now.getMinutes())}`;
+    const words = body.split(/\s+/).slice(0, 8).join(' '), name = safeName(words.length > 60 ? words.slice(0, 60).trimEnd() : words) || `Capture ${stamp}`;
+    const ref = findRefs(body)[0];
+    const fm = ['---', `type: ${k}`, `created: "${ymd(now)}"`, `captured: "${stamp.slice(0, 10)} ${stamp.slice(11, 13)}:${stamp.slice(13)}"`, ...(ref ? [`scripture: "${ref.label}"`] : []), '---', ''];
+    return { name, content: fm.join('\n') + '\n' + (k === 'quote' ? body.split('\n').map(l => `> ${l}`).join('\n') : body) + '\n' };
+  }
+
   // --- To-dos still kept in notes. Every unticked "- [ ]" line, with the Tasks plugin's date emoji turned into the
   // dashboard's "due:" and its other emoji markers dropped.
   function noteTodos(md) {
@@ -463,7 +475,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { CAPTURE_KINDS, captureNote, noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -512,7 +524,7 @@ const render = (() => {
     root.append(head(doc, new Date().toLocaleDateString(undefined, { weekday: 'long' }), 'Library', q, on));
     // Quick actions, then a bar of every section: the Library stands in for the folder sidebar.
     const acts = el(doc, 'div', 'ldl-actions');
-    [['New note', on.newNote, true], ['New sermon', on.newSermon], ['Weekly review', on.weekly], ['Today’s note', on.today]].forEach(([label, fn, primary]) => {
+    [['Capture', on.capture, true], ['New note', on.newNote], ['New sermon', on.newSermon], ['Weekly review', on.weekly], ['Today’s note', on.today]].forEach(([label, fn, primary]) => {
       if (!fn) return; const b = el(doc, 'button', 'ldl-btn' + (primary ? ' ldl-btn-primary' : ' ldl-btn-soft'), label); b.type = 'button'; b.addEventListener('click', () => fn()); acts.append(b);
     });
     if (acts.childElementCount) root.append(acts);
@@ -880,6 +892,23 @@ class PickModal extends Modal {
   }
   onClose() { this.contentEl.empty(); }
 }
+// The capture box: a few lines of text and what kind of thought it is. Cmd/Ctrl+Enter saves.
+class CaptureModal extends Modal {
+  constructor(app, onSave) { super(app); this.onSave = onSave; this.kind = 'idea'; }
+  onOpen() {
+    const { contentEl } = this; this.setTitle ? this.setTitle('Capture') : contentEl.createEl('h2', { text: 'Capture' });
+    const form = contentEl.createEl('form', { cls: 'ldl-form' });
+    const area = form.createEl('textarea', { cls: 'ldl-capture-text', attr: { rows: '5', placeholder: 'A thought, an illustration, a sermon idea… (passages like Luke 15 are noted)', 'aria-label': 'What to capture' } });
+    const kinds = form.createEl('div', { cls: 'ldl-capture-kinds', attr: { role: 'group', 'aria-label': 'Kind' } });
+    core.CAPTURE_KINDS.forEach(([id, label]) => { const b = kinds.createEl('button', { text: label, cls: 'ldl-navchip' + (id === this.kind ? ' is-on' : ''), type: 'button' }); b.setAttribute('aria-pressed', String(id === this.kind)); b.addEventListener('click', () => { this.kind = id; kinds.querySelectorAll('button').forEach(x => { const on = x === b; x.classList.toggle('is-on', on); x.setAttribute('aria-pressed', String(on)); }); }); });
+    form.createEl('button', { text: 'Save to inbox', cls: 'mod-cta', type: 'submit' });
+    const save = () => { const v = area.value.trim(); if (!v) return; this.close(); this.onSave(v, this.kind); };
+    form.addEventListener('submit', e => { e.preventDefault(); save(); });
+    area.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); } });
+    setTimeout(() => area.focus(), 0);
+  }
+  onClose() { this.contentEl.empty(); }
+}
 class StatusModal extends SuggestModal {
   constructor(app, onPick) { super(app); this.onPick = onPick; this.setPlaceholder('Set status'); }
   getSuggestions(q) { return core.STATUS_CHOICES.filter(([, l]) => l.toLowerCase().includes(q.toLowerCase())); }
@@ -897,6 +926,9 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'open-dashboard', name: 'Open Life Dashboard in the sidebar', callback: () => this.openDashboard() });
     this.addCommand({ id: 'new-sermon', name: 'New sermon', callback: () => this.newSermon() });
     this.addCommand({ id: 'meeting-tasks', name: 'Send this meeting’s action items to Tasks', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickActions(f.path); return true; } });
+    this.addCommand({ id: 'capture', name: 'Capture a thought', callback: () => this.capture() });
+    // obsidian://ld-capture?kind=idea&text=… — an iPhone Shortcut (Dictate Text, then Open URL) lands here.
+    this.registerObsidianProtocolHandler('ld-capture', async params => { const f = await this.saveCapture(params.text || '', params.kind || 'idea'); if (f && params.open === '1') this.app.workspace.getLeaf(false).openFile(f); });
     this.addCommand({ id: 'move-todos', name: 'Move to-dos from notes to Tasks', callback: () => this.moveTodos() });
     this.addCommand({ id: 'link-attendees', name: 'Link meeting attendees to people', callback: () => this.linkAllAttendees(true) });
     this.addCommand({ id: 'attendee-alias', name: 'Match a Granola attendee to a person', callback: () => this.matchAttendee() });
@@ -1020,6 +1052,7 @@ class LifeDashboardPlugin extends Plugin {
       taughtBefore: n => core.taughtBefore(n, this.notes().filter(x => !core.inFolder(x.path, this.ignored()))),
       newSermon: () => this.newSermon(),
       weekly: () => this.openWeekly(),
+      capture: () => this.capture(),
       fileInbox: () => this.fileInbox(),
       // Today's note only when the Daily notes core plugin is on (a person may let the Life Dashboard own the day).
       today: this.app.internalPlugins?.plugins?.['daily-notes']?.enabled ? () => this.runCommand('daily-notes', 'Turn on Daily notes in Settings → Core plugins to use Today’s note.') : undefined,
@@ -1146,6 +1179,14 @@ class LifeDashboardPlugin extends Plugin {
       const s = this._subjects.get(path); if (s && !r.querySelector('.ldl-row-meta')) r.querySelector('.ldl-row-text')?.append(Object.assign(r.ownerDocument.createElement('span'), { className: 'ldl-row-meta', textContent: s }));
     }
   }
+  // --- Quick capture
+  async saveCapture(text, kind) {
+    const c = core.captureNote(text, kind, new Date()); if (!c) return null;
+    const folder = this.inboxFolder(); if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    const f = await this.createUnique(folder, c.name, c.content);
+    new Notice(`Captured to ${folder || 'the vault'}: ${c.name}`); return f;
+  }
+  capture() { new CaptureModal(this.app, async (text, kind) => { await this.saveCapture(text, kind); }).open(); }
   // --- To-dos in notes: one list across the vault (not templates, archives, reference text or meetings, which have
   // their own Send action items). Ticked ones go to the dashboard, linked to their note, and stop being checkboxes.
   async moveTodos() {

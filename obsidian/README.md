@@ -61,6 +61,10 @@ Statuses are read loosely and shown the same way everywhere: Idea (idea, planned
 | 3 ✅ | **Library as home:** quick actions (New note, New sermon, Today's note), a section bar for every shelf plus Inbox and All folders, folder pages with a clickable path, Library pages in the tab's back and forward history, and a setting to fold the left sidebar away. | plugin |
 | 4 ✅ | **Filing:** *File the inbox* (rules `type: folder` with `{title}`, `{year}`, `{month}`; project notes follow their project), *Archive finished projects*, and contents lists on project notes that refresh when opened. Everything is listed for confirmation first. | plugin |
 
+## Capture by voice on the iPhone
+
+In the Shortcuts app: **Dictate Text** → **URL Encode** (the dictated text) → **Open URLs** with `obsidian://ld-capture?vault=<your vault name>&kind=idea&text=` followed by the encoded text. Name the shortcut “Capture” and say “Hey Siri, Capture”. `kind` can be `idea`, `illustration`, `sermon-seed` or `quote`; add `&open=1` to open the new note.
+
 ## Developing
 
 Plain JavaScript, no build step: Obsidian loads `main.js` as it is. `main.js` has three layers: `core` (pure rules), `render` (DOM for the Library pages) and the Obsidian glue. `tests/obsidian-plugin.spec.js` runs `core` in Node with a stand-in for the `obsidian` module and draws the pages in a browser with the theme. Set `LDL_SHOTS=<folder>` to save screenshots.
