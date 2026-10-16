@@ -6271,6 +6271,7 @@ function recGrocery() {
       <button class="btn w-full" data-action="groceryBuild">${icon('calendar-days')} Rebuild from this week's plan</button>
       <button class="btn w-full" data-action="stapleAddDue" ${due.length ? '' : 'disabled'}>${icon('repeat')} Add due staples${due.length ? ` (${due.length})` : ''}</button>
       <button class="btn w-full" data-action="grocCopy">${icon('copy')} Copy list by aisle</button>
+      <button class="btn w-full" data-action="grocReminders">${icon('list-checks')} Send to Apple Reminders</button>
       <button class="btn w-full" data-action="grocPutAway" ${g.some(x => x.checked) ? '' : 'disabled'}>${icon('package-check')} Put checked items in pantry</button>
       <button class="btn w-full" data-action="grocClearDone" ${g.some(x => x.checked) ? '' : 'disabled'}>${icon('check-check')} Clear checked items</button>
       <button class="btn w-full btn-danger" data-action="grocClearAll" ${g.length ? '' : 'disabled'}>${icon('trash-2')} Clear entire list</button>
@@ -7016,6 +7017,15 @@ function sweepClosed() {
   if (n) toast(`Tidied ${n} task${n === 1 ? '' : 's'}`);
   render();
 }
+// Apple Reminders through a Shortcut (iPhone or Mac): the app opens shortcuts://run-shortcut with the items as
+// text. "Groceries to Reminders" takes one item per line; "Tasks to Reminders" takes "Title | YYYY-MM-DD HH:MM"
+// and sets an alert, which goes off even when this app is closed.
+function runShortcut(name, text) { location.href = 'shortcuts://run-shortcut?' + new URLSearchParams({ name, input: 'text', text }).toString().replace(/\+/g, '%20'); }
+// Open tasks with a date and time in the next 7 days that Reminders doesn't have yet (or whose time changed).
+function reminderTasks() {
+  const t = ymd(), end = addDays(t, 7), sent = tkit().reminded || {};
+  return TK().filter(x => tOpen(x) && !x.someday && x.due && x.time && x.due >= t && x.due <= end && sent[x.id] !== `${x.due} ${x.time}`).sort(sortT);
+}
 // Today + day planner
 function tasksToday() {
   const t = ymd(), open = TK().filter(x => tOpen(x) && !x.someday && inArea(x)), b3 = big3();
@@ -7024,6 +7034,7 @@ function tasksToday() {
   return `<div class="grid lg:grid-cols-5 gap-4"><div class="lg:col-span-3 space-y-4 min-w-0">
     <div class="card">${cardHead('star', 'This week’s Big 3', `<button class="btn btn-sm btn-ghost" data-action="setTab" data-key="taskTab" data-val="plan">${b3.length ? 'Change' : 'Pick'} ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}${b3.length ? `<div class="space-y-2">${b3.map(x => taskRow(x)).join('')}</div>` : '<p class="text-sm muted">Choose the three things that would make this week a win.</p>'}</div>
     ${overdue.length ? `<div class="card border-rose-200 dark:border-rose-900">${cardHead('alarm-clock', `Overdue · ${overdue.length}`, `<button class="btn btn-sm" data-action="tdAllToday">Move all to today</button>`)}${sweepPrompt()}<div class="space-y-2">${overdue.map(x => taskRow(x, { today: true, push: true })).join('')}</div></div>` : ''}
+    ${reminderTasks().length ? `<div class="flex flex-wrap items-center gap-2 text-sm rounded-lg bg-brand-50 dark:bg-brand-950/40 px-3 py-2"><span class="flex-1 min-w-[10rem]">${reminderTasks().length} task${reminderTasks().length === 1 ? ' has' : 's have'} a time this week. Apple Reminders can alert you even when this app is closed.</span><button type="button" class="btn btn-sm" data-action="tasksReminders">${icon('bell', 'w-3.5 h-3.5')} Send to Reminders</button></div>` : ''}
     <div class="card">${cardHead('sun', `Today · ${fmtDate(t, { weekday: 'long', month: 'short', day: 'numeric' })}`, `${waiting ? (hiddenTabsFor('taskTab').includes('people') ? `<span class="chip">⏳ ${waiting} waiting</span>` : `<button class="chip" data-action="setTab" data-key="taskTab" data-val="people">⏳ ${waiting} waiting</button>`) : ''}`)}${today.length ? `<div class="space-y-2">${today.map(x => taskRow(x, { noDue: true, push: true })).join('')}</div>` : `<p class="text-sm muted">${doneToday.length ? 'All done for today. 🎉' : 'Nothing due today.'}</p>`}
       ${doneToday.length ? `<details class="mt-3"><summary class="text-xs muted cursor-pointer list-none">Done today · ${doneToday.length}</summary><div class="space-y-2 mt-2">${doneToday.map(x => taskRow(x)).join('')}</div></details>` : ''}</div>
     ${tm.length ? `<div class="card">${cardHead('sunrise', `Tomorrow · ${tm.length}`)}<div class="space-y-1">${tm.sort(sortT).map(taskRowMini).join('')}</div></div>` : ''}</div>
@@ -7244,6 +7255,15 @@ const A_TASKS = {
   taskPush: el => {
     const t = tFind(el.dataset.id); if (!t) return; const d = addDays(ymd(), +el.dataset.n || 1);
     t.someday = false; setDue(t, d); Store.save('tasks'); toast(`Moved to ${fmtDate(d, { weekday: 'long', month: 'short', day: 'numeric' })}`); render();
+  },
+  grocReminders: () => {
+    const g = Store.get('grocery').filter(x => !x.checked); if (!g.length) return toast('The list is empty', 'error');
+    runShortcut('Groceries to Reminders', g.map(x => `${x.qty != null ? `${fmtQty(x.qty)}${x.unit ? ' ' + x.unit : ''} ` : ''}${x.name}`).join('\n'));
+  },
+  tasksReminders: () => {
+    const ts = reminderTasks(); if (!ts.length) return;
+    const k = tkit(); k.reminded = { ...(k.reminded || {}) }; ts.forEach(x => { k.reminded[x.id] = `${x.due} ${x.time}`; }); Store.save('tkit'); render();
+    runShortcut('Tasks to Reminders', ts.map(x => `${x.title.replace(/\|/g, '/')} | ${x.due} ${x.time}`).join('\n'));
   },
   sweepStart: () => { const ids = staleTasks().map(x => x.id); if (!ids.length) return; ui.sweep = { ids, i: 0, changed: 0 }; sweepDraw(); },
   sweepLater: () => { tkit().swept = ymd(); Store.save('tkit'); render(); },
@@ -7527,6 +7547,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16u', title: 'Send to Apple Reminders', slides: [
+    { title: 'Alerts that always arrive', body: '<p>A home-screen web app can’t remind you while it’s closed, but Apple Reminders can. In Tasks → Today, <strong>Send to Reminders</strong> hands this week’s tasks that have a time to Reminders, each with an alert. In Recipes &amp; Meals → Grocery list, <strong>Send to Apple Reminders</strong> puts the list in Reminders, so anyone you share that list with sees it at the store.</p><p>Both use a Shortcut you add once on your iPhone.</p>' }
+  ] },
   { id: '2026-10-16t', title: 'Birthday reminders become gift tasks', slides: [
     { title: 'Never miss a gift', body: '<p>Ten days before a birthday in Marriage &amp; Family, or your anniversary, a task appears in Tasks: “Gift for Sam’s birthday”, due three days before, with the gift ideas you saved for them in its notes.</p>' }
   ] },

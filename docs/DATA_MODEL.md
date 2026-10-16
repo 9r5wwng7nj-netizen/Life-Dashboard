@@ -69,7 +69,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
   - `subtasks [{id,text,done}]`, `series`, `nextMade`
 - `projects`: `{ id, name, area, due, status: active|paused|done, notes, created }` with optional `repeat {freq, n}`, `nextMade` (id of the next round), `series` and `note` (a linked Obsidian note). The next round and its tasks get ids of the form `<original id>.r<YYYY-MM-DD>`, so two synced devices create the same records.
 - `ttemplates` (the user's own checklist templates: `items [{off, text}]`, optional `lib` when copied from the built-in `TEMPLATE_LIBRARY`)
-- `tkit`: `{ weeks: { 'YYYY-MM-DD (Mon)': { big3[], notes, planned, obsReview? } }, focus[], seeded, swept? }` (`obsReview`: the day the Weekly reset opened that week's Obsidian review) (`swept`: the day Tidy up last ran or was put off, so it is offered once a day)
+- `tkit`: `{ weeks: { 'YYYY-MM-DD (Mon)': { big3[], notes, planned, obsReview? } }, focus[], seeded, swept?, reminded? }` (`reminded`: task id → the date and time last sent to Apple Reminders) (`obsReview`: the day the Weekly reset opened that week's Obsidian review) (`swept`: the day Tidy up last ran or was put off, so it is offered once a day)
 - `tblocks`: a `{ 'YYYY-MM-DD': [{ id, start 'HH:MM', mins, taskId?, label? }] }` map
 
 ## Conventions

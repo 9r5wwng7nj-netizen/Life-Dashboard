@@ -430,3 +430,27 @@ test('the Weekly reset adds last week, the family review and the Obsidian review
   await page.evaluate(() => { Date.prototype.getDay = window.__getDay; });
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('tasks with a time and the grocery list go to Apple Reminders through a Shortcut, each task once', async ({ page }) => {
+  const { errors } = await open(page);
+  await page.evaluate(() => {
+    window.sent = []; window.runShortcut = (name, text) => window.sent.push([name, text]);
+    const t = ymd();
+    Store.set('tasks', [
+      { id: 'a', title: 'Call Sam | about Sunday', status: 'todo', priority: 'med', area: 'home', due: addDays(t, 1), time: '15:00', created: t },
+      { id: 'b', title: 'No time', status: 'todo', priority: 'med', area: 'home', due: t, created: t },
+      { id: 'c', title: 'Too far', status: 'todo', priority: 'med', area: 'home', due: addDays(t, 20), time: '09:00', created: t }]);
+    Store.set('grocery', [{ id: 'g1', name: 'milk', qty: 2, unit: 'gal', checked: false }, { id: 'g2', name: 'eggs', checked: true }]);
+    ui.taskTab = 'today'; go('tasks');
+  });
+  await page.click('#view [data-action="tasksReminders"]');
+  const day = await page.evaluate(() => addDays(ymd(), 1));
+  expect(await page.evaluate(() => window.sent)).toEqual([['Tasks to Reminders', `Call Sam / about Sunday | ${day} 15:00`]]);
+  await expect(page.locator('#view [data-action="tasksReminders"]')).toHaveCount(0); // already sent
+  await page.evaluate(() => { TK().find(t => t.id === 'a').time = '16:00'; render(); });
+  await expect(page.locator('#view [data-action="tasksReminders"]')).toHaveCount(1); // the time changed
+  await page.evaluate(() => { ui.recTab = 'grocery'; go('recipes'); });
+  await page.click('#view [data-action="grocReminders"]');
+  expect(await page.evaluate(() => window.sent.at(-1))).toEqual(['Groceries to Reminders', '2 gal milk']);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
