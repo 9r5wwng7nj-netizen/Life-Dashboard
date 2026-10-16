@@ -600,6 +600,7 @@ function renderNow() {
   _trC = null; _expC = null;
   try { autoCheckin(); } catch (e) { console.warn(e); }
   try { projRepeatTick(); } catch (e) { console.warn(e); }
+  try { giftTasksTick(); } catch (e) { console.warn(e); }
   for (const [key, ids] of Object.entries(S.hiddenTabs || {})) if (ids.includes(ui[key])) ui[key] = null;
   const v = VIEWS.find(x => x.id === S.view) || VIEWS[0];
   const main = $('#view'), keep = lastRendered === v.id ? main.scrollTop : 0;
@@ -6800,6 +6801,22 @@ function addRepeatFrom(f) {
   if (f.repKind.value !== 'custom') return { freq: f.repKind.value, n: 1 };
   return { freq: f.repUnit.value, n: Math.max(1, Math.min(365, Math.round(+f.repN.value) || 1)) };
 }
+// Ten days before a birthday (Family) or the anniversary, one gift task appears, due 3 days before, with
+// the person's saved gift ideas in its notes. fkit.giftTasks remembers which occasions already have one.
+function giftTasksTick() {
+  const t = ymd(); if (ui._giftDay === t) return; ui._giftDay = t;
+  const k = fkit(), made = k.giftTasks || {}, before = Object.keys(made).length;
+  const add = (key, title, d, person) => {
+    if (made[key] || daysBetween(t, d) > 10 || d < t) return;
+    const ideas = person ? Store.get('gifts').filter(g => g.personId === person.id && g.status === 'idea').map(g => `- ${g.idea}${g.price ? ` (about $${g.price})` : ''}`) : [];
+    const due = addDays(d, -3) < t ? t : addDays(d, -3);
+    if (!TK().some(x => tOpen(x) && x.title === title)) addParsedTask({ ...parseTaskInput(''), title, notes: ideas.length ? 'Gift ideas:\n' + ideas.join('\n') : '' }, { due, tags: ['home'], person: person ? person.name : undefined });
+    made[key] = t;
+  };
+  FP().forEach(p => { if (p.birthday) { const d = nextOccur(p.birthday); add(`bday:${p.id}:${d}`, `Gift for ${p.name}’s birthday (${fmtDate(d, { month: 'short', day: 'numeric' })})`, d, p); } });
+  if (k.anniversary) { const d = nextOccur(k.anniversary); add(`anniv:${d}`, `Anniversary gift or plans (${fmtDate(d, { month: 'short', day: 'numeric' })})`, d, null); }
+  if (Object.keys(made).length !== before) { k.giftTasks = made; Store.save('fkit'); Store.save('tasks'); }
+}
 function addParsedTask(p, extra = {}) {
   if (!p.title) return null;
   const tags = [...new Set([...p.tags, ...(extra.tags || [])])];
@@ -7510,6 +7527,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16t', title: 'Birthday reminders become gift tasks', slides: [
+    { title: 'Never miss a gift', body: '<p>Ten days before a birthday in Marriage &amp; Family, or your anniversary, a task appears in Tasks: “Gift for Sam’s birthday”, due three days before, with the gift ideas you saved for them in its notes.</p>' }
+  ] },
   { id: '2026-10-16s', title: 'Tell Siri, and it lands here', slides: [
     { title: 'A task, a weight or a prayer request by voice', body: '<p>With the Siri shortcuts, say <strong>“Dashboard Task”</strong>, <strong>“Log Weight”</strong> or <strong>“Prayer Request”</strong> on your iPhone. Obsidian keeps the item, and the next time the dashboard is open in Obsidian on your Mac it lands in Tasks, your weight log or your prayer list.</p><p>Dates are read from the day you said it, so “call the plumber tomorrow” said on Monday is due Tuesday even if it arrives later.</p>' }
   ] },
