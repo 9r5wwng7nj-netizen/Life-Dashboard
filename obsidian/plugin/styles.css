@@ -149,3 +149,11 @@
 @container (min-width: 760px) { .ldl-cover-big .ldl-cover-title { font-size: 26px; } }
 .ldl-cover .ldl-cover-title.ldl-cover-initials { font-size: 34px; letter-spacing: .02em; }
 .ldl-titlecard .ldl-cover .ldl-cover-title.ldl-cover-initials { font-size: 26px; }
+
+/* Taught record */
+.ldl-titlecard-taught { font-size: 13px; color: var(--text-muted); }
+.ldl-titlecard-before { font-size: 13px; color: var(--text-muted); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
+.ldl-titlecard-before button.ldl-link { font-size: 13px; padding: 0 !important; }
+.ldl-row-date { width: 64px; flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.ldl-row-static { cursor: default; }
+.ldl-gap { margin-top: 8px; }

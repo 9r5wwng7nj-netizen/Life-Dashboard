@@ -215,3 +215,43 @@ test('a person’s title card: initials on the cover, roles and last contact, no
   expect(out.fits).toBe(true);
   if (process.env.LDL_SHOTS) await page.screenshot({ path: `${process.env.LDL_SHOTS}/person-card.png` });
 });
+
+test('taught record: entries, groups, passages, the record page and “taught before”', async ({ page }) => {
+  expect(core.parseTaught(['2026-09-03 — Connect Group', '2026-10-28 - College Night', 'nonsense'])).toEqual([{ date: '2026-10-28', group: 'College Night' }, { date: '2026-09-03', group: 'Connect Group' }]);
+  expect(core.parseGroups(['CCLE', 'Freshman Bible Study (inactive)', ''])).toEqual([{ name: 'CCLE', active: true }, { name: 'Freshman Bible Study', active: false }]);
+  expect([core.scriptureKey('John 13:1-17'), core.scriptureKey('[[John 13]]'), core.scriptureKey('1 Corinthians 8-10'), core.scriptureKey('1 Cor 8'), core.scriptureKey('')]).toEqual(['joh 13', 'joh 13', '1cor 8', '1cor 8', '']);
+  const today = '2026-10-24', mk = (p, fm) => { const parts = p.split('/'); return core.noteInfo({ path: p, basename: parts.pop().replace(/\.md$/, ''), folder: parts.join('/'), mtime: 1 }, fm, today); };
+  const notes = [
+    mk('Sermons/Servant King.md', { type: 'sermon', status: 'preached', date: '2025-03-02', scripture: 'John 13:1-17', taught: ['2025-03-02 — College Night'] }),
+    mk('Studies/Foot washing.md', { type: 'study-session', status: 'taught', date: '2026-09-10', scripture: 'John 13', taught: ['2026-09-10 — Connect Group', '2026-09-24 — Freshman Bible Study'] }),
+    mk('Sermons/New one.md', { type: 'sermon', status: 'draft', date: '2026-10-28', scripture: 'John 13' }),
+    mk('Sermons/Old sermon.md', { type: 'sermon', status: 'preached', date: '2024-05-05', scripture: 'Romans 8' }),
+    mk('Sermons/Outline.md', { type: 'sermon-outline', status: 'done', date: '2024-05-01' }),
+    mk('Sermons/Undated sermon.md', { type: 'sermon', status: 'preached' })
+  ];
+  const rec = core.teachingRecord(notes, ['CCLE', 'Connect Group', 'College Night', 'Freshman Bible Study (inactive)'], []);
+  expect(rec.groups.map(g => [g.name, g.active, g.items.map(i => i.note.title)])).toEqual([['CCLE', true, []], ['Connect Group', true, ['Foot washing']], ['College Night', true, ['Servant King']], ['Freshman Bible Study', false, ['Foot washing']]]);
+  expect(rec.unrecorded.map(n => n.title)).toEqual(['Old sermon', 'Undated sermon']); // finished but no group (undated last); outlines don't count
+  expect(rec.total).toBe(3);
+  expect(core.taughtBefore(notes[2], notes).map(t => [t.note.title, t.date, t.group])).toEqual([['Foot washing', '2026-09-24', 'Freshman Bible Study'], ['Foot washing', '2026-09-10', 'Connect Group'], ['Servant King', '2025-03-02', 'College Night']]);
+
+  const code = fs.readFileSync(MAIN, 'utf8');
+  await page.setContent('<!doctype html><html><body><div id="v"></div><div id="c"></div></body></html>');
+  const out = await page.evaluate(([code, recJson, noteJson, beforeJson]) => {
+    const module = { exports: {} }; class Base { }
+    const fake = { Plugin: Base, ItemView: Base, PluginSettingTab: Base, Setting: Base, Modal: Base, SuggestModal: Base, Notice: Base, Platform: {}, TFile: Base, MarkdownView: Base, normalizePath: p => p, debounce: f => f };
+    new Function('module', 'exports', 'require', code)(module, module.exports, n => (n === 'obsidian' ? fake : null));
+    const { render } = module.exports, calls = [], on = { home: () => { }, open: p => calls.push('open:' + p), markTaught: p => calls.push('mark:' + p), status: () => { }, hub: () => { }, taughtBefore: () => beforeJson };
+    const v = document.getElementById('v'); v.append(render.taught(document, recJson, '2026-10-24', on));
+    const headings = [...v.querySelectorAll('h2')].map(h => h.textContent);
+    v.querySelector('.ldl-row-static button').click();
+    const card = render.titleCard(document, noteJson, null, on); document.getElementById('c').append(card);
+    card.querySelector('.ldl-titlecard-before button').click();
+    [...card.querySelectorAll('button')].find(b => b.textContent === 'Mark taught').click();
+    return { headings, resting: v.textContent.includes('Not teaching right now'), before: card.querySelector('.ldl-titlecard-before').textContent, calls };
+  }, [code, JSON.parse(JSON.stringify(rec)), JSON.parse(JSON.stringify(notes[2])), JSON.parse(JSON.stringify(core.taughtBefore(notes[2], notes)))]);
+  expect(out.headings).toEqual(['CCLE', 'Connect Group', 'College Night', 'Freshman Bible Study', 'Taught, group not recorded']);
+  expect(out.resting).toBe(true);
+  expect(out.before).toContain('You’ve taught John 13 before');
+  expect(out.calls).toEqual(['mark:Sermons/Old sermon.md', 'open:Studies/Foot washing.md', 'mark:Sermons/New one.md']);
+});
