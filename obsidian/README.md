@@ -19,7 +19,7 @@ The plugin reads the properties notes already have: `type`, `status`, `scripture
 | `meeting`, `meeting-review`, `meeting-source` | Meetings |
 | `person` | People |
 | `book` | Books |
-| `work-index`, `collection` (a classic work's chapters, `historical-text`, stay off the shelves but are searchable) | Historical theology |
+| Books: a `work-index` not part of another work; an `author` or `collection` with its own `historical-text` writings; a folder whose index note has the folder's name. Parts and chapters (`part_of`) open inside the book. | Historical theology, Books |
 | `article`, `podcast`, `video`, `source` | Articles & media |
 | `area` | Areas |
 

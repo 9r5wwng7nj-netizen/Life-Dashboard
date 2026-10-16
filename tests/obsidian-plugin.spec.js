@@ -363,3 +363,76 @@ test('a project note’s contents list, added once and refreshed in place', () =
   expect(twice).not.toContain('[[Manuscript]]');
   expect(twice).toContain('My notes.');
 });
+
+// A small library shaped like the vault: a work with parts, an author's own writings, a folder book, and meetings.
+function bookFixture() {
+  const today = '2026-10-15', mk = (p, fm) => { const parts = p.split('/'); return core.noteInfo({ path: p, basename: parts.pop().replace(/\.md$/, ''), folder: parts.join('/'), mtime: 1 }, fm, today); };
+  const notes = [
+    mk('HT/Scholastic/Scholastic.md', { type: 'collection' }),
+    mk('HT/Scholastic/Aquinas/Aquinas.md', { type: 'author' }),
+    mk('HT/Scholastic/Aquinas/Summa/Summa.md', { type: 'work-index', author: 'Thomas Aquinas', part_of: '[[Aquinas]]' }),
+    mk('HT/Scholastic/Aquinas/Summa/Prima Pars.md', { type: 'work-index', part_of: '[[Summa]]' }),
+    mk('HT/Scholastic/Aquinas/Summa/Prima Pars/Summa - Prima Pars - Question 2.md', { type: 'historical-text', part_of: '[[Prima Pars]]' }),
+    mk('HT/Scholastic/Aquinas/Summa/Prima Pars/Summa - Prima Pars - Question 10.md', { type: 'historical-text', part_of: '[[Prima Pars]]' }),
+    mk('HT/Scholastic/Aquinas/Summa/Secunda.md', { type: 'work-index', part_of: '[[Summa]]' }),
+    mk('HT/Scholastic/Aquinas/Summa/Secunda/Summa - Secunda - Question 1.md', { type: 'historical-text', part_of: '[[Secunda]]' }),
+    mk('HT/Reformation/Reformation.md', { type: 'collection' }),
+    mk('HT/Reformation/Luther/Luther.md', { type: 'author' }),
+    mk('HT/Reformation/Luther/95 Theses.md', { type: 'historical-text', part_of: '[[Luther]]' }),
+    mk('Books/Moody/Moody.md', {}), mk('Books/Moody/2 - The Way.md', {}), mk('Books/Moody/1 - The Basin.md', {}), mk('Books/Moody/10 - The End.md', {}),
+    mk('Meetings/Source/Staff.md', { granola_id: 'g1', date: '2026-10-12' }),
+    mk('Meetings/Reviews/Staff review.md', { type: 'meeting-review', source_meeting: '[[Staff]]', date: '2026-10-12' }),
+    mk('Meetings/Source/Leaders.md', { granola_id: 'g2', date: '2026-10-13' })
+  ];
+  const byBase = new Map(notes.map(n => [n.basename, n.path]));
+  notes.forEach(n => { n.partOfPath = byBase.get(n.partOfLink) || null; n.sourceMeetingPath = byBase.get(n.sourceMeetingLink) || null; });
+  const order = new Map([['HT/Scholastic/Aquinas/Summa/Summa.md', ['HT/Scholastic/Aquinas/Summa/Prima Pars.md', 'HT/Scholastic/Aquinas/Summa/Secunda.md']]]);
+  const coll = new Map(notes.filter(n => n.type === 'collection').map(n => [n.folder, n.title]));
+  const groupOf = n => { let f = n.folder; while (f) { if (coll.has(f) && coll.get(f) !== n.title) return coll.get(f); f = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : ''; } return ''; };
+  return { notes, books: core.buildBooks(notes, order, groupOf), today };
+}
+
+test('books: works with parts, an author’s writings and folder books, in reading order with short names', () => {
+  const { books } = bookFixture();
+  expect(books.books.map(b => [b.title, b.kind, b.count, b.group])).toEqual([['Summa', 'Classic', 3, 'Scholastic'], ['Luther', 'Writings', 1, 'Reformation'], ['Moody', 'Book', 3, '']]);
+  const summa = books.byPath.get('HT/Scholastic/Aquinas/Summa/Summa.md');
+  expect(summa.tree.children.map(c => [c.short, c.children.map(x => x.short)])).toEqual([['Prima Pars', ['Question 2', 'Question 10']], ['Secunda', ['Question 1']]]); // numbers sort as numbers
+  const place = core.bookPlace(books, summa.leaves[1]);
+  expect([place.here.short, place.prev.short, place.next.short, place.trail.map(t => t.short), place.i, place.total]).toEqual(['Question 10', 'Question 2', 'Question 1', ['Summa', 'Prima Pars'], 1, 3]);
+  expect(books.byPath.get('Books/Moody/Moody.md').tree.children.map(c => c.short)).toEqual(['1 - The Basin', '2 - The Way', '10 - The End']);
+  expect(core.shortTitle('Summa Theologiae - Prima Secundae - Question 9', [{ title: 'Summa Theologiae' }, { title: 'Prima Secundae' }])).toBe('Question 9');
+  expect(core.chapterSubject('---\ntype: historical-text\n---\n\n# Q9\n\n> [!info] Edition\n> rights\n\n## Source text\n\nOF THAT WHICH MOVES THE WILL (SIX ARTICLES)\n\nWe must now consider')).toBe('Of that which moves the will (six articles)');
+});
+
+test('the Library shelves books instead of their parts, and shows each meeting once', () => {
+  const { notes, books, today } = bookFixture();
+  const lib = core.buildLibrary(notes.map(n => ({ ...n })), { today, shelves: ['classic', 'book', 'meeting'], books });
+  const shelf = id => (lib.shelves.find(s => s.id === id) || { items: [] }).items.map(n => n.title);
+  expect(shelf('classic')).toEqual(['Luther', 'Summa']); // grouped by tradition (Reformation, Scholastic); not "Prima Pars", "Secunda" or the collections
+  expect(shelf('book')).toEqual(['Moody']); // one cover, not its chapters
+  expect(shelf('meeting')).toEqual(['Leaders', 'Staff review']); // Granola notes count as meetings; a reviewed one shows through its review
+});
+
+test('a book page lists its contents, and a chapter gets the reading bar', async ({ page }) => {
+  const code = fs.readFileSync(MAIN, 'utf8'), { books } = bookFixture();
+  const summa = books.byPath.get('HT/Scholastic/Aquinas/Summa/Summa.md'), place = core.bookPlace(books, summa.leaves[1]);
+  await page.setContent('<!doctype html><html><body><div id="v"></div><div id="c"></div></body></html>');
+  const out = await page.evaluate(([code, summa, place]) => {
+    const module = { exports: {} }; class Base { }
+    const fake = { Plugin: Base, ItemView: Base, PluginSettingTab: Base, Setting: Base, Modal: Base, SuggestModal: Base, Notice: Base, Platform: {}, TFile: Base, MarkdownView: Base, normalizePath: p => p, debounce: f => f };
+    new Function('module', 'exports', 'require', code)(module, module.exports, n => (n === 'obsidian' ? fake : null));
+    const { render } = module.exports, calls = [], on = { home: () => { }, open: p => calls.push('open:' + p.split('/').pop()), book: p => calls.push('book') };
+    const v = document.getElementById('v'); v.append(render.book(document, summa, { path: summa.leaves[1], short: 'Question 10' }, on));
+    const parts = [...v.querySelectorAll('summary')].map(s => s.textContent), openPart = [...v.querySelectorAll('details')].map(d => d.open);
+    v.querySelector('.ldl-btn-light').click();
+    const c = document.getElementById('c'); c.append(render.readingBar(document, place, on));
+    [...c.querySelectorAll('button')].forEach(b => b.click());
+    return { parts, openPart, start: v.querySelector('.ldl-btn-light').textContent, reading: v.querySelector('.ldl-here .ldl-row-title').textContent, bar: c.textContent, calls };
+  }, [code, JSON.parse(JSON.stringify(summa)), JSON.parse(JSON.stringify(place))]);
+  expect(out.parts).toEqual(['Prima Pars2', 'Secunda1']);
+  expect(out.openPart).toEqual([true, false]); // the part you're reading is open
+  expect(out.start).toBe('Continue: Question 10');
+  expect(out.reading).toBe('Question 10');
+  expect(out.bar).toContain('2 of 3');
+  expect(out.calls).toEqual(['open:Summa - Prima Pars - Question 10.md', 'book', 'book', 'open:Summa - Prima Pars - Question 2.md', 'book', 'open:Summa - Secunda - Question 1.md']);
+});
