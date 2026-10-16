@@ -264,6 +264,12 @@ const core = (() => {
   }
   const TEACH_TYPES = ['sermon', 'project', 'study-session', 'session-preparation', 'study', 'lesson', 'bible-study', 'handout', 'class', 'teaching'];
   const teachable = n => TEACHING.includes(n.family) && TEACH_TYPES.includes(String(n.type).toLowerCase()) && !n.hubPath;
+  // Teaching dated today through the next 6 days and not done yet, for the docked dashboard's Today card.
+  function teachingSoon(notes, today, ignore) {
+    const end = addDays(today, 6);
+    return notes.filter(n => teachable(n) && n.status !== 'done' && n.date && n.date >= today && n.date <= end && !inFolder(n.path, ignore || []))
+      .sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5).map(n => ({ title: n.title, note: n.basename || n.title, date: n.date, scripture: n.scripture || '' }));
+  }
   // The record: each group's entries (newest first), entries for groups no longer listed, and teaching marked done
   // with a date but no group recorded yet (to fill in).
   function teachingRecord(notes, groups, ignore) {
@@ -499,7 +505,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { healthReport, knownStatus, CAPTURE_KINDS, captureNote, noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { teachingSoon, healthReport, knownStatus, CAPTURE_KINDS, captureNote, noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -1519,7 +1525,8 @@ class LifeDashboardPlugin extends Plugin {
   greetDashboard(wv) {
     const names = this.notes().filter(n => n.family && !core.inFolder(n.path, this.ignored())).map(n => n.title).slice(0, 5000);
     const people = this.notes().filter(n => n.family === 'person').map(n => n.title);
-    const info = { vault: this.app.vault.getName(), notes: names, people, prefix: core.BRIDGE_PREFIX };
+    const teaching = core.teachingSoon(this.notes(), core.ymd(new Date()), this.ignored());
+    const info = { vault: this.app.vault.getName(), notes: names, people, teaching, prefix: core.BRIDGE_PREFIX };
     wv.executeJavaScript(`window.LD_OBSIDIAN = ${JSON.stringify(info)}; window.dispatchEvent(new Event('ld-obsidian'));`).catch(() => { });
     const waiting = this.pending || []; this.pending = [];
     waiting.forEach(msg => this.deliver(wv, msg));

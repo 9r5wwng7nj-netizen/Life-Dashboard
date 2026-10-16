@@ -696,7 +696,7 @@ function miniBar(label, val, target, color) {
   return `<div><div class="flex justify-between text-xs mb-0.5"><span class="font-medium">${label}</span><span class="tabular-nums muted">${fmtNum(val)}/${fmtNum(target)}g</span></div><div class="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${color}"></div></div></div>`;
 }
 // Dashboard cards the person can hide (S.hiddenCards); the order here is the order on the page.
-const DASH_CARDS = [['nutrition', 'Nutrition today', 'apple'], ['weight', 'Body weight', 'scale'], ['training', 'Training', 'dumbbell'], ['tasks', 'Tasks', 'list-checks'], ['faith', 'Faith & reflection', 'book-open'], ['family', 'Marriage & family', 'heart'], ['meals', 'Meals', 'chef-hat']];
+const DASH_CARDS = [['today', 'Today', 'sun'], ['nutrition', 'Nutrition today', 'apple'], ['weight', 'Body weight', 'scale'], ['training', 'Training', 'dumbbell'], ['tasks', 'Tasks', 'list-checks'], ['faith', 'Faith & reflection', 'book-open'], ['family', 'Marriage & family', 'heart'], ['meals', 'Meals', 'chef-hat']];
 const dashShow = id => !(S.hiddenCards || []).includes(id);
 // The cards in the person's order (S.cardOrder); any card not in it yet keeps its place from DASH_CARDS at the end.
 function dashOrder() { const ids = DASH_CARDS.map(c => c[0]), saved = (S.cardOrder || []).filter(id => ids.includes(id)); return [...new Set([...saved, ...ids])]; }
@@ -707,6 +707,32 @@ function dashCardsModal(focus) {
       <button type="button" class="btn btn-sm btn-ghost" data-action="dashCardMove" data-val="${id}" data-d="-1" aria-label="Move ${esc(label)} up" ${i ? '' : 'disabled'}>${icon('arrow-up', 'w-4 h-4')}</button><button type="button" class="btn btn-sm btn-ghost" data-action="dashCardMove" data-val="${id}" data-d="1" aria-label="Move ${esc(label)} down" ${i < order.length - 1 ? '' : 'disabled'}>${icon('arrow-down', 'w-4 h-4')}</button></div>`; }).join('')}</div>`,
     `<button type="button" class="btn btn-primary" data-action="closeModal">Done</button>`), { onClose: () => render() });
   if (focus) { const b = $(`[data-action="dashCardMove"][data-val="${focus[0]}"][data-d="${focus[1]}"]`); (b && !b.disabled ? b : $(`[data-action="dashCardMove"][data-val="${focus[0]}"]:not([disabled])`))?.focus(); }
+}
+// Today at a glance: one line each for the Big 3, what's due, the next time block, the reading, the
+// workout, dinner and (inside Obsidian) this week's teaching. Each line opens its section.
+function dashToday() {
+  const t = ymd(), rows = [];
+  const row = (ic, label, text, attrs, done) => rows.push(`<button type="button" class="w-full flex items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800" ${attrs}>${icon(ic, 'w-4 h-4 shrink-0 ' + (done ? 'text-emerald-600 dark:text-emerald-400' : 'text-brand-700 dark:text-brand-300'))}<span class="min-w-0 flex-1"><span class="block text-xs muted">${label}</span><span class="block text-sm font-medium truncate">${text}</span></span></button>`);
+  const b3 = big3(), b3open = b3.filter(tOpen), open = TK().filter(x => tOpen(x) && !x.someday && x.due), due = open.filter(x => x.due === t).length, late = open.filter(x => x.due < t).length;
+  if (b3.length) row('star', `Big 3 · ${b3.length - b3open.length} of ${b3.length} done`, b3open.length ? b3open.map(x => esc(x.title)).join(' · ') : 'All three done this week 🎉', 'data-action="goTaskTab" data-tab="today"', !b3open.length);
+  else row('star', 'Big 3', 'Pick this week’s three', 'data-action="goWeekPlan"');
+  row('list-checks', 'Tasks', due || late ? [due ? `${due} due today` : '', late ? `${late} overdue` : ''].filter(Boolean).join(' · ') : 'Nothing due today', 'data-action="goTaskTab" data-tab="today"', !due && !late);
+  const nb = nextBlock(); if (nb) row('calendar-clock', `Next block · ${fmtTime(nb.start)}`, esc(blockLabel(nb)), 'data-action="goTaskTab" data-tab="today"');
+  const p = activePlan();
+  if (p) { const i = planFocusIdx(p), T = p.tpl ? PLAN_TEMPLATES[p.tpl] : null; row('book-open', planKind(p) === 'weekly' ? 'This week’s reading' : 'Today’s reading', esc(planDayText(p, i)) + (p.done[i] ? ' ✓' : ''), `data-action="${T && T.kind === 'self' ? 'goScr' : 'planRead'}" data-tab="plans" data-id="${p.id}" data-i="${i}"`, !!p.done[i]); }
+  const aw = Store.get('activeWorkout'), lw = W()[0];
+  if (aw) row('activity', 'Workout in progress', esc(aw.name || 'Workout'), 'data-action="go" data-view="fitness"');
+  else if (lw && wDate(lw) === t) row('dumbbell', 'Workout', `${esc(lw.name || 'Workout')} ✓`, 'data-action="go" data-view="fitness"', true);
+  else {
+    const f = routineFolders().find(x => x.name && x.routines.length && programInfo(x.name) && !/complete|Starts/.test(programInfo(x.name))), next = f && nextInFolder(f);
+    if (next) row('dumbbell', `Workout · ${esc(f.name)} · ${esc(programInfo(f.name))}`, `Next: ${esc(next.name)}`, 'data-action="go" data-view="fitness"');
+    else if (lw) row('dumbbell', 'Workout', `Last: ${esc(lw.name || 'Workout')}, ${fmtDate(wDate(lw), { weekday: 'short', month: 'short', day: 'numeric' })}`, 'data-action="go" data-view="fitness"');
+  }
+  const din = tonightMeals();
+  row('chef-hat', 'Dinner', din.length ? din.slice(0, 2).map(it => esc(planItemLabel(it))).join(' · ') : 'Not planned yet', `data-action="goRecTab" data-tab="plan"`);
+  const teach = inObsidian() && Array.isArray(window.LD_OBSIDIAN.teaching) ? window.LD_OBSIDIAN.teaching.filter(x => x && x.title && x.date >= t).slice(0, 3) : [];
+  teach.forEach(x => row('presentation', `Teaching · ${daysBetween(t, x.date) === 0 ? 'today' : fmtDate(x.date, { weekday: 'short', month: 'short', day: 'numeric' })}`, esc([x.title, x.scripture].filter(Boolean).join(' · ')), `data-action="obsOpen" data-note="${esc(x.note || x.title)}"`));
+  return `<div class="card">${cardHead('sun', 'Today')}<div class="-mx-2 space-y-0.5">${rows.join('')}</div></div>`;
 }
 function renderDashboard() {
   const t = ymd(), tot = dayTotals(t), T = targetsFor(t);
@@ -726,6 +752,7 @@ function renderDashboard() {
   const needBackup = hasData && !copied && (!S.lastExport || Date.now() - new Date(S.lastExport) > 7 * 864e5);
   const lastMedia = Store.get('media').filter(m => m.status === 'active').sort((a, b) => (b.updated || '').localeCompare(a.updated || ''))[0] || Store.get('media').filter(m => m.status === 'queue').sort((a, b) => (a.qpos ?? 1e9) - (b.qpos ?? 1e9))[0];
   const cards = {
+    today: () => dashToday(),
     nutrition: () => `<div class="card">${cardHead('apple', 'Nutrition today', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="nutrition">Log ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       <div class="flex items-center gap-4"><div class="relative shrink-0">${ring(tot.cal / T.cal, '#0d9488', 108, 11)}<div class="absolute inset-0 grid place-items-center text-center"><div><div class="text-xl font-bold tabular-nums">${fmtNum(tot.cal)}</div><div class="text-[11px] muted">of ${fmtNum(T.cal)} kcal</div></div></div></div>
       <div class="flex-1 space-y-2">${miniBar('Protein', tot.p, T.p, '#e11d48')}${miniBar('Carbs', tot.c, T.c, '#f59e0b')}${miniBar('Fat', tot.f, T.f, '#6366f1')}</div></div>
@@ -7433,6 +7460,10 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16o', title: 'Today, at a glance', slides: [
+    { title: 'One card for today', body: '<p>The dashboard now starts with a <strong>Today</strong> card: your Big 3, what’s due and overdue, the next time block, today’s reading, your workout and tonight’s dinner. Tap a line to go straight there.</p><p>Like every card, it can be moved or hidden with the sliders button at the top right.</p>', go: ['dashboard', '', '', 'Open the Dashboard'] },
+    { title: 'Teaching this week', body: '<p>With the dashboard docked in Obsidian on the Mac, Today also lists the sermons and lessons dated in the next 7 days, with their passage. Tap one to open its note.</p>' }
+  ] },
   { id: '2026-10-16n', title: 'Tidier tasks on your phone', slides: [
     { title: 'More tasks on the screen', body: '<p>On a phone, a task’s title now gets the full width, and its buttons (+1, +2, +3, Today and the Big 3 star) sit together on one line underneath. Block time and Focus are still there on a larger screen, and Focus is in each task’s editor.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] },
     { title: 'Tidy up old overdue tasks', body: '<p>When tasks have waited 3 days or more past their date, Tasks → Today and the dashboard offer <strong>Tidy up</strong>. It shows them one at a time: move it to today, tomorrow or next week, put it in Someday, mark it already done, or delete it. <strong>Not today</strong> hides the offer until tomorrow.</p>' }
