@@ -17,23 +17,23 @@ async function open(page) {
 
 test('dashboard cards follow the order chosen in the card picker, and the order is kept and synced', async ({ page }) => {
   const errors = await open(page);
-  const first = () => page.evaluate(() => { const titles = [...document.querySelectorAll('#view .card')].map(c => c.textContent); return DASH_CARDS.map(c => c[1]).filter(l => titles.some(t => t.includes(l))).sort((a, b) => titles.findIndex(t => t.includes(a)) - titles.findIndex(t => t.includes(b))); });
-  expect((await first())[0]).toBe('Nutrition today');
+  const first = () => page.$$eval('#view .card > div:first-child > h3', hs => hs.map(h => h.textContent.trim()));
+  expect((await first()).slice(0, 2)).toEqual(['Today', 'Nutrition today']);
 
   await page.click('#view [data-action="dashCardsEdit"]');
-  // Tasks moves up three places, to the top; the button keeps focus while it moves.
-  for (let i = 0; i < 3; i++) await page.click('#modal [data-action="dashCardMove"][data-val="tasks"][data-d="-1"]');
+  // Tasks moves up four places, to the top; the button keeps focus while it moves.
+  for (let i = 0; i < 4; i++) await page.click('#modal [data-action="dashCardMove"][data-val="tasks"][data-d="-1"]');
   await expect(page.locator('#modal [data-action="dashCardMove"][data-val="tasks"][data-d="-1"]')).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement?.dataset?.val)).toBe('tasks');
   await page.locator('#modal [data-change="dashCardToggle"][data-val="weight"]').uncheck();
   await page.click('#modal button:has-text("Done")');
-  expect((await first()).slice(0, 3)).toEqual(['Tasks', 'Nutrition today', 'Training']);
+  expect((await first()).slice(0, 4)).toEqual(['Tasks', 'Today', 'Nutrition today', 'Training']);
 
   await page.reload();
   await page.waitForFunction(() => typeof S !== 'undefined' && Store.data);
-  expect(await page.evaluate(() => [S.cardOrder.slice(0, 2), S.hiddenCards, SYNC_SETTINGS.includes('cardOrder')])).toEqual([['tasks', 'nutrition'], ['weight'], true]);
+  expect(await page.evaluate(() => [S.cardOrder.slice(0, 2), S.hiddenCards, SYNC_SETTINGS.includes('cardOrder')])).toEqual([['tasks', 'today'], ['weight'], true]);
   // A card the saved order doesn't know yet (from a newer version) still appears, at the end.
-  expect(await page.evaluate(() => { S.cardOrder = ['meals', 'gone']; return dashOrder(); })).toEqual(['meals', 'nutrition', 'weight', 'training', 'tasks', 'faith', 'family']);
+  expect(await page.evaluate(() => { S.cardOrder = ['meals', 'gone']; return dashOrder(); })).toEqual(['meals', 'today', 'nutrition', 'weight', 'training', 'tasks', 'faith', 'family']);
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
@@ -135,5 +135,30 @@ test('on a phone, the bottom bar holds four chosen sections around a + button th
   expect(await page.evaluate(() => SYNC_SETTINGS.includes('bar'))).toBe(true);
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(bar).toBeHidden();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('the Today card gathers the Big 3, what is due, dinner and, inside Obsidian, this week’s teaching', async ({ page }) => {
+  const errors = await open(page);
+  await page.evaluate(() => {
+    const t = ymd(), task = (id, due) => ({ id, title: id, status: 'todo', priority: 'med', area: 'home', due, created: new Date().toISOString() });
+    Store.set('tasks', [task('Due now', t), task('Late one', addDays(t, -2)), task('Later', addDays(t, 5))]);
+    Store.set('mealPlan', { [t]: [{ id: 'p1', text: 'Chicken tacos', slot: 'dinner' }] });
+    window.LD_OBSIDIAN = { vault: 'V', notes: [], people: [], prefix: '#ld-obsidian=', teaching: [{ title: 'The Servant King', note: 'John 13 - October 28, 2026', date: addDays(t, 2), scripture: 'John 13:1-17' }, { title: 'Last week', date: addDays(t, -3) }] };
+    go('dashboard');
+  });
+  const card = page.locator('#view .card').filter({ has: page.locator('h3', { hasText: /^Today$/ }) });
+  await expect(card).toContainText('Pick this week’s three');
+  await expect(card).toContainText('1 due today · 1 overdue');
+  await expect(card).toContainText('Chicken tacos');
+  await expect(card).toContainText('The Servant King · John 13:1-17');
+  await expect(card).not.toContainText('Last week');
+  await card.locator('[data-action="obsOpen"]').click();
+  expect(await page.evaluate(() => decodeURIComponent(location.hash))).toContain('John 13 - October 28, 2026');
+  // Outside Obsidian there is no teaching line, and the card can be hidden like any other.
+  await page.evaluate(() => { delete window.LD_OBSIDIAN; history.replaceState(null, '', location.pathname); render(); });
+  await expect(card).not.toContainText('Teaching');
+  await page.evaluate(() => { S.hiddenCards = ['today']; render(); });
+  await expect(page.locator('#view h3', { hasText: /^Today$/ })).toHaveCount(0);
   expect(errors, errors.join('\n')).toEqual([]);
 });

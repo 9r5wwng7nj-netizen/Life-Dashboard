@@ -513,3 +513,19 @@ test('vault health: notes with no type, unusual status words, broken links, to-d
   expect(out.calls).toEqual(['open:Inbox/Loose.md', 'todos', 'recheck']);
   expect(out.loading).toContain('Checking the vault');
 });
+
+test('teaching for the docked dashboard: the next 7 days, not done, outside left-out folders', () => {
+  const today = '2026-10-24', mk = (p, fm) => { const parts = p.split('/'); return core.noteInfo({ path: p, basename: parts.pop().replace(/\.md$/, ''), folder: parts.join('/'), mtime: 1 }, fm, today); };
+  const notes = [
+    mk('Sermons/John 13.md', { type: 'sermon', status: 'draft', date: '2026-10-28', scripture: 'John 13', title: 'The Servant King' }),
+    mk('Studies/Romans 8.md', { type: 'study-session', status: 'planned', date: '2026-10-24' }),
+    mk('Studies/Far off.md', { type: 'study-session', status: 'planned', date: '2026-11-02' }),
+    mk('Sermons/Preached.md', { type: 'sermon', status: 'preached', date: '2026-10-25' }),
+    mk('Archive/Old lesson.md', { type: 'lesson', status: 'draft', date: '2026-10-26' }),
+    mk('Notes/Meeting.md', { type: 'meeting-review', date: '2026-10-25' })
+  ];
+  expect(core.teachingSoon(notes, today, ['Archive'])).toEqual([
+    { title: 'Romans 8', note: 'Romans 8', date: '2026-10-24', scripture: '' },
+    { title: 'The Servant King', note: 'John 13', date: '2026-10-28', scripture: 'John 13' }
+  ]);
+});

@@ -52,7 +52,7 @@ The `<head>` holds the theme pre-paint script, compiled `assets/app.css`, and th
 | `UI PRIMITIVES` | `toast`, `Modal`, `modalShell`, `tabs`, `cardHead`, `emptyState`, `tagChip`, `ui` (in-memory UI state) |
 | `ROUTER / SHELL` | `VIEWS` (nav + render fn per view), `render()` / `renderNow()`, `rerender()`, `go(view)`, the phone bottom bar (`renderBar`, `S.bar`) and its + sheet (`QUICK_ADD`, `quickAddForm`) |
 | `REST TIMER` | header timer (`Timer`), `beep()`, `notify()` |
-| `DASHBOARD (home)` | `renderDashboard()` plus per-module cards (`dashFamily`, `dashMeals`, `dashTasks`, …) |
+| `DASHBOARD (home)` | `renderDashboard()` plus per-module cards (`dashToday`, `dashFamily`, `dashMeals`, `dashTasks`, …), drawn in `dashOrder()` |
 | `FITNESS` | workout logger, programs, exercise library, stats, Hevy CSV import/export |
 | `NUTRITION` | food log, Open Food Facts / USDA search, barcode, adaptive plan and check-ins, MacroFactor import |
 | `SETTINGS & SYNC` | Settings modal, `exportAll()` backup, import (merge/replace) |
