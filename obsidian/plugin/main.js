@@ -413,7 +413,7 @@ const core = (() => {
     const cutoff = Date.parse(d.today) - (d.staleDays || 30) * 864e5;
     const stale = kept.filter(n => n.hub && ['draft', 'ready'].includes(STATUS_OF[n.rawStatus]) && Math.max(n.mtime || 0, touched.get(n.path) || 0) < cutoff);
     const sections = [
-      { id: 'untyped', title: 'Notes with no type', why: 'Without a type a note stays off the shelves and the areas’ live lists.', items: kept.filter(n => !n.type && !inBook.has(n.path)).sort(newest).map(n => item(n, n.folder || 'Top of the vault')) },
+      { id: 'untyped', title: 'Notes with no type', why: 'Without a type a note stays off the shelves and the areas’ live lists.', items: kept.filter(n => !n.type && !inBook.has(n.path)).sort(newest).map(n => item(n, n.folder && n.folder !== '/' ? n.folder : 'Top of the vault')) },
       { id: 'status', title: 'Status words outside the usual set', why: 'Shelves read these as Draft. Use Set status to pick a usual word.', items: kept.filter(n => !knownStatus(n.rawStatus)).sort(newest).map(n => item(n, `status: ${n.rawStatus}`)) },
       { id: 'broken', title: 'Links that go nowhere', why: 'The linked note doesn’t exist: fix the name, or leave it as a note to write.', items: (d.broken || []).filter(b => byPath.has(b.path)).map(b => item(byPath.get(b.path), `${b.targets.slice(0, 3).join(', ')}${b.targets.length > 3 ? ` and ${b.targets.length - 3} more` : ''}`)) },
       { id: 'todos', title: 'To-dos still in notes', why: 'The dashboard keeps the one task list.', action: 'moveTodos', actionLabel: 'Move to-dos to Tasks', items: (d.todos || []).filter(t => byPath.has(t.path)).map(t => item(byPath.get(t.path), `${t.count} to-do${t.count === 1 ? '' : 's'}`)) },
@@ -1278,9 +1278,11 @@ class LifeDashboardPlugin extends Plugin {
       new Notice(`Moved ${picked.length} to-do${picked.length === 1 ? '' : 's'} to Tasks`);
     }, { intro: 'Tick the ones that are real tasks. Leave checklists that belong inside their note unticked.', button: 'Move to Tasks' }).open();
   }
-  // --- Vault health: the same checks as moveTodos and the weekly review, across the whole vault.
+  // --- Vault health: the same checks as moveTodos and the weekly review, across the whole vault. Folders in
+  // Obsidian's own Excluded files (Settings → Files and links) are left out too: imported reference text is noisy.
   async healthData() {
-    const today = core.ymd(new Date()), skip = [...this.ignored(), core.safeFolder(this.settings.archiveFolder || '') || ''].filter(Boolean), notes = this.notes();
+    let excluded = []; try { excluded = (this.app.vault.getConfig('userIgnoreFilters') || []).filter(x => typeof x === 'string' && !x.startsWith('/')).map(x => core.safeFolder(x) || ''); } catch (e) { }
+    const today = core.ymd(new Date()), skip = [...this.ignored(), core.safeFolder(this.settings.archiveFolder || '') || '', ...excluded].filter(Boolean), notes = this.notes();
     const kept = notes.filter(n => !core.inFolder(n.path, skip)), mc = this.app.metadataCache;
     const broken = Object.entries(mc.unresolvedLinks || {}).map(([path, t]) => ({ path, targets: Object.keys(t || {}) })).filter(b => b.targets.length);
     const todos = [];
