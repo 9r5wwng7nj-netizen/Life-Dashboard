@@ -96,6 +96,7 @@ const core = (() => {
   // One note → the facts the Library shows. `file`: { path, basename, folder, mtime }.
   function noteInfo(file, fm, today) {
     fm = fm || {};
+    if (!fm.type && fm.granola_id) fm = { ...fm, type: 'meeting-source' }; // Granola notes that arrived without a type
     const family = familyOf(fm);
     const date = isoDate(fm.preaching_date || fm.date || fm.due || fm.published);
     const status = statusOf(fm, family, date, today);
@@ -105,9 +106,61 @@ const core = (() => {
       mtime: file.mtime || 0, scripture: plain(fm.scripture || fm.passage), series: plain(fm.series),
       roles: plain(fm.roles), lastContact: isoDate(fm.last_contact), nextContact: isoDate(fm.next_contact), rawStatus: String(fm.status || '').trim().toLowerCase(), taught: parseTaught(fm.taught), scriptureKey: scriptureKey(fm.scripture || fm.passage),
       projectLink: linkTarget(fm.project), projectPath: null, status: status.key, statusLabel: status.label,
+      basename: file.basename, partOfLink: linkTarget(fm.part_of), partOfPath: null, author: plain(fm.author), sourceMeetingLink: linkTarget(fm.source_meeting), sourceMeetingPath: null,
       kind: family ? FAMILIES[family].kind : '', cover: coverText(title, fm.scripture || fm.passage),
       color: PALETTE[hash(title) % PALETTE.length], hub: family === 'series' || String(fm.type || '').toLowerCase() === 'project'
     };
+  }
+  // --- Books. A book is (1) a work-index note that isn't part of another work, (2) an author or collection's own
+  // writings (texts whose part_of is that author or collection), or (3) a folder whose index note has the folder's
+  // name, with its other notes as chapters. Chapters keep the order of the parent's links (its Contents list).
+  const naturalCmp = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+  // "Summa Theologiae - Prima Secundae - Question 9" under those titles reads "Question 9".
+  function shortTitle(title, ancestors) {
+    let t = String(title); const names = ancestors.map(a => a.title).filter(Boolean).sort((a, b) => b.length - a.length);
+    for (let changed = true; changed;) { changed = false; for (const a of names) if (t.toLowerCase().startsWith(a.toLowerCase() + ' - ')) { t = t.slice(a.length + 3); changed = true; } }
+    return t || title;
+  }
+  // notes: noteInfo with partOfPath resolved. order: Map(parentPath -> [childPath...]) in the parent's link order.
+  function buildBooks(notes, order, groupOf) {
+    const byPath = new Map(notes.map(n => [n.path, n])), kids = new Map(), push = (k, n) => (kids.get(k) || kids.set(k, []).get(k)).push(n);
+    for (const n of notes) if (n.partOfPath && byPath.has(n.partOfPath)) push(n.partOfPath, n);
+    const roots = [];
+    for (const n of notes) {
+      const t = n.type.toLowerCase(), parent = n.partOfPath && byPath.get(n.partOfPath);
+      if (t === 'work-index' && (!parent || ['author', 'collection'].includes(parent.type.toLowerCase()))) roots.push({ note: n, kind: 'Classic', only: null });
+      else if (['author', 'collection'].includes(t)) { const own = (kids.get(n.path) || []).filter(k => !['work-index', 'author', 'collection'].includes(k.type.toLowerCase())); if (own.length) roots.push({ note: n, kind: 'Writings', only: own }); }
+      else if (!n.partOfPath && !n.hub && ['', 'book', 'book-note'].includes(t) && n.folder && n.basename === n.folder.split('/').pop()) {
+        const chapters = notes.filter(c => c.folder === n.folder && c !== n && !c.partOfPath && !c.hub && ['', 'book-chapter', 'chapter', 'historical-text'].includes(c.type.toLowerCase()));
+        if (chapters.length) roots.push({ note: n, kind: 'Book', only: chapters });
+      }
+    }
+    const sorted = (parent, list) => { const o = (order && order.get(parent.path)) || []; const at = p => { const i = o.indexOf(p); return i < 0 ? 1e6 : i; }; return [...list].sort((a, b) => at(a.path) - at(b.path) || naturalCmp(a.basename || a.title, b.basename || b.title)); };
+    const index = new Map(); // chapter path -> { book, ancestors, i }
+    const books = roots.map(({ note, kind, only }) => {
+      const leaves = [];
+      const grow = (n, ancestors, list, depth) => ({ path: n.path, title: n.title, short: shortTitle(n.title, ancestors), children: depth > 6 ? [] : sorted(n, list).map(c => { const cs = kids.get(c.path) || []; if (cs.length) return grow(c, [...ancestors, n], cs, depth + 1); leaves.push({ note: c, ancestors: [...ancestors, n] }); return { path: c.path, title: c.title, short: shortTitle(c.title, [...ancestors, n]), children: [] }; }) });
+      const tree = grow(note, [], only || kids.get(note.path) || [], 0);
+      const book = { ...note, kind, isBook: true, tree, leaves: leaves.map(l => l.note.path), count: leaves.length, group: groupOf ? groupOf(note) : '', author: note.author || (kind === 'Writings' ? note.title : ''), cover: coverText(note.title, ''), family: kind === 'Book' ? 'book' : 'classic' };
+      leaves.forEach((l, i) => index.set(l.note.path, { book: book.path, ancestors: l.ancestors.map(a => a.path), i }));
+      return book;
+    }).filter(b => b.count);
+    return { books, index, byPath: new Map(books.map(b => [b.path, b])) };
+  }
+  // A chapter's topic: the first line of its text after "## Source text" (or after the frontmatter), sentence-cased when shouted.
+  function chapterSubject(text) {
+    const lines = String(text).replace(/^---[\s\S]*?\n---\n?/, '').split('\n').map(l => l.trim()), start = lines.findIndex(l => /^##\s+source text/i.test(l));
+    let line = lines.slice(start >= 0 ? start + 1 : 0).find(l => l && !/^(#|>|\[\[|!\[|---|\|)/.test(l)) || '';
+    if (line && line === line.toUpperCase() && /[A-Z]/.test(line)) line = line.toLowerCase().replace(/^\W*\w/, c => c.toUpperCase());
+    return line.length > 90 ? line.slice(0, 88).trimEnd() + '…' : line;
+  }
+  // Previous and next chapter, and the trail back up, for a chapter that belongs to a book.
+  function bookPlace(books, path) {
+    const at = books.index.get(path); if (!at) return null;
+    const book = books.byPath.get(at.book); if (!book) return null;
+    const find = p => { const walk = node => node.path === p ? node : node.children.reduce((r, c) => r || walk(c), null); return walk(book.tree); };
+    const leaves = book.leaves, trail = at.ancestors.map(find).filter(Boolean);
+    return { book, trail, prev: at.i > 0 ? find(leaves[at.i - 1]) : null, next: at.i < leaves.length - 1 ? find(leaves[at.i + 1]) : null, i: at.i, total: leaves.length, here: find(path) };
   }
   const inFolder = (path, folders) => folders.some(f => f && (path === f || path.startsWith(f.replace(/\/+$/, '') + '/')));
 
@@ -131,9 +184,15 @@ const core = (() => {
       h.done = fam.filter(m => m.status === 'done').length; h.total = fam.length;
       h.note.count = h.members.length;
     }
-    const onShelf = n => n.family && !n.hubPath;
+    // Books replace their parts: a book is one cover, and its chapters and sub-parts stay off the shelves.
+    const books = opts.books || null, inBook = new Set();
+    if (books) for (const b of books.books) { const walk = node => node.children.forEach(c => { inBook.add(c.path); walk(c); }); walk(b.tree); }
+    // A Granola note that has a review is shown through the review.
+    const reviewed = new Set(seen.filter(n => n.sourceMeetingPath).map(n => n.sourceMeetingPath));
+    const onShelf = n => n.family && !n.hubPath && !inBook.has(n.path) && !reviewed.has(n.path) && !(books && n.family === 'classic');
     const newest = (a, b) => (b.date || '').localeCompare(a.date || '') || b.mtime - a.mtime;
-    const shelves = order.filter(f => FAMILIES[f]).map(f => ({ id: f, label: FAMILIES[f].label, items: seen.filter(n => onShelf(n) && n.family === f).sort(newest) })).filter(s => s.items.length);
+    const bookItems = books ? books.books.filter(b => !inFolder(b.path, ignore)) : [];
+    const shelves = order.filter(f => FAMILIES[f]).map(f => ({ id: f, label: FAMILIES[f].label, items: [...seen.filter(n => onShelf(n) && n.family === f && !(books && books.byPath.has(n.path))).sort(newest), ...bookItems.filter(b => b.family === f).sort((a, b) => naturalCmp(a.group || '', b.group || '') || naturalCmp(a.title, b.title))] })).filter(s => s.items.length);
     // Working on now: the next unfinished sermon or study with a date from today on, else the latest one touched.
     const open = seen.filter(n => TEACHING.includes(n.family) && !n.hubPath && n.status !== 'done' && n.status !== 'idea');
     const upcoming = open.filter(n => n.date && n.date >= today).sort((a, b) => a.date.localeCompare(b.date));
@@ -267,6 +326,33 @@ const core = (() => {
   const passageCallout = (r, verses, translation) => `> [!quote] ${r.label}${translation ? ` (${translation})` : ''}\n${verses.map(([n, t]) => `> **${n}** ${t}`).join('\n')}\n`;
   const passageNoteText = (book, c, today) => `---\ntype: scripture-note\ncreated: ${today}\nscripture: "${book} ${c}"\nbook: ${book}\ntestament: ${BIBLE.indexOf(book) >= 39 ? 'New Testament' : 'Old Testament'}\n---\n\n# ${book} ${c}\n\n## Notes\n\n## Canonical connections\n\n## Related notes\n\n`;
 
+  // --- Filing. Rules are lines like "person: People" or "project: Projects/{title}" ({title}, {year} and {month} are filled in).
+  const parseRules = lines => [].concat(lines || []).map(String).map(l => l.match(/^\s*([\w-]+)\s*(?::|→|->)\s*(.+?)\s*$/)).filter(Boolean)
+    .map(m => ({ type: m[1].toLowerCase(), folder: m[2].replace(/^\/+|\/+$/g, '') }));
+  // Where a note belongs: its project's folder when it belongs to one, else its type's rule; null when it's already there.
+  function fileTarget(n, rules, ctx = {}) {
+    let folder = null;
+    if (n.projectPath && ctx.hubFolder && ctx.hubFolder !== n.folder) folder = ctx.hubFolder;
+    if (!folder) {
+      const r = rules.find(x => x.type === String(n.type || '').toLowerCase()); if (!r) return null;
+      const when = n.date || ctx.today || '';
+      folder = r.folder.replace(/\{title\}/g, safeName(n.title)).replace(/\{year\}/g, when.slice(0, 4)).replace(/\{month\}/g, when.slice(5, 7));
+      folder = safeFolder(folder); if (folder === null) return null;
+    }
+    return folder === n.folder ? null : folder;
+  }
+  const FINISHED = ['done', 'complete', 'completed', 'archived', 'finished', 'preached', 'taught', 'delivered'];
+  // A project or series note's contents, refreshed when the note opens.
+  const CONTENTS_START = '<!-- life-dashboard:contents -->', CONTENTS_END = '<!-- /life-dashboard:contents -->';
+  function contentsBlock(members, today) {
+    const lines = members.map((m, i) => `${i + 1}. [[${m.title}]]${[m.scripture, m.date ? fmtDate(m.date, today) : '', m.statusLabel, (m.taught || []).length ? `taught ${m.taught.map(t => `${fmtDate(t.date, today)}${t.group ? ` (${t.group})` : ''}`).join(', ')}` : ''].filter(Boolean).map(x => ` · ${x}`).join('')}`);
+    return [CONTENTS_START, '## Contents', '', ...(lines.length ? lines : ['No notes in this project yet.']), '', '_Kept up to date by Life Dashboard each time this note opens._', CONTENTS_END].join('\n');
+  }
+  function setContents(text, block) {
+    const a = text.indexOf(CONTENTS_START), b = text.indexOf(CONTENTS_END);
+    return a >= 0 && b > a ? text.slice(0, a) + block + text.slice(b + CONTENTS_END.length) : `${text.replace(/\s*$/, '')}\n\n${block}\n`;
+  }
+
   // --- Weekly review. The top of the note (between the markers) is filled in and refreshed; everything below is yours.
   const AUTO_START = '<!-- life-dashboard:auto -->', AUTO_END = '<!-- /life-dashboard:auto -->';
   function weekOf(today) { const [y, m, d] = today.split('-').map(Number), dow = (new Date(y, m - 1, d).getDay() + 6) % 7; return addDays(today, -dow); }
@@ -286,7 +372,7 @@ const core = (() => {
     } else L.push('_The dashboard’s numbers fill in on the Mac with the dashboard docked: run **Refresh the weekly review** there._');
     L.push('', '## Clear the decks', '');
     L.push(d.meetings.length ? `**Meetings to process:** ${d.meetings.map(m => `${wl(m.title)}${m.date ? ` (${shortDay(m.date, d.today)})` : ''}`).join(' · ')}` : '**Meetings to process:** none');
-    L.push(d.inboxNotes.length ? `**Notes waiting in the inbox:** ${d.inboxNotes.map(wl).join(' · ')}${d.inboxMore ? ` and ${d.inboxMore} more` : ''}` : '**Notes waiting in the inbox:** none');
+    L.push(d.inboxNotes.length ? `**Notes waiting in the inbox:** ${d.inboxNotes.map(wl).join(' · ')}${d.inboxMore ? ` and ${d.inboxMore} more` : ''} (run **File the inbox**)` : '**Notes waiting in the inbox:** none');
     L.push('', '## Teaching this week', '');
     if (d.teaching.length) d.teaching.forEach(t => L.push(`- ${wl(t.title)}${t.scripture ? ` · ${t.scripture}` : ''} · ${shortDay(t.date, d.today)}${t.statusLabel ? ` · ${t.statusLabel}` : ''}`)); else L.push('Nothing scheduled.');
     L.push('', '## People to reach', '');
@@ -342,7 +428,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -362,9 +448,9 @@ const render = (() => {
     const b = el(doc, 'button', 'ldl-card'); b.type = 'button';
     b.setAttribute('aria-label', [n.title, n.kind, n.statusLabel].filter(Boolean).join(', '));
     b.append(cover(doc, n), el(doc, 'span', 'ldl-card-title', n.title));
-    const meta = n.count ? `${n.count} note${n.count === 1 ? '' : 's'}` : core.metaLine({ ...n, kind: '' }, today);
+    const meta = n.isBook ? [n.author && n.author !== n.title ? n.author : '', `${n.count} ${n.kind === 'Writings' ? 'writing' : 'chapter'}${n.count === 1 ? '' : 's'}`].filter(Boolean).join(' · ') : n.count ? `${n.count} note${n.count === 1 ? '' : 's'}` : core.metaLine({ ...n, kind: '' }, today);
     if (meta) b.append(el(doc, 'span', 'ldl-card-meta', meta));
-    b.addEventListener('click', () => (n.hub && n.count ? on.hub(n.path) : on.open(n.path)));
+    b.addEventListener('click', () => (n.isBook && on.book ? on.book(n.path) : n.hub && n.count ? on.hub(n.path) : on.open(n.path)));
     return b;
   }
   function row(doc, n, on, today, num) {
@@ -419,6 +505,12 @@ const render = (() => {
       go.addEventListener('click', () => (h && h.members.length ? on.hub(w.path) : on.open(w.path)));
       txt.append(go); wc.append(cover(doc, w, true), txt); root.append(wc);
     }
+    if (lib.reading && lib.reading.length) {
+      const sec = el(doc, 'section', 'ldl-section'); sec.append(el(doc, 'h2', 'ldl-h2', 'Continue reading'));
+      const list = el(doc, 'div', 'ldl-list');
+      lib.reading.forEach(r => { const b = el(doc, 'button', 'ldl-row'); b.type = 'button'; const mid = el(doc, 'span', 'ldl-row-text'); mid.append(el(doc, 'span', 'ldl-row-title', r.book.title), el(doc, 'span', 'ldl-row-meta', `${r.short} · ${r.of}`)); b.append(mid); b.addEventListener('click', () => on.open(r.path)); list.append(b); });
+      sec.append(list); root.append(sec);
+    }
     for (const s of lib.shelves) {
       const sec = el(doc, 'section', 'ldl-section');
       const top = el(doc, 'div', 'ldl-section-head'); top.append(el(doc, 'h2', 'ldl-h2', s.label));
@@ -456,8 +548,50 @@ const render = (() => {
     const s = lib.shelves.find(x => x.id === id), root = el(doc, 'div', 'ldl-root');
     const back = el(doc, 'button', 'ldl-back ldl-back-plain', '‹ Library'); back.type = 'button'; back.addEventListener('click', () => on.home());
     root.append(back, el(doc, 'h1', 'ldl-h1', s ? s.label : 'Shelf'));
-    const grid = el(doc, 'div', 'ldl-grid'); (s ? s.items : []).forEach(n => grid.append(card(doc, n, on, lib.today))); root.append(grid);
+    // Books that belong to a collection are grouped under its name (Church Fathers, Reformation…).
+    const items = s ? s.items : [], groups = [...new Set(items.map(n => n.group || ''))];
+    if (groups.length > 1) groups.forEach(g => { const sec = el(doc, 'section', 'ldl-section'); sec.append(el(doc, 'h2', 'ldl-h2', g || 'Other')); const grid = el(doc, 'div', 'ldl-grid'); items.filter(n => (n.group || '') === g).forEach(n => grid.append(card(doc, n, on, lib.today))); sec.append(grid); root.append(sec); });
+    else { const grid = el(doc, 'div', 'ldl-grid'); items.forEach(n => grid.append(card(doc, n, on, lib.today))); root.append(grid); }
     return root;
+  }
+  // A book: its cover band, Start or Continue, and a contents list you can open level by level.
+  function book(doc, b, progress, on) {
+    const root = el(doc, 'div', 'ldl-root ldl-hubpage'), band = el(doc, 'header', 'ldl-band'); band.style.background = b.color;
+    const back = el(doc, 'button', 'ldl-back', '‹ Library'); back.type = 'button'; back.addEventListener('click', () => on.home());
+    band.append(back, el(doc, 'div', 'ldl-kicker', [b.kind === 'Writings' ? 'Writings' : b.author, b.group].filter(Boolean).join(' · ') || b.kind), el(doc, 'h1', 'ldl-h1', b.title));
+    const chips = el(doc, 'div', 'ldl-band-chips'); chips.append(el(doc, 'span', 'ldl-band-chip', `${b.count} ${b.kind === 'Writings' ? 'writing' : 'chapter'}${b.count === 1 ? '' : 's'}`)); band.append(chips);
+    const go = el(doc, 'button', 'ldl-btn ldl-btn-light', progress ? `Continue: ${progress.short}` : 'Start reading'); go.type = 'button';
+    go.addEventListener('click', () => on.open(progress ? progress.path : b.leaves[0])); band.append(go);
+    const about = el(doc, 'button', 'ldl-link ldl-link-light', 'Open the book’s note'); about.type = 'button'; about.addEventListener('click', () => on.open(b.path)); band.append(about);
+    root.append(band);
+    const sec = el(doc, 'section', 'ldl-section'); sec.append(el(doc, 'h2', 'ldl-h2', 'Contents'));
+    const here = progress && progress.path, holds = (node, p) => node.path === p || node.children.some(c => holds(c, p));
+    const leafRow = node => { const r = el(doc, 'button', 'ldl-row ldl-chapter' + (node.path === here ? ' ldl-here' : '')); r.type = 'button'; r.dataset.path = node.path; const mid = el(doc, 'span', 'ldl-row-text'); mid.append(el(doc, 'span', 'ldl-row-title', node.short)); r.append(mid); if (node.path === here) r.append(el(doc, 'span', 'ldl-chip ldl-st-week', 'Reading')); r.addEventListener('click', () => on.open(node.path)); return r; };
+    const count = x => x.children.length ? x.children.reduce((a, y) => a + count(y), 0) : 1;
+    const fill = (container, nodes) => {
+      const list = el(doc, 'div', 'ldl-list'); container.append(list);
+      nodes.forEach(node => {
+        if (!node.children.length) return list.append(leafRow(node));
+        const d = el(doc, 'details', 'ldl-part'); const sum = el(doc, 'summary', 'ldl-part-head');
+        sum.append(el(doc, 'span', 'ldl-part-title', node.short), el(doc, 'span', 'ldl-muted ldl-small', String(count(node)))); d.append(sum);
+        let filled = false; const open = () => { if (filled) return; filled = true; fill(d, node.children); if (on.subjects) on.subjects(d); };
+        d.addEventListener('toggle', () => { if (d.open) open(); });
+        if (here && holds(node, here)) { d.open = true; open(); }
+        list.append(d);
+      });
+    };
+    fill(sec, b.tree.children); if (on.subjects) on.subjects(sec);
+    root.append(sec); return root;
+  }
+  // The reading bar at the top of a chapter: the trail back up, and previous / contents / next.
+  function readingBar(doc, place, on) {
+    const bar = el(doc, 'div', 'ldl-readbar'), trail = el(doc, 'div', 'ldl-trail');
+    [place.book, ...place.trail.slice(1)].forEach((n, i) => { if (i) trail.append(el(doc, 'span', 'ldl-muted', '›')); const b = el(doc, 'button', 'ldl-link', i ? n.short : place.book.title); b.type = 'button'; b.addEventListener('click', () => on.book(place.book.path)); trail.append(b); });
+    trail.append(el(doc, 'span', 'ldl-muted ldl-small', `${place.i + 1} of ${place.total}`));
+    const nav = el(doc, 'div', 'ldl-readnav');
+    const mk = (label, fn, cls) => { const b = el(doc, 'button', 'ldl-btn ' + cls, label); b.type = 'button'; if (fn) b.addEventListener('click', fn); else b.disabled = true; return b; };
+    nav.append(mk(place.prev ? `‹ ${place.prev.short}` : '‹ Previous', place.prev && (() => on.open(place.prev.path)), 'ldl-btn-soft'), mk('Contents', () => on.book(place.book.path), 'ldl-btn-soft'), mk(place.next ? `${place.next.short} ›` : 'Next ›', place.next && (() => on.open(place.next.path)), 'ldl-btn-primary'));
+    bar.append(trail, nav); return bar;
   }
   // A folder: its sub-folders as tiles and its notes as rows, with a path you can click back through.
   // data: { path, name, crumbs: [{ name, path }], folders: [{ path, name, count }], notes: [noteInfo], more }
@@ -472,6 +606,7 @@ const render = (() => {
     });
     root.append(top, el(doc, 'h1', 'ldl-h1', data ? data.name : 'Folder not found'));
     if (!data) return root;
+    if (data.isInbox && on.fileInbox) { const b = el(doc, 'button', 'ldl-btn ldl-btn-primary', 'File these notes'); b.type = 'button'; b.addEventListener('click', () => on.fileInbox()); root.append(b); }
     if (data.folders.length) {
       const grid = el(doc, 'div', 'ldl-folders');
       data.folders.forEach(f => {
@@ -594,7 +729,7 @@ const render = (() => {
     box.append(acts);
     return box;
   }
-  return { home, hub, shelf, folder, taught, titleCard, followUps, versePreview };
+  return { home, hub, shelf, folder, taught, book, readingBar, titleCard, followUps, versePreview };
 })();
 
 /* =============================== 3. plugin =============================== */
@@ -605,7 +740,10 @@ const DEFAULTS = {
   ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
   shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'classic', 'article', 'person'],
   sermonFolder: '',
-  reviewFolder: '', // weekly reviews go here, in a folder per year
+  reviewFolder: '',
+  fileRules: [], // "type: folder" lines for File the inbox
+  archiveFolder: '', // where finished projects go
+  sermonArchive: '', // where finished sermon projects go // weekly reviews go here, in a folder per year
   versePreviews: true, // Bible references in notes show their verses
   bibleSuffix: 'WEB', // chapter notes are named "John 13 (WEB)"
   passageFolder: '', // where passage notes live, one folder per book like the Bible's
@@ -635,6 +773,7 @@ class LibraryView extends ItemView {
     let node;
     if (this.page.name === 'hub') node = render.hub(doc, lib, this.page.path, on);
     else if (this.page.name === 'shelf') node = render.shelf(doc, lib, this.page.id, on);
+    else if (this.page.name === 'book') { const b = this.plugin.books().byPath.get(this.page.path); node = b ? render.book(doc, b, this.plugin.progressFor(b.path), on) : render.home(doc, lib, on, '', []); }
     else if (this.page.name === 'taught') node = render.taught(doc, this.plugin.teaching(), lib.today, on);
     else if (this.page.name === 'folder') node = render.folder(doc, this.plugin.folderData(this.page.path || ''), lib.today, on);
     else node = render.home(doc, lib, on, this.q, this.q ? core.search(this.plugin.notes(), this.q, this.plugin.ignored()) : []);
@@ -688,20 +827,20 @@ class TextModal extends Modal {
 }
 // A list of items to tick; items already sent are shown greyed out.
 class PickModal extends Modal {
-  constructor(app, title, items, onSubmit) { super(app); this.title = title; this.items = items; this.onSubmit = onSubmit; }
+  constructor(app, title, items, onSubmit, opts = {}) { super(app); this.title = title; this.items = items; this.onSubmit = onSubmit; this.opts = opts; }
   onOpen() {
     const { contentEl } = this; this.setTitle ? this.setTitle(this.title) : contentEl.createEl('h2', { text: this.title });
-    contentEl.createEl('p', { text: 'Tick the ones that are yours. Follow-ups become “waiting on” tasks.', cls: 'ldl-muted' });
+    contentEl.createEl('p', { text: this.opts.intro || 'Tick the ones that are yours. Follow-ups become “waiting on” tasks.', cls: 'ldl-muted' });
     const form = contentEl.createEl('form', { cls: 'ldl-form' }), boxes = [];
     let last = null;
     this.items.forEach(it => {
       if (it.section !== last) { form.createEl('div', { text: it.section, cls: 'ldl-kicker' }); last = it.section; }
       const lab = form.createEl('label', { cls: 'ldl-field ldl-field-check' + (it.done ? ' ldl-done' : '') });
-      const box = lab.createEl('input', { type: 'checkbox' }); box.disabled = !!it.done;
-      lab.createEl('span', { text: it.done ? `${it.text} (already sent)` : it.text });
+      const box = lab.createEl('input', { type: 'checkbox' }); box.disabled = !!it.done; box.checked = !!it.checked;
+      lab.createEl('span', { text: it.done ? `${it.text} (${this.opts.doneLabel || 'already sent'})` : it.text });
       boxes.push([box, it]);
     });
-    form.createEl('button', { text: 'Send to Tasks', cls: 'mod-cta', type: 'submit' });
+    form.createEl('button', { text: this.opts.button || 'Send to Tasks', cls: 'mod-cta', type: 'submit' });
     form.addEventListener('submit', e => { e.preventDefault(); const picked = boxes.filter(([b]) => b.checked && !b.disabled).map(([, it]) => it); this.close(); this.onSubmit(picked); });
   }
   onClose() { this.contentEl.empty(); }
@@ -723,6 +862,10 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'open-dashboard', name: 'Open Life Dashboard in the sidebar', callback: () => this.openDashboard() });
     this.addCommand({ id: 'new-sermon', name: 'New sermon', callback: () => this.newSermon() });
     this.addCommand({ id: 'meeting-tasks', name: 'Send this meeting’s action items to Tasks', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickActions(f.path); return true; } });
+    this.addCommand({ id: 'file-inbox', name: 'File the inbox', callback: () => this.fileInbox() });
+    this.addCommand({ id: 'archive-projects', name: 'Archive finished projects', callback: () => this.archiveProjects() });
+    this.addCommand({ id: 'add-contents', name: 'Add a contents list to this project note', checkCallback: checking => { const f = this.app.workspace.getActiveFile(), n = f && this.library().hubs.get(f.path); if (!n) return false; if (!checking) this.refreshContents(f, true); return true; } });
+    this.registerEvent(this.app.workspace.on('file-open', f => { if (f) setTimeout(() => this.refreshContents(f), 300); }));
     this.addCommand({ id: 'weekly-review', name: 'Open this week’s review', callback: () => this.openWeekly() });
     this.addCommand({ id: 'weekly-refresh', name: 'Refresh the weekly review', callback: () => this.openWeekly(true) });
     this.addCommand({ id: 'insert-passage', name: 'Insert a Bible passage', editorCallback: editor => this.insertPassage(editor) });
@@ -741,7 +884,7 @@ class LifeDashboardPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on('file-open', () => setTimeout(() => this.decorateAll(), 50)));
     this.app.workspace.onLayoutReady(() => { this._notes = null; this.decorateAll(); if (this.settings.openOnStartup) this.openLibrary(); });
   }
-  onunload() { document.querySelectorAll('.ldl-titlecard').forEach(e => e.remove()); document.querySelectorAll('.ldl-carded').forEach(e => e.classList.remove('ldl-carded')); }
+  onunload() { document.querySelectorAll('.ldl-titlecard, .ldl-readbar').forEach(e => e.remove()); document.querySelectorAll('.ldl-carded').forEach(e => e.classList.remove('ldl-carded')); }
   async saveSettings() { await this.saveData(this.settings); this._notes = null; this.redraw(); this.decorateAll(); }
 
   // Every Markdown note as core.noteInfo, with `project` links resolved to paths. Cached until the vault changes.
@@ -752,6 +895,8 @@ class LifeDashboardPlugin extends Plugin {
       const fm = mc.getFileCache(f)?.frontmatter;
       const n = core.noteInfo({ path: f.path, basename: f.basename, folder: f.parent ? f.parent.path : '', mtime: f.stat.mtime }, fm, today);
       if (n.projectLink) n.projectPath = mc.getFirstLinkpathDest(n.projectLink, f.path)?.path || null;
+      if (n.partOfLink) n.partOfPath = mc.getFirstLinkpathDest(n.partOfLink, f.path)?.path || null;
+      if (n.sourceMeetingLink) n.sourceMeetingPath = mc.getFirstLinkpathDest(n.sourceMeetingLink, f.path)?.path || null;
       return n;
     });
     return this._notes;
@@ -773,7 +918,7 @@ class LifeDashboardPlugin extends Plugin {
     const folders = f.children.filter(c => c.children && !c.name.startsWith('.')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })).map(c => ({ path: c.path, name: c.name, count: count(c) }));
     const notes = f.children.filter(c => c.extension === 'md').map(c => byPath.get(c.path) || core.noteInfo({ path: c.path, basename: c.basename, folder: f.path, mtime: c.stat.mtime }, {}, today)).sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
     const parts = path ? path.split('/') : [];
-    return { path, name: parts.length ? parts[parts.length - 1] : 'All folders', crumbs: parts.map((p, i) => ({ name: p, path: parts.slice(0, i + 1).join('/') })), folders, notes: notes.slice(0, 300), more: Math.max(0, notes.length - 300) };
+    return { path, isInbox: !!path && path === this.inboxFolder(), name: parts.length ? parts[parts.length - 1] : 'All folders', crumbs: parts.map((p, i) => ({ name: p, path: parts.slice(0, i + 1).join('/') })), folders, notes: notes.slice(0, 300), more: Math.max(0, notes.length - 300) };
   }
   runCommand(id, missing) { const ok = this.app.commands?.executeCommandById?.(id); if (ok === false) new Notice(missing); }
   async newNote() {
@@ -781,7 +926,7 @@ class LifeDashboardPlugin extends Plugin {
     const folder = this.inboxFolder(), f = await this.createUnique(folder, 'Untitled', ''); await this.app.workspace.getLeaf(false).openFile(f);
   }
   teaching() { return core.teachingRecord(this.notes(), this.settings.groups, this.ignored()); }
-  library() { const t = this.teaching(); return Object.assign(this.libraryData(), { inbox: this.inboxFolder(), teaching: this.settings.groups.length || t.total ? t.total : 0 }); }
+  library() { const t = this.teaching(); return Object.assign(this.libraryData(), { reading: this.readingProgress(), inbox: this.inboxFolder(), teaching: this.settings.groups.length || t.total ? t.total : 0 }); }
   // Record that a sermon or lesson was taught: which group, when; and mark it Preached or Taught.
   markTaught(path) {
     const f = this.app.vault.getAbstractFileByPath(path); if (!(f instanceof TFile)) return;
@@ -802,7 +947,24 @@ class LifeDashboardPlugin extends Plugin {
       new Notice(`Recorded: ${v.group}, ${v.date}`);
     }, 'Save').open();
   }
-  libraryData() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.ignored(), shelves: this.settings.shelves }); }
+  // Books, built once per change of the vault: chapters in the order of each parent's links.
+  books() {
+    if (this._books && this._booksFor === this._notes) return this._books;
+    const notes = this.notes(), mc = this.app.metadataCache, order = new Map(), collections = new Map();
+    for (const n of notes) {
+      const t = n.type.toLowerCase();
+      if (t === 'collection') collections.set(n.folder, n.title);
+      if (['work-index', 'author', 'collection', '', 'book', 'book-note'].includes(t)) { const links = (mc.getCache(n.path)?.links || []).map(l => mc.getFirstLinkpathDest(l.link.split('#')[0], n.path)?.path).filter(Boolean); if (links.length) order.set(n.path, links); }
+    }
+    const groupOf = n => { let f = n.folder; while (f) { if (collections.has(f) && collections.get(f) !== n.title) return collections.get(f); f = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : ''; } return ''; };
+    this._books = core.buildBooks(notes, order, groupOf); this._booksFor = this._notes; return this._books;
+  }
+  readingProgress() {
+    const books = this.books(), r = this.settings.reading || {};
+    return Object.entries(r).map(([bookPath, v]) => { const b = books.byPath.get(bookPath), place = b && core.bookPlace(books, v.path); return place ? { book: b, path: v.path, at: v.at, short: place.here.short, of: `${place.i + 1} of ${place.total}` } : null; })
+      .filter(Boolean).sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, 4);
+  }
+  libraryData() { return core.buildLibrary(this.notes().map(n => ({ ...n })), { today: core.ymd(new Date()), ignoreFolders: this.ignored(), shelves: this.settings.shelves, books: this.books() }); }
   handlers(view) {
     return {
       open: path => this.openNote(path),
@@ -811,11 +973,14 @@ class LifeDashboardPlugin extends Plugin {
       home: () => view.show({ name: 'home' }),
       folder: path => view ? view.show({ name: 'folder', path }) : this.openLibrary({ name: 'folder', path }),
       newNote: () => this.newNote(),
+      book: path => view ? view.show({ name: 'book', path }) : this.openLibrary({ name: 'book', path }),
+      subjects: el => this.fillSubjects(el),
       taught: () => view ? view.show({ name: 'taught' }) : this.openLibrary({ name: 'taught' }),
       markTaught: path => this.markTaught(path),
       taughtBefore: n => core.taughtBefore(n, this.notes().filter(x => !core.inFolder(x.path, this.ignored()))),
       newSermon: () => this.newSermon(),
       weekly: () => this.openWeekly(),
+      fileInbox: () => this.fileInbox(),
       // Today's note only when the Daily notes core plugin is on (a person may let the Life Dashboard own the day).
       today: this.app.internalPlugins?.plugins?.['daily-notes']?.enabled ? () => this.runCommand('daily-notes', 'Turn on Daily notes in Settings → Core plugins to use Today’s note.') : undefined,
       search: q => { view.q = q; view.draw(); },
@@ -888,9 +1053,17 @@ class LifeDashboardPlugin extends Plugin {
   decorate(view) {
     if (!(view instanceof MarkdownView)) return;
     const root = view.containerEl, header = root.querySelector('.markdown-reading-view .mod-header');
-    root.querySelectorAll('.ldl-titlecard').forEach(e => e.remove()); root.classList.remove('ldl-carded');
+    root.querySelectorAll('.ldl-titlecard, .ldl-readbar').forEach(e => e.remove()); root.classList.remove('ldl-carded');
     if (!this.settings.titleCards || !header || !view.file) return;
-    const n = this.notes().find(x => x.path === view.file.path); if (!n || !n.family) return;
+    const n = this.notes().find(x => x.path === view.file.path); if (!n) return;
+    const place = core.bookPlace(this.books(), n.path);
+    if (place) {
+      const bar = render.readingBar(root.ownerDocument, place, this.handlers(null)), title = header.querySelector('.inline-title'); title ? title.after(bar) : header.prepend(bar);
+      const r = this.settings.reading = this.settings.reading || {}, prev = r[place.book.path];
+      if (!prev || prev.path !== n.path) { r[place.book.path] = { path: n.path, at: new Date().toISOString() }; this.saveData(this.settings); }
+      return;
+    }
+    if (!n.family) return;
     const lib = this.library(), hubNote = n.projectPath ? lib.byPath.get(n.projectPath) : null, self = lib.byPath.get(n.path) || n;
     const card = render.titleCard(root.ownerDocument, self, hubNote, this.handlers(null));
     const title = header.querySelector('.inline-title'); title ? title.after(card) : header.prepend(card);
@@ -917,11 +1090,83 @@ class LifeDashboardPlugin extends Plugin {
     if (!wv || wv.isLoading?.()) return null;
     try { return await wv.executeJavaScript(`window.LD_QUERY ? window.LD_QUERY(${JSON.stringify(q)}) : null`); } catch (e) { return null; }
   }
+  // --- Reading books
+  progressFor(bookPath) { const v = (this.settings.reading || {})[bookPath], place = v && core.bookPlace(this.books(), v.path); return place ? { path: v.path, short: place.here.short } : null; }
+  // A chapter's topic, from the first line of its text ("OF THAT WHICH MOVES THE WILL" reads "Of that which moves the will").
+  async fillSubjects(container) {
+    const rows = [...container.querySelectorAll(':scope > .ldl-list > .ldl-chapter')].filter(r => !r.dataset.subject).slice(0, 80);
+    this._subjects = this._subjects || new Map();
+    for (const r of rows) {
+      r.dataset.subject = '1'; const path = r.dataset.path;
+      if (!this._subjects.has(path)) {
+        const f = this.app.vault.getAbstractFileByPath(path); let subject = '';
+        if (f instanceof TFile) subject = core.chapterSubject(await this.app.vault.cachedRead(f));
+        this._subjects.set(path, subject);
+      }
+      const s = this._subjects.get(path); if (s && !r.querySelector('.ldl-row-meta')) r.querySelector('.ldl-row-text')?.append(Object.assign(r.ownerDocument.createElement('span'), { className: 'ldl-row-meta', textContent: s }));
+    }
+  }
+  // --- Filing
+  // Move a note or folder, making folders on the way; Obsidian updates the links. Skips anything that would overwrite.
+  async moveTo(file, folder, name) {
+    const dest = normalizePath(`${folder ? folder + '/' : ''}${name}`);
+    if (this.app.vault.getAbstractFileByPath(dest)) return false;
+    if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    await this.app.fileManager.renameFile(file, dest); return true;
+  }
+  async fileInbox() {
+    const inbox = this.inboxFolder(); if (!inbox) return new Notice('Set a folder for new notes in Settings → Files and links first.');
+    const rules = core.parseRules(this.settings.fileRules), lib = this.library(), today = core.ymd(new Date());
+    const here = this.notes().filter(n => n.folder === inbox), moves = [], untyped = [];
+    for (const n of here) {
+      const hub = n.projectPath && lib.byPath.get(n.projectPath);
+      const target = core.fileTarget(n, rules, { hubFolder: hub ? hub.folder : null, today });
+      if (target) moves.push({ n, target }); else if (!n.type) untyped.push(n.title);
+    }
+    if (!moves.length) return new Notice(untyped.length ? `Nothing to file. ${untyped.length} note${untyped.length === 1 ? '' : 's'} need a type first.` : 'The inbox is already sorted.');
+    const items = moves.map(m => ({ text: `${m.n.title}  →  ${m.target}`, section: 'Move', checked: true, move: m }));
+    new PickModal(this.app, `File the inbox · ${moves.length} note${moves.length === 1 ? '' : 's'}`, items, async picked => {
+      let done = 0, skipped = 0;
+      for (const it of picked) { const f = this.app.vault.getAbstractFileByPath(it.move.n.path); if (f instanceof TFile && await this.moveTo(f, it.move.target, f.name)) done++; else skipped++; }
+      new Notice(`Filed ${done} note${done === 1 ? '' : 's'}${skipped ? `; ${skipped} skipped because a note with that name is already there` : ''}${untyped.length ? `. ${untyped.length} still need a type.` : '.'}`);
+    }, { intro: `Untick any you want to keep in the inbox.${untyped.length ? ` Not listed: ${untyped.length} with no type (${untyped.slice(0, 3).join(', ')}${untyped.length > 3 ? '…' : ''}).` : ''}`, button: 'File them' }).open();
+  }
+  // Finished projects: sermons to the sermon archive, the rest to the archive. A project in its own folder moves with its folder.
+  archiveProjects() {
+    const lib = this.library(), arc = core.safeFolder(this.settings.archiveFolder || ''), sarc = core.safeFolder(this.settings.sermonArchive || '') || arc;
+    if (!arc && !sarc) return new Notice('Choose an archive folder in Settings → Life Dashboard Library first.');
+    const items = [];
+    for (const { note: n } of lib.hubs.values()) {
+      if (!core.FINISHED.includes(n.rawStatus)) continue;
+      const dest = n.family === 'sermon' ? sarc : arc; if (!dest || n.path.startsWith(dest + '/')) continue;
+      const own = n.folder && n.folder.split('/').pop() === n.title;
+      items.push({ text: `${n.title}  →  ${dest}${own ? ' (with its folder)' : ''}`, section: n.family === 'sermon' ? 'Sermons' : 'Projects', checked: true, n, dest, own });
+    }
+    if (!items.length) return new Notice('No finished projects to archive. A project is finished when its status is done or complete.');
+    new PickModal(this.app, 'Archive finished projects', items, async picked => {
+      let done = 0;
+      for (const it of picked) {
+        const target = it.own ? this.app.vault.getAbstractFileByPath(it.n.folder) : this.app.vault.getAbstractFileByPath(it.n.path);
+        if (target && await this.moveTo(target, it.dest, target.name)) done++;
+      }
+      new Notice(`Archived ${done} project${done === 1 ? '' : 's'}`);
+    }, { intro: 'Untick any you want to keep where they are.', button: 'Archive them' }).open();
+  }
+  // A project note's contents list: added on request, then refreshed whenever the note opens (only when it changed).
+  async refreshContents(file, add) {
+    if (!(file instanceof TFile) || file.extension !== 'md') return;
+    const hub = this.library().hubs.get(file.path); if (!hub) return;
+    if (!add) { const text = await this.app.vault.cachedRead(file); if (!text.includes(core.CONTENTS_START)) return; }
+    const block = core.contentsBlock(hub.members, core.ymd(new Date()));
+    await this.app.vault.process(file, text => { const next = core.setContents(text, block); return next === text ? text : next; });
+    if (add) new Notice('Contents list added; it updates each time this note opens.');
+  }
   // --- Weekly review: this week's note, made or opened; its top section filled from the vault and the docked dashboard.
   async weeklyData() {
     const today = core.ymd(new Date()), monday = core.weekOf(today), end = core.addDays(monday, 6), lib = this.library();
     const notes = this.notes().filter(n => !core.inFolder(n.path, this.ignored()));
-    const meetings = notes.filter(n => (n.type === 'meeting-review' && ['unprocessed', ''].includes(n.rawStatus)) || (n.type === 'meeting-source' && ['imported', 'captured', ''].includes(n.rawStatus)))
+    const reviewed = new Set(notes.map(n => n.sourceMeetingPath).filter(Boolean));
+    const meetings = notes.filter(n => (n.type === 'meeting-review' && ['unprocessed', ''].includes(n.rawStatus)) || (n.type === 'meeting-source' && ['imported', 'captured', ''].includes(n.rawStatus) && !reviewed.has(n.path)))
       .filter(n => !n.date || n.date >= core.addDays(today, -14)).sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 12);
     const inbox = this.inboxFolder(), inboxNotes = inbox ? notes.filter(n => n.folder === inbox).map(n => n.title).sort() : [];
     const teaching = notes.filter(n => core.teachable(n) && n.status !== 'done' && n.date && n.date >= monday && n.date <= end).map(n => lib.byPath.get(n.path) || n).sort((a, b) => a.date.localeCompare(b.date));
@@ -1095,6 +1340,12 @@ class LibrarySettings extends PluginSettingTab {
       .addText(t => t.setValue(s.peopleFolder).setPlaceholder('e.g. 04 People').onChange(v => { s.peopleFolder = v.trim(); save(); }));
     new Setting(containerEl).setName('Template for new people').setDesc('A note new profiles start from. {{title}} and {{date}} are filled in.')
       .addText(t => t.setValue(s.personTemplate).setPlaceholder('e.g. Templates/Person').onChange(v => { s.personTemplate = v.trim(); save(); }));
+    new Setting(containerEl).setName('Filing rules').setDesc('One per line, “type: folder”. {title} is the note’s name; {year} and {month} come from its date. Notes that belong to a project always go to the project’s folder.')
+      .addTextArea(t => t.setValue(s.fileRules.join('\n')).setPlaceholder('person: People\nbook: Library/Books\nproject: Projects/{title}').onChange(v => { s.fileRules = v.split('\n').map(x => x.trim()).filter(Boolean); save(); }));
+    new Setting(containerEl).setName('Archive for finished projects')
+      .addText(t => t.setValue(s.archiveFolder).setPlaceholder('e.g. Archive').onChange(v => { s.archiveFolder = v.trim(); save(); }));
+    new Setting(containerEl).setName('Archive for finished sermons').setDesc('Leave empty to use the archive above.')
+      .addText(t => t.setValue(s.sermonArchive).setPlaceholder('e.g. Library/Sermons').onChange(v => { s.sermonArchive = v.trim(); save(); }));
     new Setting(containerEl).setName('Weekly reviews folder').setDesc('Each week’s review is made here, in a folder per year, named like “2026-10-19 - Weekly Review”.')
       .addText(t => t.setValue(s.reviewFolder).setPlaceholder('e.g. Reviews/Weekly').onChange(v => { s.reviewFolder = v.trim(); save(); }));
     new Setting(containerEl).setName('Verse previews').setDesc('Bible references in notes show their verses when you point at or tap them.')

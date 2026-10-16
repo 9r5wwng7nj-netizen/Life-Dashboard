@@ -170,3 +170,23 @@
 .ldl-verses-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 16px 12px; border-top: 1px solid var(--background-modifier-border); }
 .ldl-verses-actions button.ldl-link { padding: 4px 0; height: auto; background: none; border: 0; box-shadow: none; color: var(--text-accent); font-weight: 600; font-size: 14px; cursor: pointer; }
 .ldl-verses-sheet { left: 8px !important; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); top: auto !important; width: auto; max-height: 65vh; }
+
+/* Books: contents, parts, the reading bar */
+.ldl-root button.ldl-btn-light { background: #fff !important; color: #0f172a !important; align-self: flex-start; margin-top: 4px; }
+.ldl-root button.ldl-link-light { color: rgba(255, 255, 255, .9) !important; align-self: flex-start; }
+details.ldl-part { border: 1px solid var(--background-modifier-border); border-radius: 14px; background: var(--background-primary); padding: 0 12px; }
+details.ldl-part[open] { padding-bottom: 12px; }
+summary.ldl-part-head { display: flex; align-items: center; gap: 10px; min-height: 52px; cursor: pointer; list-style: none; }
+summary.ldl-part-head::-webkit-details-marker { display: none; }
+summary.ldl-part-head::before { content: '›'; font-size: 20px; color: var(--text-muted); transition: transform .15s ease; }
+details.ldl-part[open] > summary.ldl-part-head::before { transform: rotate(90deg); }
+.ldl-part-title { flex: 1; font-weight: 600; font-size: 15px; }
+.ldl-root button.ldl-chapter.ldl-here { border-color: var(--interactive-accent) !important; }
+.ldl-readbar { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 18px; padding: 12px 14px; border-radius: 16px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); font-family: var(--font-interface); }
+.ldl-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 14px; }
+.ldl-trail button.ldl-link { padding: 0 !important; height: auto; background: none; border: 0; box-shadow: none; color: var(--text-accent); font-weight: 600; cursor: pointer; }
+.ldl-readnav { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; }
+.ldl-readnav button { height: 40px; border-radius: 12px; padding: 0 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.ldl-readnav button:disabled { opacity: .4; cursor: default; }
+.ldl-readnav .ldl-btn-soft { background: var(--background-primary); color: var(--text-normal); border: 1px solid var(--background-modifier-border); }
+.ldl-readnav .ldl-btn-primary { background: var(--interactive-accent); color: var(--text-on-accent); border: 0; }
