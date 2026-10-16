@@ -50,7 +50,7 @@ The `<head>` holds the theme pre-paint script, compiled `assets/app.css`, and th
 | `SETTINGS (localStorage)` | `SETTINGS_DEFAULT`, `S` (settings object), `loadSettings`/`saveSettings` |
 | `STORAGE (IndexedDB primary…)` | `COLLECTIONS` (every data key plus its default) and the `Store` API |
 | `UI PRIMITIVES` | `toast`, `Modal`, `modalShell`, `tabs`, `cardHead`, `emptyState`, `tagChip`, `ui` (in-memory UI state) |
-| `ROUTER / SHELL` | `VIEWS` (nav + render fn per view), `render()` / `renderNow()`, `rerender()`, `go(view)` |
+| `ROUTER / SHELL` | `VIEWS` (nav + render fn per view), `render()` / `renderNow()`, `rerender()`, `go(view)`, the phone bottom bar (`renderBar`, `S.bar`) and its + sheet (`QUICK_ADD`, `quickAddForm`) |
 | `REST TIMER` | header timer (`Timer`), `beep()`, `notify()` |
 | `DASHBOARD (home)` | `renderDashboard()` plus per-module cards (`dashFamily`, `dashMeals`, `dashTasks`, …) |
 | `FITNESS` | workout logger, programs, exercise library, stats, Hevy CSV import/export |

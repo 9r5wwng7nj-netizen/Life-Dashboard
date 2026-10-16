@@ -86,3 +86,54 @@ test('on a phone, Nutrition starts with Log food and one-tap recent foods', asyn
   await expect(page.locator('#view [data-action="lfOpen"]:has-text("Log food")')).toBeHidden();
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('on a phone, the bottom bar holds four chosen sections around a + button that adds a task, weight or prayer', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const errors = await open(page);
+  const bar = page.locator('#bottom-bar');
+  await expect(bar).toBeVisible();
+  expect(await bar.locator('.bar-item').allInnerTexts()).toEqual(['Dashboard', 'Tasks', 'Nutrition', 'Workouts']);
+  await expect(bar.locator('[aria-current="page"]')).toHaveText('Dashboard');
+  await bar.locator('[data-view="tasks"]').click();
+  await expect(bar.locator('[aria-current="page"]')).toHaveText('Tasks');
+  // The bar sits below the scrolling view, so it never covers the last thing on the page.
+  const [viewBox, barBox] = await Promise.all([page.locator('#view').boundingBox(), bar.boundingBox()]);
+  expect(viewBox.y + viewBox.height).toBeLessThanOrEqual(barBox.y + 1);
+
+  await bar.locator('[data-action="quickAdd"]').click();
+  await page.click('#modal [data-what="task"]');
+  await expect(page.locator('#qa-task')).toBeFocused();
+  await page.keyboard.type('Call the plumber tomorrow at 3');
+  await page.keyboard.press('Enter');
+  const plumber = await page.evaluate(() => { const t = Store.get('tasks').find(x => x.title === 'Call the plumber'); return t && [t.due, t.time]; });
+  expect(plumber).toEqual([await page.evaluate(() => addDays(ymd(), 1)), '15:00']);
+
+  await bar.locator('[data-action="quickAdd"]').click();
+  await page.click('#modal [data-what="weight"]');
+  await page.fill('#qa-weight', '181.4');
+  await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => round(toUnit(Store.get('nutrition')[ymd()].weight), 1))).toBe(181.4);
+
+  await bar.locator('[data-action="quickAdd"]').click();
+  await page.click('#modal [data-what="prayer"]');
+  await page.fill('#qa-pray', 'Sam’s surgery');
+  await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => Store.get('prayers').map(p => [p.title, p.cat]))).toEqual([['Sam’s surgery', 'Personal']]);
+
+  // Food and Link open their usual screens; food goes to today.
+  await bar.locator('[data-action="quickAdd"]').click();
+  await page.click('#modal [data-what="food"]');
+  await expect(page.locator('#modal')).toContainText('Add to');
+  expect(await page.evaluate(() => ui.lf.date === ymd())).toBe(true);
+  await page.keyboard.press('Escape');
+
+  // The four places can be changed (and must be four different sections); on a wide screen the bar is hidden.
+  await page.evaluate(() => { S.bar = ['journal', 'tasks', 'scripture', 'family']; render(); });
+  expect(await bar.locator('.bar-item').allInnerTexts()).toEqual(['Journal', 'Tasks', 'Scripture', 'Family']);
+  await page.evaluate(() => { S.bar = ['tasks', 'tasks', 'nope', 'family']; render(); });
+  expect(await bar.locator('.bar-item').allInnerTexts()).toEqual(['Dashboard', 'Tasks', 'Nutrition', 'Workouts']);
+  expect(await page.evaluate(() => SYNC_SETTINGS.includes('bar'))).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(bar).toBeHidden();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
