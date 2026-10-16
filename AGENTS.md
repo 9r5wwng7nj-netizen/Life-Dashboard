@@ -4,7 +4,7 @@ This file is the shared brief for **Claude Code** (via `CLAUDE.md`) and **OpenAI
 
 ## What this is
 
-A personal, offline-first dashboard built for one person (Seth) and shareable with others, who each get their own private copy at the hosted address: Workouts, Nutrition, Scripture, Journal, Media Library, Marriage & Family, Recipes & Meals and Tasks. The application UI and roughly 6,000 lines of vanilla JavaScript remain in `index.html`; pinned runtime libraries and compiled Tailwind CSS live in `vendor/` and `assets/`. There is no framework or application server. All data lives in the user's browser (IndexedDB). The app is opened directly from disk (`file://`) in Chrome.
+A personal, offline-first dashboard built for one person (Seth) and shareable with others, who each get their own private copy at the hosted address: Workouts, Nutrition, Scripture, Journal, Media Library, Marriage & Family, Recipes & Meals and Tasks. The application UI and roughly 7,800 lines (about 1.1 MB, many of them very long) of vanilla JavaScript remain in `index.html`; pinned runtime libraries and compiled Tailwind CSS live in `vendor/` and `assets/`. There is no framework or application server. All data lives in the user's browser (IndexedDB). Seth uses the hosted copy: the installed iPhone home-screen app and the Life Dashboard panel inside Obsidian on the Mac, kept together by Google Drive sync. Opening `index.html` from disk (`file://`) still works and is handy for tests.
 
 ## Golden rules
 
@@ -34,9 +34,9 @@ npm run probe:populated     # synthetic records, common edits/searches/imports; 
 npm run probe:performance   # large task fixtures, startup reads and photo lifecycle; also requires local server
 ```
 
-You can also just open `index.html` in Chrome; that is how the user runs it.
+You can also just open `index.html` in Chrome to try a change. Seth's own copies run at the hosted address (see the roadmap below).
 
-**Storage is per origin.** `file://`, `http://localhost:8080` and any hosted URL each have their own separate IndexedDB. The service worker caches only the app's own files (Cache Storage `ld-shell-*`), never personal data. For testing, use a localhost server or a fresh profile; the user's real data lives under `file://`. The smoke tests use a fresh, empty browser profile every run.
+**Storage is per origin.** `file://`, `http://localhost:8080` and any hosted URL each have their own separate IndexedDB. The service worker caches only the app's own files (Cache Storage `ld-shell-*`), never personal data. For testing, use a localhost server or a fresh profile. Seth's real data lives in the iPhone home-screen app and in Obsidian's panel (the hosted origin), never in a test browser. The smoke tests use a fresh, empty browser profile every run.
 
 CLI probes use isolated contexts and accept localhost URLs only. Never point a probe at the user's regular Chrome profile or change it to reuse a personal browser session. CI runs both probes after npm test. See docs/QUALITY_ASSURANCE.md for coverage and remaining manual checks.
 
@@ -98,8 +98,14 @@ See `docs/ARCHITECTURE.md` for the patterns and `docs/DATA_MODEL.md` for every s
   - Hosted on GitHub Pages at https://9r5wwng7nj-netizen.github.io/Life-Dashboard/ (repo made public by Seth on 2026-10-12). Pages publishes the `main` branch root after every push, so everything on `main` is public and live within a few minutes.
   - Drive sync is built. `DRIVE.clientId` is the OAuth client ID from Seth's `connection.church` Google Cloud project (an Internal app; the ID is public by design and is tied to the hosted address). Each device turns sync on in Settings & Sync. It syncs records and the settings listed in `SYNC_SETTINGS`; photos (`photoMeta` and the `photos` store), API keys and downloaded libraries stay on each device. Photo sync is the next step.
   - Sync rules: every write still goes through `Store.save()`/`Store.set()`, which is what marks a device as changed. Merged data is checked with `validateBackup()` and saved with `commitBackupImport()`, so a bad Drive copy changes nothing. A new collection syncs automatically; add it to `SYNC_SKIP` only if it must stay on the device. Lists of records merge by `id`, so keep giving records an `id`.
-  - Sync safeguards, which must stay: before merging, `Sync.adopt()` reloads what is saved on the device, so an out-of-date second tab cannot sync its old view; and a sync that would remove more than `SYNC_LOSS_LIMIT` records (outside `SYNC_CLEARED_OFTEN`) pauses until Seth confirms it.
+  - Sync safeguards, which must stay: before merging, `Sync.adopt()` reloads what is saved on the device, so an out-of-date second tab cannot sync its old view; a sync that would remove more than `SYNC_LOSS_LIMIT` records (outside `SYNC_CLEARED_OFTEN`) pauses until Seth confirms it; and the first sync of each day keeps a dated copy in the same app folder (`Sync.keepCopy`, thinned by `copiesToDrop` to 7 daily and 8 weekly), which Settings & Sync → Restore from a copy can add back from.
   - On iPhone the installed home-screen app has its own storage, separate from Safari. Import the backup inside the installed app.
   - Keep `id` and `updated` on records to make merging possible.
   - Keep reference data (Bibles, lexicons) separate from personal data.
+- **Dashboard master plan** (Seth's audit answers, 2026-10-16):
+  - Phase 1 (built): daily Drive copies with Restore from a copy; dashboard card order; Journal and Media show 50 at a time; Log food first on a phone; this docs refresh.
+  - Phase 2: a phone bottom bar with **Dashboard, Tasks, Nutrition, Workouts** plus a **+** capture button; compact task rows and a morning overdue sweep; *Stay signed in* to Google through the Cloudflare worker (Seth agreed to the Google Cloud setup); a Today card; one Weekly reset (nutrition check-in, Big 3, family review, then the Obsidian weekly review); photo sync.
+  - Phase 3: notes on a Bible passage and quotes/illustrations belong in Obsidian (the dashboard sends them); Google Calendar on the Today card; real push reminders only if needed; splitting `index.html` into parts is approved when it helps (a build step would also allow trimming the Lucide icon set).
+  - No in-app sharing with a spouse: a shared Apple Reminders list is enough. Seth uses every section, so don't hide any by default.
+  - Seth said yes to all 24 automation ideas on the plan page (Siri/Shortcuts captures through Obsidian or a worker inbox, groceries and timed tasks to Apple Reminders, birthdays to gift tasks, sermon readiness, and so on). Shortcuts cannot open or write into the home-screen web app, so phone automations go through Obsidian, Apple's own apps or the worker.
 - The user has said not now to Miyo integration and Claude-powered answers in Smart Search. Leave that code as is.

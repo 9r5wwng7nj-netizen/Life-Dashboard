@@ -37,16 +37,16 @@ These live on the device. You redo them once on any new origin or device:
 
 `.gitignore` blocks `*backup*.json`. Don't rename backups to get around it. They hold your private journal, prayers and family notes.
 
-## Phone + laptop (in progress)
+## Phone and laptop
 
-The plan is to host the app at an https address as an installable PWA and sync through a private Google Drive folder. The app is hosted at <https://9r5wwng7nj-netizen.github.io/Life-Dashboard/> and can be installed and opened offline; sync is not set up yet.
+The app is hosted at <https://9r5wwng7nj-netizen.github.io/Life-Dashboard/>, can be installed on a phone, opens offline, and syncs through a private Google Drive folder (below).
 
 To start using the hosted address:
 
 1. On the laptop, export a backup from the copy you use today, open the hosted address in Chrome and import the backup there. Use the hosted address from then on.
 2. On the iPhone, open the address in Safari, tap **Share → Add to Home Screen**, then open the app from the home-screen icon and import the same backup **inside that installed app**. The installed app keeps its own data, separate from Safari.
 
-Until sync is switched on, the phone and laptop each keep their own copy of your data.
+Each place keeps its own copy of your data until sync is switched on there. Inside Obsidian on the Mac, the Life Dashboard panel is one more such place: turn sync on in its Settings & Sync too.
 
 ### Sync
 
