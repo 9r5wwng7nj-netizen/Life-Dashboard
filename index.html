@@ -22,6 +22,13 @@
   /* Installed on a phone: keep the shell clear of the home indicator and rounded corners. */
   #app-shell { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
   #sidebar { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  /* Phones: the bottom bar takes the home-indicator space itself, and the timer and messages sit above it. */
+  @media (max-width: 767px) {
+    #app-shell { padding-bottom: 0; }
+    #bottom-bar { padding-bottom: env(safe-area-inset-bottom); }
+    #timer { bottom: calc(4.75rem + env(safe-area-inset-bottom)); }
+    #toasts { bottom: calc(5.5rem + env(safe-area-inset-bottom)); }
+  }
   .orig[lang=he] { font-family: 'SBL Hebrew', 'Ezra SIL', 'Noto Serif Hebrew', 'Times New Roman', serif; }
   .orig[lang=grc] { font-family: 'SBL Greek', 'Gentium Plus', 'Noto Serif', 'Times New Roman', serif; }
   #sidebar { transform: translateX(-100%); transition: transform .2s ease, width .2s ease; }
@@ -74,6 +81,7 @@
       </div>
     </header>
     <main id="view" tabindex="-1" aria-labelledby="view-title" class="flex-1 overflow-y-auto scroll-thin"></main>
+    <nav id="bottom-bar" aria-label="Quick navigation" class="md:hidden shrink-0 flex items-stretch px-1 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur"></nav>
   </div>
 </div>
 <div id="timer" class="fixed z-40 bottom-4 right-4 hidden"></div>
@@ -166,7 +174,8 @@ const SETTINGS_DEFAULT = {
   hiddenTabs: { taskTab: ['stats', 'people'], medTab: ['stats'] }, // section tabs the person chose to hide, by section; see tabs()
   tabsV: 0, // which default-hidden tabs have been applied to saved settings (see below)
   hiddenCards: [], // dashboard cards the person chose to hide; see DASH_CARDS
-  cardOrder: [] // the dashboard cards' order, by id; empty means the DASH_CARDS order
+  cardOrder: [], // the dashboard cards' order, by id; empty means the DASH_CARDS order
+  bar: ['dashboard', 'tasks', 'nutrition', 'fitness'] // the four sections in the phone's bottom bar, around the + button
 };
 let S = loadSettings();
 function loadSettings() {
@@ -536,6 +545,41 @@ function navCount(id) {
   if (c.dot) return `<span class="nav-count w-2 h-2 rounded-full bg-emerald-500 inline-block" title="${c.what}"></span><span class="sr-only"> ${c.what}</span>`;
   return `<span class="nav-count chip ${c.late ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200' : 'bg-brand-100 text-brand-800 dark:bg-brand-900/60 dark:text-brand-200'}" title="${c.n} ${c.what}">${c.n}<span class="sr-only"> ${c.what}</span></span>`;
 }
+// Phones: four sections the person chose, around a + button that adds a task, food, weight, entry, prayer or link.
+const BAR_LABEL = { media: 'Media', family: 'Family', recipes: 'Meals' };
+function barViews() {
+  const ok = VIEWS.filter(v => v.id).map(v => v.id), list = [...new Set((S.bar || []).filter(id => ok.includes(id)))];
+  return list.length === 4 ? list : SETTINGS_DEFAULT.bar;
+}
+function renderBar() {
+  const el = $('#bottom-bar'); if (!el) return;
+  const item = id => {
+    const v = VIEWS.find(x => x.id === id), c = NAV_COUNTS[id] && NAV_COUNTS[id](), on = S.view === id, n = c && c.n ? c : null;
+    return `<button type="button" class="bar-item ${on ? 'bar-on' : ''}" data-action="go" data-view="${id}" aria-current="${on ? 'page' : 'false'}">${icon(v.icon, 'w-5 h-5')}<span class="truncate max-w-full">${esc(BAR_LABEL[id] || v.label)}</span>${n ? `<span class="bar-badge ${n.late ? 'bar-late' : ''}" aria-hidden="true">${n.dot ? '' : n.n > 99 ? '99+' : n.n}</span><span class="sr-only">, ${n.n} ${esc(n.what)}</span>` : ''}</button>`;
+  };
+  const [a, b, c, d] = barViews();
+  el.innerHTML = `${item(a)}${item(b)}<div class="flex items-center px-1"><button type="button" class="bar-add" data-action="quickAdd" aria-label="Add a task, food, weight, journal entry, prayer or link">${icon('plus', 'w-6 h-6')}</button></div>${item(c)}${item(d)}`;
+}
+// The + sheet and its three small forms. Food, journal and link open their usual screens.
+const QUICK_ADD = [['task', 'Task', 'list-checks'], ['food', 'Food', 'apple'], ['weight', 'Weight', 'scale'], ['journal', 'Journal entry', 'notebook-pen'], ['prayer', 'Prayer request', 'hand-heart'], ['link', 'Link', 'link-2']];
+function quickAddSheet() {
+  Modal.open(modalShell('Add', `<div class="grid grid-cols-2 gap-2">${QUICK_ADD.map(([k, l, ic]) => `<button type="button" class="btn justify-start gap-3 py-3 text-base" data-action="qaPick" data-what="${k}">${icon(ic, 'w-5 h-5 shrink-0 text-brand-700 dark:text-brand-300')}<span class="min-w-0 text-left">${l}</span></button>`).join('')}</div>`,
+    `<button type="button" class="btn" data-action="closeModal">Cancel</button>`));
+}
+function quickAddForm(what) {
+  if (what === 'task') return Modal.open(modalShell('Add a task', `<label class="label" for="qa-task">Task</label><input id="qa-task" name="title" class="input" placeholder="Call Sam fri at 9" autocomplete="off" required autofocus>
+    <p class="text-xs muted mt-2">Dates and times work as in Tasks (“today”, “fri”, “at 9”). A task without a date or an area waits in the Inbox.</p>`,
+    `<button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn btn-primary">${icon('plus')} Add</button>`, 'qaTask'));
+  if (what === 'weight') { const w = day(ymd()).weight; return Modal.open(modalShell('Today’s weight', `<label class="label" for="qa-weight">Scale weight (${S.unit})</label><input id="qa-weight" name="weight" type="number" step="0.1" inputmode="decimal" class="input text-lg" value="${wDisp(w)}" required autofocus>`,
+    `<button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn btn-primary">Save</button>`, 'qaWeight')); }
+  if (what === 'prayer') return Modal.open(modalShell('New prayer request', `<label class="label" for="qa-pray">Who or what to pray for</label><input id="qa-pray" name="title" class="input" autocomplete="off" required autofocus>
+    <label class="label mt-3" for="qa-pray-cat">Category</label><select id="qa-pray-cat" name="cat" class="input">${PRAY_CATS.map(c => `<option ${c === 'Personal' ? 'selected' : ''}>${c}</option>`).join('')}</select>`,
+    `<button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn btn-primary">${icon('plus')} Add</button>`, 'qaPrayer'));
+  Modal.close();
+  if (what === 'food') { ui.nutDate = ymd(); lfOpen(); }
+  else if (what === 'journal') newJournalEntry({ type: 'journal' });
+  else if (what === 'link') shareOpen();
+}
 function renderNav() {
   $('#nav').innerHTML = VIEWS.map(v => v.section
     ? `<div class="nav-label px-3 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">${v.section}</div>`
@@ -544,6 +588,7 @@ function renderNav() {
   $('#help-dot').classList.toggle('hidden', !helpWaiting());
   const waiting = !!$('#nav .nav-count') || helpWaiting(), menu = $('[data-action="openSidebar"]');
   $('#menu-dot').classList.toggle('hidden', !waiting); menu.setAttribute('aria-label', waiting ? 'Open menu (items need attention)' : 'Open menu');
+  renderBar();
 }
 let _rendering = false;
 function render() {
@@ -2265,7 +2310,8 @@ function openSettings() {
     <section class="space-y-3"><h4 class="font-semibold text-sm">General</h4>
       <div class="grid sm:grid-cols-2 gap-3"><div><label class="label">Your name (for greeting)</label><input name="name" class="input" value="${esc(S.name)}"></div>
       <div><label class="label">Theme</label><select name="theme" class="input">${['system', 'light', 'dark'].map(t => `<option value="${t}" ${S.theme === t ? 'selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></div>
-      <div><label class="label">Family name (optional)</label><input name="familyName" class="input" value="${esc(S.familyName || '')}" placeholder="e.g. Smith" autocomplete="off"></div><p class="text-xs muted self-end">Used in the titles of family exports, such as “Smith Family Rule of Life”.</p></div></section>
+      <div><label class="label">Family name (optional)</label><input name="familyName" class="input" value="${esc(S.familyName || '')}" placeholder="e.g. Smith" autocomplete="off"></div><p class="text-xs muted self-end">Used in the titles of family exports, such as “Smith Family Rule of Life”.</p></div>
+      <fieldset><legend class="label">Bottom bar on a phone</legend><div class="grid grid-cols-2 sm:grid-cols-4 gap-2">${barViews().map((id, i) => `<select name="bar${i}" class="input" aria-label="Bottom bar, place ${i + 1}">${VIEWS.filter(v => v.id).map(v => `<option value="${v.id}" ${v.id === id ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</select>`).join('')}</div><p class="text-xs muted mt-1">Four sections, two on each side of the + button. Everything else stays in the menu.</p></fieldset></section>
     <section class="space-y-3"><h4 class="font-semibold text-sm">Workouts</h4>
       <div class="grid sm:grid-cols-3 gap-3"><div><label class="label">Weight unit</label><select name="unit" class="input"><option value="lbs" ${S.unit === 'lbs' ? 'selected' : ''}>lbs</option><option value="kg" ${S.unit === 'kg' ? 'selected' : ''}>kg</option></select></div>
       <div><label class="label">Default rest</label><select name="restSeconds" class="input">${restOptions(S.restSeconds)}</select></div>
@@ -7349,6 +7395,11 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16m', title: 'A bar at the bottom of your phone', slides: [
+    { title: 'Four sections, one tap away', body: '<p>On a phone, a bar along the bottom now holds Dashboard, Tasks, Nutrition and Workouts. The section you’re in is highlighted, and Tasks shows how many are due. Everything else is still in the ☰ menu.</p>' },
+    { title: 'The + button', body: '<p>Tap <strong>+</strong> in the middle of the bar to add a <strong>task</strong>, <strong>food</strong>, today’s <strong>weight</strong>, a <strong>journal entry</strong>, a <strong>prayer request</strong> or a <strong>link</strong> from wherever you are. Tasks understand dates the usual way: “call Sam fri at 9”.</p>' },
+    { title: 'Choose your four', body: '<p>Prefer Journal or Scripture down there? Open <strong>Settings &amp; Sync</strong> and pick the four sections under <strong>Bottom bar on a phone</strong>. Your choice follows you to your other devices.</p>' }
+  ] },
   { id: '2026-10-16l', title: 'Quicker on your phone', slides: [
     { title: 'Log food comes first', body: '<p>On a phone, Nutrition’s daily log now starts with a <strong>Log food</strong> button and your recent foods. Tap a food to add it again; it goes into the meal for this time of day.</p>', go: ['nutrition', 'nutTab', 'today', 'Open Nutrition'] },
     { title: 'Put your cards in order', body: '<p>On the Dashboard, tap the sliders button at the top right. Besides showing or hiding cards, you can now move each one up or down, so the card you look at first sits at the top. The order follows you to your other devices.</p>', go: ['dashboard', '', '', 'Open the Dashboard'] },
@@ -7441,7 +7492,7 @@ const RELEASES = [
 ];
 const TOUR = [
   { title: 'Welcome to Life Dashboard', body: '<p>One place for your health, your faith and your home life.</p><p>Everything you enter is saved on this device. There is no account to create, and nobody else can see your records.</p>' },
-  { title: 'Getting around', body: '<p>The menu lists every section. On a phone, tap the <strong>☰</strong> button at the top left to open it.</p><ul class="list-disc pl-5 space-y-1"><li><strong>Dashboard</strong> is today at a glance, with a shortcut into each section.</li><li>Inside a section, the row of tabs across the top switches between its pages.</li><li>A number beside a menu item means something there needs attention today.</li></ul>' },
+  { title: 'Getting around', body: '<p>The menu lists every section. On a phone, the bar at the bottom holds four sections and a <strong>+</strong> button for quick adds, and the <strong>☰</strong> button at the top left opens the full menu.</p><ul class="list-disc pl-5 space-y-1"><li><strong>Dashboard</strong> is today at a glance, with a shortcut into each section.</li><li>Inside a section, the row of tabs across the top switches between its pages.</li><li>A number beside a menu item means something there needs attention today.</li></ul>' },
   { title: 'Health', body: '<ul class="list-disc pl-5 space-y-1"><li><strong>Workouts</strong>: log your sets as you train, with a rest timer in the top bar.</li><li><strong>Nutrition</strong>: search for foods or scan a barcode to log what you eat, and track your weight.</li></ul>', go: ['fitness', '', '', 'Open Workouts'] },
   { title: 'Faith', body: '<ul class="list-disc pl-5 space-y-1"><li><strong>Scripture</strong>: read, follow a reading plan, memorize verses with typing practice, and keep a prayer list.</li><li><strong>Journal</strong>: write entries from templates, with mood and photos.</li><li><strong>Media Library</strong>: save sermons, podcasts, articles and books, with your notes and quotes.</li></ul>', go: ['scripture', '', '', 'Open Scripture'] },
   { title: 'Home', body: '<ul class="list-disc pl-5 space-y-1"><li><strong>Marriage &amp; Family</strong>: a weekly family review, date ideas, and notes on the people you love.</li><li><strong>Recipes &amp; Meals</strong>: recipes, a meal plan and a grocery list.</li><li><strong>Tasks</strong>: type something like <em>call Jake fri at 9</em> and it is dated for you. A task waits in the Inbox until it has a due date and an area or project.</li></ul>', go: ['tasks', '', '', 'Open Tasks'] },
@@ -7498,7 +7549,7 @@ const A_HELP = {
 // edits and deletions from either device survive. Photos, API keys and downloaded libraries stay
 // on the device. Sign-in is a plain redirect, so no Google script is loaded.
 const DRIVE = { clientId: '868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.googleusercontent.com', scope: 'https://www.googleapis.com/auth/drive.appdata', file: 'life-dashboard-sync.json', api: 'https://www.googleapis.com', auth: 'https://accounts.google.com/o/oauth2/v2/auth' };
-const SYNC_SETTINGS = ['name', 'familyName', 'hiddenTabs', 'tabsV', 'hiddenCards', 'cardOrder', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
+const SYNC_SETTINGS = ['name', 'familyName', 'hiddenTabs', 'tabsV', 'hiddenCards', 'cardOrder', 'bar', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
 const SYNC_SKIP = ['photoMeta'];
 const SYNC_BASE = 'sync.base';
 // A sync that would remove more than this many records (outside the lists that are routinely
@@ -7790,6 +7841,18 @@ const A_SYNC = {
 const A = {
   // shell
   go: el => go(el.dataset.view),
+  quickAdd: () => quickAddSheet(),
+  qaPick: el => quickAddForm(el.dataset.what),
+  qaTask: f => {
+    const added = addTasks(fd(f).title), t = added[0]; if (!t) return;
+    Modal.close(); toast(added.length > 1 ? `Added ${added.length} tasks` : `Added “${t.title}”${t.due ? ` · ${daysBetween(ymd(), t.due) === 0 ? 'today' : daysBetween(ymd(), t.due) === 1 ? 'tomorrow' : fmtDate(t.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : isInbox(t) ? ' · Inbox' : ''}`); render();
+  },
+  qaWeight: f => { const v = num(fd(f).weight); if (v == null || v <= 0) return toast('Enter your weight', 'error'); ensureDay(ymd()).weight = fromUnit(v); Store.save('nutrition'); Modal.close(); toast('Weight saved'); render(); },
+  qaPrayer: f => {
+    const v = fd(f), title = (v.title || '').trim(); if (!title) return;
+    Store.get('prayers').push({ id: uid(), title, details: '', cat: PRAY_CATS.includes(v.cat) ? v.cat : 'Other', created: new Date().toISOString(), lastPrayed: null, count: 0, answered: null }); Store.save('prayers');
+    Modal.close(); toast('Added to your prayer list'); render();
+  },
   showMore: el => { const k = el.dataset.key; ui.more = { ...(ui.more || {}), [k]: ((ui.more || {})[k] || PAGE) + PAGE }; render(); },
   setTab: el => { ui[el.dataset.key] = el.dataset.val; render(); },
   tabsEdit: el => tabsEditModal(el.dataset.key),
@@ -7843,6 +7906,8 @@ const A = {
   saveSettings: f => {
     const v = fd(f);
     Object.assign(S, { name: v.name.trim(), familyName: (v.familyName || '').trim(), theme: v.theme, unit: v.unit, restSeconds: +v.restSeconds, bwFallback: num(v.bwFallback) ? (v.unit === 'lbs' ? num(v.bwFallback) * LB : num(v.bwFallback)) : null, timerSound: v.timerSound === '1', translation: v.translation, esvKey: v.esvKey.trim(), vaultName: (v.vaultName || '').trim(), obsFolder: (v.obsFolder || '').trim().replace(/^\/+|\/+$/g, ''), fdcKey: (v.fdcKey || '').trim(), targets: { cal: num(v.t_cal) || 2000, p: num(v.t_p) || 0, c: num(v.t_c) || 0, f: num(v.t_f) || 0 } });
+    const bar = [...new Set([v.bar0, v.bar1, v.bar2, v.bar3].filter(Boolean))];
+    if (bar.length === 4) S.bar = bar; else if ([v.bar0, v.bar1, v.bar2, v.bar3].some(Boolean)) toast('Choose four different sections for the bottom bar', 'error');
     saveSettings(); applyTheme(); Modal.close(); toast('Settings saved'); render();
   }
 };
