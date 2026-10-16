@@ -162,3 +162,18 @@ test('the Today card gathers the Big 3, what is due, dinner and, inside Obsidian
   await expect(page.locator('#view h3', { hasText: /^Today$/ })).toHaveCount(0);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('a long food name never makes a page wider than a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const errors = await open(page);
+  const wide = await page.evaluate(() => {
+    const name = 'Pork, fresh, shoulder, (boston butt), blade (steaks), separable lean and fat, raw';
+    Store.set('foods', [{ id: 'long', name, basis: '100g', base: { cal: 250, p: 20, c: 0, f: 18 }, extra: [], uses: 9, lastUsed: new Date().toISOString(), lastQty: 1, lastUnit: '100g' }]);
+    Store.set('nutrition', { [ymd()]: { entries: [{ id: 'e1', name, cal: 250, p: 20, c: 0, f: 18, meal: 'lunch' }] } });
+    const out = {};
+    for (const v of VIEWS.filter(x => x.id)) { go(v.id); renderNow(); const m = document.querySelector('#view'); out[v.id] = m.scrollWidth - m.clientWidth; }
+    return out;
+  });
+  expect(Object.entries(wide).filter(([, n]) => n > 0)).toEqual([]);
+  expect(errors, errors.join('\n')).toEqual([]);
+});

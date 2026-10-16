@@ -5,6 +5,8 @@
 
 /* Keep keyboard focus visible on every interactive control, including chips. */
 @layer base {
+  /* A long word or name inside a grid column (a food name, a link) wraps or truncates instead of widening the page. */
+  .grid > * { min-width: 0; }
   :focus-visible { outline: 2px solid var(--color-brand-700); outline-offset: 3px; }
   .dark :focus-visible { outline-color: var(--color-brand-300); }
 }
