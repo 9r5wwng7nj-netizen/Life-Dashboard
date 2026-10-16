@@ -474,6 +474,7 @@ test('vault health: notes with no type, unusual status words, broken links, to-d
   const mk = (p, fm, mtime) => { const parts = p.split('/'); return core.noteInfo({ path: p, basename: parts.pop().replace(/\.md$/, ''), folder: parts.join('/'), mtime }, fm, today); };
   const notes = [
     mk('Inbox/Loose.md', {}, now - day),
+    Object.assign(mk('README.md', {}, now - 2 * day), { folder: '/' }),
     mk('Books/A Book/Chapter 1.md', {}, now),
     mk('Inbox/Odd.md', { type: 'idea', status: 'percolating' }, now),
     mk('Projects/Old/Old.md', { type: 'project', status: 'active' }, now - 90 * day),
@@ -486,13 +487,13 @@ test('vault health: notes with no type, unusual status words, broken links, to-d
   notes.find(n => n.title === 'Draft').projectPath = 'Projects/Busy/Busy.md';
   const rep = core.healthReport(notes, { today, skip: ['Archive'], broken: [{ path: 'Inbox/Odd.md', targets: ['Nowhere', 'B', 'C', 'D'] }, { path: 'Archive/Untyped.md', targets: ['X'] }], todos: [{ path: 'Projects/Old/Old.md', count: 2 }], attendees: ['Jsmith'], inBook: ['Books/A Book/Chapter 1.md'] });
   const by = Object.fromEntries(rep.sections.map(s => [s.id, s.items.map(i => [i.title, i.detail])]));
-  expect(by.untyped).toEqual([['Loose', 'Inbox']]); // the archive and book chapters are left out
+  expect(by.untyped).toEqual([['Loose', 'Inbox'], ['README', 'Top of the vault']]); // the archive and book chapters are left out
   expect(by.status).toEqual([['Odd', 'status: percolating']]); // waiting and processed are usual words
   expect(by.broken).toEqual([['Odd', 'Nowhere, B, C and 1 more']]);
   expect(by.todos).toEqual([['Old', '2 to-dos']]);
   expect(by.attendees).toEqual([['Jsmith', 'Granola attendee']]);
   expect(by.stale).toEqual([['Old', 'active']]); // Busy has a recently changed note; Waiting isn't under way
-  expect(rep.total).toBe(6);
+  expect(rep.total).toBe(7);
 
   const code = fs.readFileSync(MAIN, 'utf8');
   await page.setContent('<!doctype html><html><body><div id="v"></div><div id="w"></div></body></html>');
@@ -508,7 +509,7 @@ test('vault health: notes with no type, unusual status words, broken links, to-d
     const w = document.getElementById('w'); w.append(render.health(document, null, on));
     return { headings: [...v.querySelectorAll('h2')].map(h => h.textContent), calls, loading: w.textContent };
   }, [code, JSON.parse(JSON.stringify(rep))]);
-  expect(out.headings).toEqual(['Notes with no type · 1', 'Status words outside the usual set · 1', 'Links that go nowhere · 1', 'To-dos still in notes · 1', 'Meeting attendees with no profile · 1', 'Projects untouched for 30 days · 1']);
+  expect(out.headings).toEqual(['Notes with no type · 2', 'Status words outside the usual set · 1', 'Links that go nowhere · 1', 'To-dos still in notes · 1', 'Meeting attendees with no profile · 1', 'Projects untouched for 30 days · 1']);
   expect(out.calls).toEqual(['open:Inbox/Loose.md', 'todos', 'recheck']);
   expect(out.loading).toContain('Checking the vault');
 });
