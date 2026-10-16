@@ -255,3 +255,18 @@ test('taught record: entries, groups, passages, the record page and “taught be
   expect(out.before).toContain('You’ve taught John 13 before');
   expect(out.calls).toEqual(['mark:Sermons/Old sermon.md', 'open:Studies/Foot washing.md', 'mark:Sermons/New one.md']);
 });
+
+test('the Library leaves out a quick action that has no handler (e.g. Today’s note with daily notes off)', async ({ page }) => {
+  const code = fs.readFileSync(MAIN, 'utf8');
+  await page.setContent('<!doctype html><html><body><div id="v"></div></body></html>');
+  const labels = await page.evaluate(code => {
+    const module = { exports: {} }; class Base { }
+    const fake = { Plugin: Base, ItemView: Base, PluginSettingTab: Base, Setting: Base, Modal: Base, SuggestModal: Base, Notice: Base, Platform: {}, TFile: Base, MarkdownView: Base, normalizePath: p => p, debounce: f => f };
+    new Function('module', 'exports', 'require', code)(module, module.exports, n => (n === 'obsidian' ? fake : null));
+    const { core, render } = module.exports, lib = Object.assign(core.buildLibrary([], { today: '2026-10-15' }), { inbox: '01 Inbox' }), noop = () => { };
+    const on = { open: noop, hub: noop, shelf: noop, home: noop, search: noop, status: noop, folder: noop, newNote: noop, newSermon: noop, today: undefined };
+    document.getElementById('v').append(render.home(document, lib, on, '', []));
+    return [...document.querySelectorAll('.ldl-actions button')].map(b => b.textContent);
+  }, code);
+  expect(labels).toEqual(['New note', 'New sermon']);
+});

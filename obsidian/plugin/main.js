@@ -702,7 +702,8 @@ class LifeDashboardPlugin extends Plugin {
       markTaught: path => this.markTaught(path),
       taughtBefore: n => core.taughtBefore(n, this.notes().filter(x => !core.inFolder(x.path, this.ignored()))),
       newSermon: () => this.newSermon(),
-      today: () => this.runCommand('daily-notes', 'Turn on Daily notes in Settings → Core plugins to use Today’s note.'),
+      // Today's note only when the Daily notes core plugin is on (a person may let the Life Dashboard own the day).
+      today: this.app.internalPlugins?.plugins?.['daily-notes']?.enabled ? () => this.runCommand('daily-notes', 'Turn on Daily notes in Settings → Core plugins to use Today’s note.') : undefined,
       search: q => { view.q = q; view.draw(); },
       status: path => this.pickStatus(path),
       meetingTasks: path => this.pickActions(path)
