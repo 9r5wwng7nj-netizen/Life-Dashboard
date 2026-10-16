@@ -24,6 +24,8 @@ function fakeYouTube(context, { fail, failStatus = 403 } = {}) {
   const calls = [];
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': '*' };
   const json = (route, body, status = 200) => route.fulfill({ status, headers: { ...cors, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  // The link reader Worker's Google step: not set up here, so sign-in uses the one-hour token (sync.spec.js covers the lasting kind).
+  context.route('https://life-dashboard-reader.lifedashboard-9r5w.workers.dev/**', route => route.request().method() === 'OPTIONS' ? route.fulfill({ status: 204, headers: cors }) : json(route, { ready: false }));
   context.route('https://i.ytimg.com/**', route => route.fulfill({ status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') }));
   context.route('https://www.googleapis.com/youtube/v3/**', route => {
     const req = route.request(), url = new URL(req.url()), p = url.searchParams, name = url.pathname.split('/').pop();

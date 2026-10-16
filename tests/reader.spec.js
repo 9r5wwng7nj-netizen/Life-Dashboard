@@ -64,3 +64,35 @@ test('the Worker answers only the app, reads pages, and keeps answers for an hou
     expect(fetched).toHaveLength(1);
   } finally { globalThis.fetch = realFetch; delete globalThis.caches; }
 });
+
+test('the Worker trades Google codes and refresh tokens, adding the client secret only it knows', async () => {
+  const sent = [], realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    const form = Object.fromEntries(new URLSearchParams(String(opts.body))); sent.push([String(url), form]);
+    if (form.refresh_token === 'revoked') return new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }), { status: 400 });
+    return new Response(JSON.stringify({ access_token: 'at', expires_in: 3599, id_token: 'not-passed-on', ...(form.grant_type === 'authorization_code' ? { refresh_token: 'rt' } : {}) }), { status: 200 });
+  };
+  const app = 'https://9r5wwng7nj-netizen.github.io', back = app + '/Life-Dashboard/index.html', env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'shh' };
+  const call = (path, { body, e = env, origin = app } = {}) => worker.fetch(new Request('https://reader.example' + path, body ? { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { headers: { Origin: origin } }), e, {});
+  try {
+    // Without the secret it says so, and sign-in stays one hour long.
+    expect(await (await call('/google/ready', { e: {} })).json()).toEqual({ ready: false });
+    expect((await call('/google/token', { e: {}, body: { code: 'c', verifier: 'v', redirect_uri: back } })).status).toBe(501);
+    expect(await (await call('/google/ready')).json()).toEqual({ ready: true });
+    expect((await call('/google/ready', { origin: 'https://evil.example' })).status).toBe(403);
+    expect((await call('/google/token', { body: { code: 'c', verifier: 'v', redirect_uri: 'https://evil.example/index.html' } })).status).toBe(400);
+    expect((await call('/google/token')).status).toBe(405);
+
+    const tok = await call('/google/token', { body: { code: 'c', verifier: 'v', redirect_uri: back } });
+    expect(await tok.json()).toEqual({ access_token: 'at', expires_in: 3599, refresh_token: 'rt' });
+    expect([tok.headers.get('Cache-Control'), tok.headers.get('Access-Control-Allow-Origin')]).toEqual(['no-store', app]);
+    expect(sent[0]).toEqual(['https://oauth2.googleapis.com/token', { client_id: 'cid', client_secret: 'shh', grant_type: 'authorization_code', code: 'c', code_verifier: 'v', redirect_uri: back }]);
+    expect(await (await call('/google/refresh', { body: { refresh_token: 'rt' } })).json()).toEqual({ access_token: 'at', expires_in: 3599, refresh_token: null });
+    const refused = await call('/google/refresh', { body: { refresh_token: 'revoked' } });
+    expect([refused.status, await refused.json()]).toEqual([400, { error: 'invalid_grant' }]);
+    expect(await (await call('/google/revoke', { body: { token: 'rt' } })).json()).toEqual({ revoked: true });
+    expect(sent.at(-1)[0]).toBe('https://oauth2.googleapis.com/revoke');
+    const pre = await worker.fetch(new Request('https://reader.example/google/token', { method: 'OPTIONS', headers: { Origin: app } }), env, {});
+    expect([pre.status, pre.headers.get('Access-Control-Allow-Methods'), pre.headers.get('Access-Control-Allow-Headers')]).toEqual([204, 'GET, POST', 'Content-Type']);
+  } finally { globalThis.fetch = realFetch; }
+});

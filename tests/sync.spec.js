@@ -3,6 +3,7 @@
 import { test, expect } from '@playwright/test';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { serveRepo, stopServer } from './serve.js';
 
 const TOKEN = 'test-token';
@@ -13,11 +14,22 @@ test.afterAll(() => stopServer(server));
 // The hidden app folder: the sync file, with the version number Drive bumps on every save, and the
 // dated daily copies (`copies`, newest last), which can be listed, downloaded and deleted.
 function fakeDrive() {
-  const drive = { file: null, saves: 0, copies: [], made: 0 };
+  const drive = { file: null, saves: 0, copies: [], made: 0, gauth: { ready: false, refuse: false, calls: [] } };
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': '*' };
   const json = (route, body, status = 200) => route.fulfill({ status, headers: { ...cors, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   drive.copy = (name, body = '{}') => { const c = { id: 'copy-' + (++drive.made), name, body, size: String(body.length), createdTime: new Date().toISOString() }; drive.copies.push(c); return c; };
-  drive.attach = context => context.route('https://www.googleapis.com/**', route => {
+  // The link reader Worker's Google step (lasting sign-in): off unless a test turns `gauth.ready` on.
+  const reader = context => context.route('https://life-dashboard-reader.lifedashboard-9r5w.workers.dev/**', route => {
+    const req = route.request(), url = new URL(req.url());
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    if (url.pathname === '/google/ready') return json(route, { ready: drive.gauth.ready });
+    const body = JSON.parse(req.postData() || '{}'); drive.gauth.calls.push({ path: url.pathname, body });
+    if (url.pathname === '/google/token') return json(route, { access_token: TOKEN, expires_in: 3599, refresh_token: 'refresh-1' });
+    if (url.pathname === '/google/refresh') return drive.gauth.refuse ? json(route, { error: 'invalid_grant' }, 400) : json(route, { access_token: TOKEN, expires_in: 3599, refresh_token: null });
+    if (url.pathname === '/google/revoke') return json(route, { revoked: true });
+    return json(route, { error: 'not found' }, 404);
+  });
+  drive.attach = context => reader(context).then(() => context.route('https://www.googleapis.com/**', route => {
     const req = route.request(), url = new URL(req.url()), method = req.method();
     if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
     if (req.headers().authorization !== `Bearer ${TOKEN}`) return json(route, { error: 'unauthorized' }, 401);
@@ -37,7 +49,7 @@ function fakeDrive() {
     if (url.pathname === '/upload/drive/v3/files/file-1' && method === 'PATCH') return save(req.postData());
     if (url.pathname === '/drive/v3/files/file-1') return url.searchParams.get('alt') === 'media' ? route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': 'application/json' }, body: drive.file.body }) : json(route, { version: drive.file.version });
     return json(route, { error: 'not found' }, 404);
-  });
+  }));
   return drive;
 }
 
@@ -284,6 +296,46 @@ test('the first sync of the day keeps a dated copy, and a deleted task can be ad
   expect(await titles(d.page)).toEqual(['Delete me by mistake', 'Keep me']);
   expect((await sync(d.page)).error).toBe('');
   expect(JSON.parse(drive.file.body).data.tasks.map(t => t.title).sort()).toEqual(['Delete me by mistake', 'Keep me']);
+  expect(d.errors).toEqual([]);
+  await d.context.close();
+});
+
+test('with the Worker set up, sign-in lasts: the code is traded once, and an expired hour renews by itself', async ({ browser }) => {
+  const drive = fakeDrive(); drive.gauth.ready = true;
+  const d = await device(browser, drive, { connected: false });
+  let asked;
+  await d.context.route('https://accounts.google.com/**', route => {
+    asked = new URL(route.request().url()).searchParams;
+    const back = `${asked.get('redirect_uri')}?state=${asked.get('state')}&code=one-time-code&scope=${encodeURIComponent(asked.get('scope'))}`;
+    return route.fulfill({ status: 200, contentType: 'text/html', body: `<script>location.replace(${JSON.stringify(back)})</script>` });
+  });
+  await d.page.evaluate(() => { addTask('Lasting'); openSettings(); });
+  await d.page.click('[data-action="syncConnect"]');
+  await d.page.waitForFunction(() => typeof syncMeta === 'function' && syncMeta().refresh === 'refresh-1' && !location.search);
+  expect([asked.get('response_type'), asked.get('access_type'), asked.get('prompt'), asked.get('code_challenge_method')]).toEqual(['code', 'offline', 'consent', 'S256']);
+  const traded = drive.gauth.calls.find(c => c.path === '/google/token');
+  expect([traded.body.code, traded.body.redirect_uri]).toEqual(['one-time-code', `${base}/index.html`]);
+  expect(createHash('sha256').update(traded.body.verifier).digest('base64url')).toBe(asked.get('code_challenge')); // PKCE
+  await d.page.waitForFunction(() => !Sync.busy && syncMeta().last);
+  expect(JSON.parse(drive.file.body).data.tasks.map(t => t.title)).toEqual(['Lasting']);
+  expect(await d.page.evaluate(() => [syncMeta().verifier, syncMeta().state])).toEqual(['', '']);
+
+  // An hour later the token has run out: the next sync renews it without leaving the page.
+  await d.page.evaluate(() => { setSyncMeta({ token: 'expired', exp: 0 }); addTask('After an hour'); });
+  expect(await d.page.evaluate(() => [Sync.canSync(), Sync.status()])).toEqual([true, expect.not.stringContaining('Sign in')]);
+  expect((await sync(d.page)).error).toBe('');
+  expect(drive.gauth.calls.filter(c => c.path === '/google/refresh').map(c => c.body.refresh_token)).toEqual(['refresh-1']);
+  expect(JSON.parse(drive.file.body).data.tasks.map(t => t.title).sort()).toEqual(['After an hour', 'Lasting']);
+
+  // Google refuses the refresh token (for example, access was removed): it is dropped and sign-in is asked for.
+  drive.gauth.refuse = true;
+  await d.page.evaluate(async () => { setSyncMeta({ token: 'expired', exp: 0 }); await Sync.run(); });
+  expect(await d.page.evaluate(() => [syncMeta().refresh, Sync.canSync(), Sync.status()])).toEqual(['', false, 'Sign in to Google to sync this device.']);
+
+  // Stopping sync signs the device out at Google too.
+  await d.page.evaluate(() => setSyncMeta({ refresh: 'refresh-2' }));
+  await d.page.evaluate(() => Sync.disconnect());
+  await expect.poll(() => drive.gauth.calls.filter(c => c.path === '/google/revoke').map(c => c.body.token)).toEqual(['refresh-2']);
   expect(d.errors).toEqual([]);
   await d.context.close();
 });
