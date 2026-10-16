@@ -393,3 +393,40 @@ test('on a phone a task row puts push, Today and the star on one line under a fu
   await expect(page.locator('#view [data-action="ftStartA"]')).toHaveCount(1);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('the Weekly reset adds last week, the family review and the Obsidian review to planning, and Today offers it on Sunday', async ({ page }) => {
+  const { errors } = await open(page);
+  await page.evaluate(() => {
+    const mon = weekKeyT(), last = addDays(mon, -7);
+    Store.set('tasks', [{ id: 'f1', title: 'Finished', status: 'done', completedAt: last + 'T10:00:00', created: last, area: 'home' }]);
+    Store.set('workouts', [{ id: 'w1', name: 'Push', start: addDays(last, 1) + 'T07:00:00', end: addDays(last, 1) + 'T08:00:00', exercises: [] }]); sortWorkouts();
+    Store.set('fpeople', [{ id: 'p1', name: 'Sam', role: 'spouse' }]);
+    window.LD_OBSIDIAN = { vault: 'V', notes: [], people: [], prefix: '#ld-obsidian=' };
+    ui.taskTab = 'plan'; go('tasks');
+  });
+  await expect(page.locator('#view [data-action="setTab"][data-val="plan"]')).toContainText('Weekly reset');
+  const view = page.locator('#view');
+  await expect(view).toContainText('How last week went');
+  const lastWeek = view.locator('.card').filter({ has: page.locator('h3', { hasText: /^How last week went$/ }) });
+  await expect(lastWeek).toContainText('Workouts1');
+  await expect(lastWeek).toContainText('Tasks finished1');
+  await expect(view).toContainText('Start the review');
+  // Steps number themselves (a ticked step keeps its number's place); no nutrition plan, no nutrition step.
+  expect(await view.locator('.card .rounded-full.grid').allInnerTexts()).toEqual(['1', '✓', '✓', '4', '5', '6', '7', '8']);
+  expect(await view.locator('.card h3').allInnerTexts()).toEqual(['How last week went', 'Clear the decks', 'Empty the inbox', 'Family review', 'Pick your Big 3', 'Look at the week', 'Focus for the week', 'Weekly review in Obsidian']);
+  await page.click('#view [data-action="obsWeekly"]');
+  expect(await page.evaluate(() => decodeURIComponent(location.hash))).toContain('"openWeekly":true');
+  expect(await page.evaluate(() => !!weekRec(weekKeyT()).obsReview)).toBe(true);
+
+  // On a Sunday the Today card offers the reset for the week ahead.
+  await page.evaluate(() => { history.replaceState(null, '', location.pathname); window.__getDay = Date.prototype.getDay; Date.prototype.getDay = function () { return 0; }; go('dashboard'); });
+  const offer = page.locator('#view [data-action="goWeekReset"]');
+  await expect(offer).toContainText('Get ready for the week ahead');
+  expect(await offer.getAttribute('data-wk')).toBe(await page.evaluate(() => addDays(weekKeyT(), 7)));
+  await offer.click();
+  expect(await page.evaluate(() => [S.view, ui.taskTab, ui.planWk === addDays(weekKeyT(), 7)])).toEqual(['tasks', 'plan', true]);
+  await page.evaluate(() => { weekRec(addDays(weekKeyT(), 7)).planned = ymd(); go('dashboard'); });
+  await expect(page.locator('#view [data-action="goWeekReset"]')).toHaveCount(0);
+  await page.evaluate(() => { Date.prototype.getDay = window.__getDay; });
+  expect(errors, errors.join('\n')).toEqual([]);
+});

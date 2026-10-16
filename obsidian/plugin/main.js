@@ -443,7 +443,7 @@ const core = (() => {
       row('Workouts', a.workouts, b.workouts); row('Tasks finished', a.tasksDone, b.tasksDone); row('Bible reading', `${a.readingDays} of 7 days`, `${b.readingDays} of 7 days`); row('Journal entries', a.journal, b.journal);
       if (a.weight || b.weight) row('Weight trend', a.weight ? `${a.weight}${a.weightChange ? ` (${a.weightChange})` : ''}` : '–', b.weight ? `${b.weight}${b.weightChange ? ` (${b.weightChange})` : ''}` : '–');
       L.push('', `**Last week’s Big 3:** ${st.big3.length ? st.big3.map(x => `${x.done ? '✓' : '○'} ${x.title}`).join(' · ') : 'none were picked'}`);
-      L.push(`**This week’s Big 3:** ${st.nextBig3.length ? st.nextBig3.join(' · ') : 'not picked yet (Plan week in the dashboard)'}`);
+      L.push(`**This week’s Big 3:** ${st.nextBig3.length ? st.nextBig3.join(' · ') : 'not picked yet (Weekly reset in the dashboard)'}`);
       L.push(`**Family review this week:** ${st.familyReview ? 'done' : 'not yet'}`, `**Right now:** ${st.overdue} overdue · ${st.dueThisWeek} due this week · ${st.inbox} in the dashboard Inbox`);
     } else L.push('_The dashboard’s numbers fill in on the Mac with the dashboard docked: run **Refresh the weekly review** there._');
     L.push('', '## Clear the decks', '');
@@ -997,6 +997,7 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'meeting-tasks', name: 'Send this meeting’s action items to Tasks', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickActions(f.path); return true; } });
     this.addCommand({ id: 'capture', name: 'Capture a thought', callback: () => this.capture() });
     // obsidian://ld-capture?kind=idea&text=… — an iPhone Shortcut (Dictate Text, then Open URL) lands here.
+    this.registerObsidianProtocolHandler('ld-weekly', () => this.openWeekly(true));
     this.registerObsidianProtocolHandler('ld-capture', async params => { const f = await this.saveCapture(params.text || '', params.kind || 'idea'); if (f && params.open === '1') this.app.workspace.getLeaf(false).openFile(f); });
     this.addCommand({ id: 'move-todos', name: 'Move to-dos from notes to Tasks', callback: () => this.moveTodos() });
     this.addCommand({ id: 'link-attendees', name: 'Link meeting attendees to people', callback: () => this.linkAllAttendees(true) });
@@ -1514,6 +1515,7 @@ class LifeDashboardPlugin extends Plugin {
       if (made.length) { new Notice(`New profile${made.length === 1 ? '' : 's'}: ${made.join(', ')}`); this._notes = null; setTimeout(() => this.greetDashboard(wv), 800); }
       return;
     }
+    if (msg.openWeekly) return this.openWeekly(true);
     if (msg.create) {
       const { folder, name, content } = msg.create;
       if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
