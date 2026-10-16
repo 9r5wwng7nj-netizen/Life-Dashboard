@@ -346,3 +346,50 @@ test('a task on today’s list can be pushed 1, 2 or 3 days', async ({ page }) =
   await expect(page.locator('[data-action="taskPush"]')).toHaveCount(0);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('Tidy up walks through tasks 3+ days overdue once a day: today, someday, done or delete', async ({ page }) => {
+  const { errors } = await open(page);
+  await page.evaluate(() => { const ago = n => addDays(ymd(), -n), t = (id, due) => ({ id, title: id, notes: '', status: 'todo', priority: 'med', tags: [], area: 'home', created: new Date().toISOString(), due }); Store.set('tasks', [t('ten-days', ago(10)), t('five-days', ago(5)), t('four-days', ago(4)), t('three-days', ago(3)), t('yesterday', ago(1))]); ui.taskTab = 'today'; go('tasks'); });
+  await expect(page.locator('#view')).toContainText('4 tasks have waited 3 days or more.');
+  await page.click('#view [data-action="sweepStart"]');
+  await expect(page.locator('#modal')).toContainText('Tidy up · 1 of 4');
+  await expect(page.locator('#modal')).toContainText('ten-days');
+  await page.click('#modal [data-action="sweepDo"][data-v="today"]');
+  await expect(page.locator('#modal')).toContainText('five-days');
+  await page.click('#modal [data-action="sweepDo"][data-v="someday"]');
+  await page.click('#modal [data-action="sweepDo"][data-v="done"]');
+  await expect(page.locator('#modal')).toContainText('three-days');
+  await page.click('#modal [data-action="sweepDo"][data-v="delete"]');
+  await expect(page.locator('#modal')).toBeHidden();
+  await expect(page.locator('#toasts')).toContainText('Tidied 4 tasks');
+  const r = await page.evaluate(() => ({ tasks: Object.fromEntries(TK().map(t => [t.id, [t.status, t.due === ymd() ? 'today' : t.due ? 'other' : null, !!t.someday]])), swept: tkit().swept === ymd() }));
+  expect(r.tasks).toEqual({ 'ten-days': ['todo', 'today', false], 'five-days': ['todo', null, true], 'four-days': ['done', 'other', false], yesterday: ['todo', 'other', false] });
+  expect(r.swept).toBe(true);
+  await expect(page.locator('#view [data-action="sweepStart"]')).toHaveCount(0);
+
+  // Not today hides the offer until tomorrow; it comes back on a new day.
+  await page.evaluate(() => { delete tkit().swept; TK().find(t => t.id === 'yesterday').due = addDays(ymd(), -6); render(); });
+  await page.click('#view [data-action="sweepLater"]');
+  await expect(page.locator('#view [data-action="sweepStart"]')).toHaveCount(0);
+  await page.evaluate(() => { tkit().swept = addDays(ymd(), -1); render(); });
+  await expect(page.locator('#view [data-action="sweepStart"]')).toHaveCount(1);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('on a phone a task row puts push, Today and the star on one line under a full-width title', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { errors } = await open(page);
+  await page.evaluate(() => { Store.set('tasks', [{ id: 'late', title: 'Call Sam about Sunday', status: 'todo', priority: 'med', area: 'ministry', due: addDays(ymd(), -1), created: new Date().toISOString() }]); ui.taskTab = 'today'; go('tasks'); });
+  const row = page.locator('#view [data-drag-task], #view .rounded-xl.border').filter({ hasText: 'Call Sam about Sunday' }).first();
+  await expect(row.locator('[data-action="taskPush"]')).toHaveCount(3);
+  await expect(row.locator('[data-action="blkNew"], [data-action="ftStartA"]')).toHaveCount(0);
+  const [title, push, today] = await Promise.all([row.locator('[data-action="taskEdit"]').boundingBox(), row.locator('[data-action="taskPush"][data-n="1"]').boundingBox(), row.locator('[data-action="tdSet"]').boundingBox()]);
+  expect(Math.abs(push.y - today.y)).toBeLessThan(4); // same line
+  expect(push.y).toBeGreaterThan(title.y); // under the title
+  expect((await row.boundingBox()).height).toBeLessThan(140);
+  // A wide screen keeps the usual layout with every button.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => render());
+  await expect(page.locator('#view [data-action="ftStartA"]')).toHaveCount(1);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
