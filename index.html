@@ -4953,11 +4953,13 @@ const YTAPI = { scope: 'https://www.googleapis.com/auth/youtube.readonly', api: 
 const ytMeta = () => { try { return JSON.parse(localStorage.getItem('ld.youtube') || '{}'); } catch (e) { return {}; } };
 const setYtMeta = patch => { try { localStorage.setItem('ld.youtube', JSON.stringify({ ...ytMeta(), ...patch })); } catch (e) { console.warn(e); } };
 const ytAvailable = () => !!DRIVE.clientId && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname));
-const ytConnected = () => { const m = ytMeta(); return !!m.token && m.exp > Date.now(); };
-function ytSignIn(view) {
+const ytConnected = () => { const m = ytMeta(); return (!!m.token && m.exp > Date.now()) || !!m.refresh; };
+async function ytSignIn(view) {
   const state = 'yt' + [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
-  setYtMeta({ on: true, state, view: view || 'search', error: '' });
-  location.assign(DRIVE.auth + '?' + new URLSearchParams({ client_id: DRIVE.clientId, redirect_uri: new URL('./index.html', location.href).href, response_type: 'token', scope: YTAPI.scope, state, prompt: 'select_account' }));
+  const { url, verifier } = await gauthStart(YTAPI.scope, state, 'select_account'); // select_account lets the person pick a brand channel
+  setYtMeta({ on: true, state, verifier, view: view || 'search', error: '' });
+  await Store.flushDirty(); // the page is about to leave for Google: save the last change first
+  location.assign(url);
 }
 // Google returns here after the YouTube sign-in. Answers to the Drive sign-in are left for syncFinishSignIn.
 function ytFinishSignIn() {
@@ -4969,8 +4971,9 @@ function ytFinishSignIn() {
   setYtMeta({ state: '', token: p.get('access_token'), exp: Date.now() + (num(p.get('expires_in')) || 3600) * 1000 - 60000, error: '' });
   return true;
 }
-async function ytFetch(path, params) {
-  if (!ytConnected()) throw Object.assign(new Error('Your YouTube connection has timed out. Reconnect to carry on.'), { signin: true });
+async function ytFetch(path, params, retried = false) {
+  const m = ytMeta();
+  if (!(m.token && m.exp > Date.now()) && !(await gauthRenew(m, setYtMeta))) throw Object.assign(new Error('Your YouTube connection has timed out. Reconnect to carry on.'), { signin: true });
   if (navigator.onLine === false) throw new Error('You are offline. Try again when connected.');
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
   let res;
@@ -4979,7 +4982,10 @@ async function ytFetch(path, params) {
   finally { clearTimeout(timer); }
   if (res.ok) return res.json();
   let reason = ''; try { reason = (await res.json()).error?.errors?.[0]?.reason || ''; } catch (e) { }
-  if (res.status === 401) { setYtMeta({ token: '', exp: 0 }); throw Object.assign(new Error('Your YouTube connection has timed out. Reconnect to carry on.'), { signin: true }); }
+  if (res.status === 401) {
+    if (!retried && await gauthRenew(ytMeta(), setYtMeta)) return ytFetch(path, params, true);
+    setYtMeta({ token: '', exp: 0 }); throw Object.assign(new Error('Your YouTube connection has timed out. Reconnect to carry on.'), { signin: true });
+  }
   if (/accessNotConfigured|SERVICE_DISABLED/i.test(reason) || (res.status === 403 && !reason)) throw new Error('YouTube is not turned on for this app’s Google project yet. Turn on the YouTube Data API v3 in Google Cloud, then try again.');
   if (/quota/i.test(reason)) throw new Error('YouTube’s daily limit for this app is used up. It resets overnight (Pacific time).');
   if (/insufficientPermissions|forbidden/i.test(reason)) throw Object.assign(new Error('YouTube needs your permission again. Reconnect to carry on.'), { signin: true });
@@ -5108,7 +5114,7 @@ const A_MEDIA = {
   ytFind: () => { if (!ui.yt) ui.yt = { view: 'search', q: '' }; if (ytConnected() && ui.yt.view !== 'search' && !ui.yt.items) return ytLoad(ui.yt.view); ytModal(); },
   ytConnect: () => ytSignIn(ui.yt?.view === 'list' || ui.yt?.view === 'channel' ? 'search' : ui.yt?.view),
   ytDisconnect: () => {
-    const token = ytMeta().token; localStorage.removeItem('ld.youtube'); ui.yt = { view: 'search', q: '' }; ui.ytCache = {};
+    const token = ytMeta().token; gauthRevoke(ytMeta().refresh); localStorage.removeItem('ld.youtube'); ui.yt = { view: 'search', q: '' }; ui.ytCache = {};
     if (token) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(token), { method: 'POST', credentials: 'omit' }).catch(() => { });
     toast('YouTube disconnected'); ytModal();
   },
@@ -7476,6 +7482,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16q', title: 'Stay signed in to Google', slides: [
+    { title: 'No more signing in every hour', body: '<p>Sync and Find a video now stay signed in on each device. The next time the cloud button asks, sign in once more: Google asks you to allow access again, and after that the dashboard keeps itself signed in.</p><p>Stopping sync (or disconnecting YouTube) signs that device out at Google too.</p>' }
+  ] },
   { id: '2026-10-16p', title: 'The Weekly reset', slides: [
     { title: 'One weekly rhythm', body: '<p>Tasks → <strong>Plan week</strong> is now the <strong>Weekly reset</strong>. It starts with how last week went (workouts, tasks finished, Bible reading, journal entries, weight trend and your Big 3), then walks through clearing overdue tasks, emptying the Inbox, your nutrition check-in, the family review, picking this week’s Big 3, a look at the week and your focus.</p>', go: ['tasks', 'taskTab', 'plan', 'Open the Weekly reset'] },
     { title: 'It ends in Obsidian', body: '<p>The last step opens this week’s review note in Obsidian, with last week’s numbers already filled in, so you can add what you noticed. On Sunday and Monday, the Today card reminds you until the week is planned.</p>' }
@@ -7721,10 +7730,69 @@ function syncLosses(before, after) {
 }
 const syncLossText = losses => Object.entries(losses).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${n} from ${k}`).join(', ');
 
-function syncSignIn() {
+// Google sign-in that lasts. When the link reader Worker holds the app's Google client secret, sign-in
+// uses a one-time code (with PKCE) that the Worker trades for tokens, and this device keeps a refresh
+// token (`refresh` in ld.sync / ld.youtube, never in backups) to get a fresh one-hour token when needed.
+// Without the Worker's secret, sign-in falls back to the one-hour token in the address, as before.
+let _gauthReady = null;
+async function gauthReady() {
+  if (_gauthReady !== null) return _gauthReady;
+  try { const r = await fetch(READER.url + '/google/ready', { credentials: 'omit' }); _gauthReady = r.ok && (await r.json()).ready === true; } catch (e) { _gauthReady = false; }
+  return _gauthReady;
+}
+const b64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+async function pkcePair() {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  return { verifier, challenge: b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))) };
+}
+async function gauthPost(path, body) {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+  let r, d;
+  try { r = await fetch(`${READER.url}/google/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'omit', signal: controller.signal }); d = await r.json().catch(() => ({})); }
+  catch (e) { throw new Error('Google could not be reached. Try again in a moment.'); }
+  finally { clearTimeout(timer); }
+  if (!r.ok) throw Object.assign(new Error(d.error === 'invalid_grant' ? 'Google asked to sign in again.' : 'Google sign-in could not be completed.'), { grant: d.error === 'invalid_grant' });
+  return d;
+}
+// The address to send the person to Google with, and the PKCE verifier to keep until they come back.
+async function gauthStart(scope, state, prompt) {
+  const p = { client_id: DRIVE.clientId, redirect_uri: new URL('./index.html', location.href).href, scope, state };
+  if (!(await gauthReady())) return { url: DRIVE.auth + '?' + new URLSearchParams({ ...p, response_type: 'token', ...(prompt ? { prompt } : {}) }), verifier: '' };
+  const { verifier, challenge } = await pkcePair();
+  // access_type offline + consent: Google gives a refresh token every time, even to someone who signed in before.
+  return { url: DRIVE.auth + '?' + new URLSearchParams({ ...p, response_type: 'code', access_type: 'offline', prompt: [prompt, 'consent'].filter(Boolean).join(' '), code_challenge: challenge, code_challenge_method: 'S256' }), verifier };
+}
+// Google comes back with ?code=…&state=… after a lasting sign-in. The state says whose it is (Drive or
+// YouTube); the code is traded through the Worker and the address is cleaned. Returns 'sync', 'yt' or null.
+async function gauthFinishCode() {
+  const q = new URLSearchParams(location.search); if (!q.has('state') || !(q.has('code') || q.has('error'))) return null;
+  const state = q.get('state'), code = q.get('code'), sm = syncMeta(), ym = ytMeta();
+  const which = sm.state && sm.state === state ? 'sync' : ym.state && ym.state === state ? 'yt' : null;
+  ['code', 'state', 'scope', 'authuser', 'hd', 'prompt', 'iss', 'error'].forEach(k => q.delete(k));
+  history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
+  if (!which) return null;
+  const meta = which === 'sync' ? sm : ym, set = which === 'sync' ? setSyncMeta : setYtMeta;
+  if (!code || !meta.verifier) { set({ state: '', verifier: '', error: 'Google sign-in was not completed.' }); return which; }
+  try {
+    const d = await gauthPost('token', { code, verifier: meta.verifier, redirect_uri: new URL('./index.html', location.href).href });
+    set({ state: '', verifier: '', token: d.access_token, exp: Date.now() + (num(d.expires_in) || 3600) * 1000 - 60000, refresh: d.refresh_token || meta.refresh || '', error: '' });
+  } catch (e) { set({ state: '', verifier: '', error: e.message }); }
+  return which;
+}
+// A fresh one-hour token from the refresh token kept on this device. False when there is none, Google
+// can't be reached, or Google refused it (then the refresh token is dropped and the person signs in again).
+async function gauthRenew(meta, set) {
+  if (!meta.refresh) return false;
+  try { const d = await gauthPost('refresh', { refresh_token: meta.refresh }); set({ token: d.access_token, exp: Date.now() + (num(d.expires_in) || 3600) * 1000 - 60000, error: '' }); return true; }
+  catch (e) { if (e.grant) set({ refresh: '', token: '', exp: 0 }); return false; }
+}
+const gauthRevoke = token => { if (token) gauthPost('revoke', { token }).catch(() => { }); };
+async function syncSignIn() {
   const state = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
-  setSyncMeta({ on: true, state });
-  location.assign(DRIVE.auth + '?' + new URLSearchParams({ client_id: DRIVE.clientId, redirect_uri: new URL('./index.html', location.href).href, response_type: 'token', scope: DRIVE.scope, state }));
+  const { url, verifier } = await gauthStart(DRIVE.scope, state);
+  setSyncMeta({ on: true, state, verifier });
+  await Store.flushDirty(); // the page is about to leave for Google: save the last change first
+  location.assign(url);
 }
 // Google returns here with the access token in the address fragment; take it and clean the address.
 function syncFinishSignIn() {
@@ -7736,13 +7804,16 @@ function syncFinishSignIn() {
   setSyncMeta({ state: '', token: p.get('access_token'), exp: Date.now() + (num(p.get('expires_in')) || 3600) * 1000 - 60000, error: '' });
   return true;
 }
-async function driveFetch(path, options = {}) {
+async function driveFetch(path, options = {}, retried = false) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 60000);
   let res;
   try { res = await fetch(DRIVE.api + path, { ...options, signal: controller.signal, headers: { Authorization: 'Bearer ' + syncMeta().token, ...options.headers } }); }
   catch (e) { throw new Error('Google Drive could not be reached.'); }
   finally { clearTimeout(timer); }
-  if (res.status === 401) { setSyncMeta({ token: '', exp: 0 }); throw new Error('Sign in to Google again to keep syncing.'); }
+  if (res.status === 401) {
+    if (!retried && await gauthRenew(syncMeta(), setSyncMeta)) return driveFetch(path, options, true);
+    setSyncMeta({ token: '', exp: 0 }); throw new Error('Sign in to Google again to keep syncing.');
+  }
   if (!res.ok) throw new Error('Google Drive answered with error ' + res.status + '.');
   return res;
 }
@@ -7775,6 +7846,7 @@ const Sync = {
   busy: false, timer: null, first: '', allowLoss: false,
   connected() { return !!syncMeta().on; },
   signedIn() { const m = syncMeta(); return !!m.token && m.exp > Date.now(); },
+  canSync() { return this.signedIn() || !!syncMeta().refresh; }, // a refresh token renews the hour on its own
   // This device's records in the same plain-JSON form the Drive copy and the base use.
   local() {
     return JSON.parse(JSON.stringify({
@@ -7793,13 +7865,13 @@ const Sync = {
   soon() { clearTimeout(this.timer); this.timer = setTimeout(() => this.auto(), 30000); },
   // Background runs wait while something is being edited, so open forms never lose their record.
   auto() {
-    if (!this.connected() || !this.signedIn()) return this.draw();
+    if (!this.connected() || !this.canSync()) return this.draw();
     if (Modal.isOpen() || document.activeElement?.matches?.('input, textarea, select, [contenteditable="true"]')) return this.soon();
     this.run();
   },
   async run({ signIn = false, announce = false } = {}) {
     if (!syncAvailable() || !this.connected() || this.busy) return;
-    if (!this.signedIn()) { if (signIn) syncSignIn(); else this.draw(); return; }
+    if (!this.signedIn() && !(await gauthRenew(syncMeta(), setSyncMeta))) { if (signIn) syncSignIn(); else this.draw(); return; }
     if (navigator.onLine === false) { if (announce) toast('You are offline. Sync will run when you reconnect.', 'error'); return; }
     this.busy = true; this.draw();
     let paused = '';
@@ -7866,18 +7938,18 @@ const Sync = {
     setSyncMeta({ copied: today, copyError: '' });
     return true;
   },
-  async disconnect() { clearTimeout(this.timer); localStorage.removeItem('ld.sync'); if (BibleDb.ok()) await BibleDb.del(SYNC_BASE); this.draw(); },
+  async disconnect() { clearTimeout(this.timer); gauthRevoke(syncMeta().refresh); localStorage.removeItem('ld.sync'); if (BibleDb.ok()) await BibleDb.del(SYNC_BASE); this.draw(); },
   status() {
     const m = syncMeta();
     if (this.busy) return 'Syncing…';
-    if (!this.signedIn()) return 'Sign in to Google to sync this device.';
+    if (!this.canSync()) return 'Sign in to Google to sync this device.';
     if (m.error) return m.error;
     return m.last ? 'Last synced ' + fmtDateTime(m.last) : 'Not synced yet';
   },
   draw() {
     const on = syncAvailable() && this.connected(), btn = $('#sync-btn'), box = $('#sync-box');
     if (btn) {
-      const alert = on && !this.busy && (!this.signedIn() || !!syncMeta().error);
+      const alert = on && !this.busy && (!this.canSync() || !!syncMeta().error);
       btn.classList.toggle('hidden', !on); btn.disabled = this.busy;
       btn.title = this.status(); btn.setAttribute('aria-label', 'Sync now. ' + this.status());
       btn.innerHTML = icon(alert ? 'cloud-alert' : 'refresh-cw', 'w-4 h-4' + (alert ? ' text-amber-600 dark:text-amber-400' : '')) + '<span class="hidden sm:inline">Sync</span>';
@@ -7894,6 +7966,7 @@ function syncBox() {
   const m = syncMeta();
   return `<p class="text-sm" role="status">${icon('cloud', 'w-4 h-4 inline')} Google Drive sync is on · ${esc(Sync.status())}</p>
     <p class="text-xs muted">Records and basic settings sync. Photos, API keys and downloaded libraries stay on each device.</p>
+    ${m.refresh ? '<p class="text-xs muted">This device stays signed in to Google; Stop syncing signs it out.</p>' : ''}
     <p class="text-xs muted">${m.copied ? `A dated copy of your records is kept in Drive each day (latest: ${fmtDate(m.copied)}).` : 'Each day, the first sync also keeps a dated copy of your records in Drive.'} Copies cover the last 7 days, then one a week for 8 weeks.${m.copyError ? ` The last copy could not be made: ${esc(m.copyError)}` : ''}</p>
     <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="syncNow" ${Sync.busy ? 'disabled' : ''}>${icon('refresh-cw', 'w-3.5 h-3.5')} Sync now</button><button type="button" class="btn btn-sm" data-action="syncCopies">${icon('history', 'w-3.5 h-3.5')} Restore from a copy…</button><button type="button" class="btn btn-sm" data-action="syncDisconnect">${icon('cloud-off', 'w-3.5 h-3.5')} Stop syncing this device</button></div>`;
 }
@@ -7912,7 +7985,7 @@ const A_SYNC = {
   },
   // The dated copies in Drive, newest first; choosing one opens the restore choices.
   syncCopies: async () => {
-    if (!Sync.signedIn()) return toast('Sign in to Google first: tap Sync now, then try again.', 'error');
+    if (!Sync.signedIn() && !(await gauthRenew(syncMeta(), setSyncMeta))) return toast('Sign in to Google first: tap Sync now, then try again.', 'error');
     Modal.open(modalShell('Restore from a copy', `<p class="text-sm muted">A copy is made the first time you sync each day: one for each of the last 7 days, then one a week for 8 weeks. Photos aren’t in copies, and restoring never removes them.</p><div id="copy-list" class="text-sm" role="status">Looking in Google Drive…</div>`, `<button type="button" class="btn" data-action="closeModal">Close</button>`));
     let list; try { list = await driveCopies(); } catch (e) { const box = $('#copy-list'); if (box) box.textContent = e.message; return; }
     const box = $('#copy-list'); if (!box) return;
@@ -8052,8 +8125,9 @@ function registerOfflineShell() {
 }
 
 async function init() {
-  const ytBack = ytFinishSignIn(); // before Drive's: each sign-in only takes its own answer
-  const signedIn = syncFinishSignIn();
+  const back = await gauthFinishCode(); // a lasting sign-in comes back as ?code=…
+  const ytBack = back === 'yt' || ytFinishSignIn(); // before Drive's: each sign-in only takes its own answer
+  const signedIn = back === 'sync' || syncFinishSignIn();
   applyTheme(); applyCollapse();
   $('#header-date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   // A browser that has never opened the app gets the start-here card instead of old release notes.

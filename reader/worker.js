@@ -9,6 +9,32 @@ const UA = 'Mozilla/5.0 (compatible; LifeDashboardReader/1.0; +https://9r5wwng7n
 
 const reply = (body, status, origin, extra = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin', ...extra } });
 
+// Google sign-in that lasts. The app trades a one-time sign-in code for tokens here, and later trades
+// its refresh token for a fresh one-hour access token. Only this Worker holds the app's client secret
+// (the Worker secret GOOGLE_CLIENT_SECRET); it stores nothing. Without the secret, /google/ready says
+// so and the app keeps using one-hour sign-ins.
+const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token', GOOGLE_REVOKE = 'https://oauth2.googleapis.com/revoke';
+const REDIRECTS = ORIGINS.map(o => o + (o.includes('github.io') ? '/Life-Dashboard/index.html' : '/index.html'));
+async function google(request, env, origin, path) {
+  const ready = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET), nostore = { 'Cache-Control': 'no-store' };
+  if (path === '/google/ready') return reply({ ready }, 200, origin, nostore);
+  if (!ready) return reply({ error: 'not_set_up' }, 501, origin, nostore);
+  if (request.method !== 'POST') return reply({ error: 'Use POST' }, 405, origin, nostore);
+  let b; try { b = await request.json(); } catch (e) { b = null; }
+  const text = v => typeof v === 'string' && v.length > 0 && v.length < 4096;
+  const form = { client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET };
+  if (path === '/google/token' && b && text(b.code) && text(b.verifier) && REDIRECTS.includes(b.redirect_uri)) Object.assign(form, { grant_type: 'authorization_code', code: b.code, code_verifier: b.verifier, redirect_uri: b.redirect_uri });
+  else if (path === '/google/refresh' && b && text(b.refresh_token)) Object.assign(form, { grant_type: 'refresh_token', refresh_token: b.refresh_token });
+  else if (path === '/google/revoke' && b && text(b.token)) {
+    const r = await fetch(GOOGLE_REVOKE, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: b.token }) });
+    return reply({ revoked: r.ok }, 200, origin, nostore);
+  } else return reply({ error: 'bad_request' }, 400, origin, nostore);
+  const r = await fetch(GOOGLE_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return reply({ error: d.error === 'invalid_grant' ? 'invalid_grant' : 'google_refused' }, r.status >= 500 ? 502 : 400, origin, nostore);
+  return reply({ access_token: d.access_token, expires_in: d.expires_in, refresh_token: d.refresh_token || null }, 200, origin, nostore);
+}
+
 async function fetchText(url, signal) {
   const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'en-US,en;q=0.8' }, redirect: 'follow', signal });
   if (!res.ok) throw Object.assign(new Error(`The site answered ${res.status}`), { status: 502 });
@@ -24,7 +50,9 @@ export default {
   async fetch(request, env, ctx) {
     const origin = request.headers.get('Origin') || '';
     if (!ORIGINS.includes(origin)) return new Response('Not available', { status: 403 });
-    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET', 'Access-Control-Max-Age': '86400', 'Vary': 'Origin' } });
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400', 'Vary': 'Origin' } });
+    const path = new URL(request.url).pathname;
+    if (path.startsWith('/google/')) return google(request, env, origin, path);
     if (request.method !== 'GET') return reply({ error: 'Use GET' }, 405, origin);
     const target = allowedTarget(new URL(request.url).searchParams.get('url') || '');
     if (!target) return reply({ error: 'That link cannot be read' }, 400, origin);

@@ -2,3 +2,8 @@ name = "life-dashboard-reader"
 main = "worker.js"
 compatibility_date = "2025-09-01"
 workers_dev = true
+
+# The app's Google OAuth client ID is public. Its secret is a Worker secret, never in this file:
+# npx wrangler secret put GOOGLE_CLIENT_SECRET
+[vars]
+GOOGLE_CLIENT_ID = "868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.googleusercontent.com"

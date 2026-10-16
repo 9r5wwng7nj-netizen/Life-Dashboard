@@ -26,3 +26,16 @@ npx wrangler@4.139.0 deploy
 ```
 
 It runs on the free Workers plan at `https://life-dashboard-reader.lifedashboard-9r5w.workers.dev`, which is `READER.url` in `index.html`. `parse.js` holds the page parsing and is tested by `tests/reader.spec.js`.
+
+## Google sign-in that lasts
+
+The same Worker lets Drive sync and Find a video stay signed in. The app sends Google's one-time sign-in code (with a PKCE verifier) to `POST /google/token`, keeps the refresh token on the device, and later calls `POST /google/refresh`; `POST /google/revoke` signs a device out. `GET /google/ready` tells the app whether this is set up. The Worker adds the client secret, stores nothing, answers only the app's addresses, and accepts only the app's own redirect addresses.
+
+`GOOGLE_CLIENT_ID` is in `wrangler.toml` (it is public). The client secret is a Worker secret and never goes in the repo:
+
+```bash
+cd reader
+npx wrangler@4.139.0 secret put GOOGLE_CLIENT_SECRET   # paste the secret from Google Cloud → Credentials → the OAuth client
+```
+
+Without it, `/google/ready` answers `{ "ready": false }` and the app keeps using one-hour sign-ins.
