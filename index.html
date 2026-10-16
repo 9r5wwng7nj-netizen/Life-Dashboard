@@ -6873,13 +6873,15 @@ function taskBulkBar() {
       <span class="flex-1"></span>${act('delete', 'Delete', 'trash-2', 'btn-danger')}</div></div>`;
 }
 // +1 / +2 / +3 on today's list: move a task that many days from today.
-const taskPushButtons = t => `<div class="flex items-center gap-1 mt-1.5" role="group" aria-label="Push ${esc(t.title)} to a later day"><span class="text-[11px] muted mr-0.5">Push</span>${[1, 2, 3].map(n => `<button class="btn btn-sm px-2 py-0.5 tabular-nums" data-action="taskPush" data-id="${t.id}" data-n="${n}" title="${fmtDate(addDays(ymd(), n), { weekday: 'long', month: 'short', day: 'numeric' })}" aria-label="Push ${n} day${n === 1 ? '' : 's'}, to ${fmtDate(addDays(ymd(), n), { weekday: 'long' })}">+${n}</button>`).join('')}</div>`;
+const taskPushButtons = (t, inline) => `<div class="flex items-center gap-1 ${inline ? 'mr-1' : 'mt-1.5'}" role="group" aria-label="Push ${esc(t.title)} to a later day">${inline ? '' : '<span class="text-[11px] muted mr-0.5">Push</span>'}${[1, 2, 3].map(n => `<button class="btn btn-sm px-2 py-0.5 tabular-nums" data-action="taskPush" data-id="${t.id}" data-n="${n}" title="${fmtDate(addDays(ymd(), n), { weekday: 'long', month: 'short', day: 'numeric' })}" aria-label="Push ${n} day${n === 1 ? '' : 's'}, to ${fmtDate(addDays(ymd(), n), { weekday: 'long' })}">+${n}</button>`).join('')}</div>`;
 function taskRow(t, o = {}) {
   const done = !tOpen(t), isB3 = big3().includes(t);
   if (ui.taskSel) o = { ...o, today: false };
-  return `<div class="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5${taskPicked(t)}" ${o.drag ? `draggable="true" data-drag-task="${t.id}"` : ''}>${taskTick(t)}
-    <div class="flex-1 min-w-0"><button class="text-left text-sm font-medium break-words hover:underline ${done ? 'line-through' : ''}" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><div class="flex flex-wrap items-center gap-1 mt-1 empty:hidden"><span class="w-1.5 h-1.5 rounded-full ${PRI[t.priority || 'med'][1]}" title="${PRI[t.priority || 'med'][0]} priority"></span>${taskMeta(t, o)}</div>${o.push && tOpen(t) && !ui.taskSel ? taskPushButtons(t) : ''}${o.extra || ''}</div>
-    <div class="flex items-center gap-0.5 shrink-0">${o.today ? `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="today">Today</button>` : ''}${tOpen(t) && !ui.taskSel ? `<button class="btn btn-ghost btn-sm px-1.5 ${isB3 ? 'text-amber-500' : 'opacity-50 hover:opacity-100'}" data-action="big3Toggle" data-id="${t.id}" title="${isB3 ? 'Remove from' : 'Add to'} this week’s Big 3" aria-label="Big 3">${icon('star', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="blkNew" data-task="${t.id}" title="Block time" aria-label="Block time">${icon('calendar-clock', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="ftStartA" data-id="${t.id}" title="Focus 25 min" aria-label="Focus">${icon('target', 'w-3.5 h-3.5')}</button>` : ''}</div></div>`;
+  // On a phone the push buttons join the action buttons on one line under the title.
+  const narrow = !matchMedia('(min-width: 640px)').matches, push = o.push && tOpen(t) && !ui.taskSel;
+  return `<div class="flex flex-wrap sm:flex-nowrap items-start gap-x-2.5 gap-y-1 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5${taskPicked(t)}" ${o.drag ? `draggable="true" data-drag-task="${t.id}"` : ''}>${taskTick(t)}
+    <div class="flex-1 min-w-0"><button class="text-left text-sm font-medium break-words hover:underline ${done ? 'line-through' : ''}" data-action="taskEdit" data-id="${t.id}">${esc(t.title)}</button><div class="flex flex-wrap items-center gap-1 mt-1 empty:hidden"><span class="w-1.5 h-1.5 rounded-full ${PRI[t.priority || 'med'][1]}" title="${PRI[t.priority || 'med'][0]} priority"></span>${taskMeta(t, o)}</div>${push && !narrow ? taskPushButtons(t) : ''}${o.extra || ''}</div>
+    <div class="flex flex-wrap items-center gap-0.5 shrink-0 w-full sm:w-auto empty:hidden">${push && narrow ? taskPushButtons(t, true) : ''}${o.today ? `<button class="btn btn-sm" data-action="tdSet" data-id="${t.id}" data-v="today">Today</button>` : ''}${tOpen(t) && !ui.taskSel ? `<button class="btn btn-ghost btn-sm px-1.5 ${isB3 ? 'text-amber-500' : 'opacity-50 hover:opacity-100'}" data-action="big3Toggle" data-id="${t.id}" title="${isB3 ? 'Remove from' : 'Add to'} this week’s Big 3" aria-label="Big 3">${icon('star', 'w-3.5 h-3.5')}</button>${narrow ? '' : `<button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="blkNew" data-task="${t.id}" title="Block time" aria-label="Block time">${icon('calendar-clock', 'w-3.5 h-3.5')}</button><button class="btn btn-ghost btn-sm px-1.5 opacity-50 hover:opacity-100" data-action="ftStartA" data-id="${t.id}" title="Focus 25 min" aria-label="Focus">${icon('target', 'w-3.5 h-3.5')}</button>`}` : ''}</div></div>`;
 }
 function renderTasks() {
   const nInbox = TK().filter(isInbox).length, notif = 'Notification' in window && Notification.permission !== 'granted';
@@ -6908,6 +6910,31 @@ function renderTasks() {
     ${tabs('taskTab', [['today', 'Today', 'sun'], ['inbox', `Inbox${nInbox ? ` (${nInbox})` : ''}`, 'inbox'], ['upcoming', 'Upcoming', 'calendar-range'], ['all', 'All tasks', 'kanban'], ['projects', 'Projects', 'folder-kanban'], ['people', 'People', 'users'], ['plan', 'Plan week', 'calendar-check'], ['templates', 'Templates', 'layout-template'], ['stats', 'Stats', 'chart-column']])}
     ${view()}${ui.taskSel ? taskBulkBar() : ''}`;
 }
+// Tasks that have waited STALE_DAYS or more past their date get one tidy pass a day, one task at a time:
+// a new day, Someday, already done, or delete. "Not today" (or stopping part way) hides the offer until tomorrow.
+const STALE_DAYS = 3;
+const staleTasks = () => { const cut = addDays(ymd(), -STALE_DAYS); return TK().filter(x => tOpen(x) && !x.someday && x.due && x.due <= cut).sort((a, b) => a.due.localeCompare(b.due) || sortT(a, b)); };
+function sweepPrompt() {
+  if (tkit().swept === ymd()) return '';
+  const n = staleTasks().length; if (!n) return '';
+  return `<div class="flex flex-wrap items-center gap-2 text-sm rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 mb-3"><span class="flex-1 min-w-[10rem]">${n} task${n === 1 ? ' has' : 's have'} waited ${STALE_DAYS} days or more.</span><button type="button" class="btn btn-sm btn-primary" data-action="sweepStart">Tidy up</button><button type="button" class="btn btn-sm btn-ghost" data-action="sweepLater">Not today</button></div>`;
+}
+function sweepDraw() {
+  const S_ = ui.sweep; let t = null;
+  while (S_.i < S_.ids.length && !(t = tFind(S_.ids[S_.i])) ) S_.i++;
+  if (!t || !tOpen(t)) { if (S_.i < S_.ids.length) { S_.i++; return sweepDraw(); } return Modal.close(); }
+  const late = daysBetween(t.due, ymd()), pick = (v, label, cls = '') => `<button type="button" class="btn ${cls}" data-action="sweepDo" data-v="${v}">${label}</button>`;
+  Modal.open(modalShell(`Tidy up · ${S_.i + 1} of ${S_.ids.length}`, `<div class="rounded-xl border border-slate-200 dark:border-slate-800 p-3"><div class="font-medium break-words">${esc(t.title)}</div>
+      <p class="text-sm muted mt-1">Due ${fmtDate(t.due, { weekday: 'short', month: 'short', day: 'numeric' })}, ${late} days ago${t.project && projFind(t.project) ? ` · ${esc(projFind(t.project).name)}` : ''}${areaOf(t) ? ` · ${areaLabel(areaOf(t))}` : ''}</p></div>
+    <div class="grid grid-cols-2 gap-2 mt-3">${pick('today', 'Today', 'btn-primary')}${pick('tomorrow', 'Tomorrow')}${pick('nextweek', 'Next week')}${pick('someday', 'Someday')}${pick('done', 'Already done')}${pick('delete', 'Delete', 'btn-danger')}</div>`,
+    `<button type="button" class="btn mr-auto" data-action="closeModal">Stop</button><button type="button" class="btn" data-action="sweepDo" data-v="skip">Skip</button>`), { onClose: sweepClosed });
+}
+function sweepClosed() {
+  const n = ui.sweep ? ui.sweep.changed : 0; ui.sweep = null;
+  tkit().swept = ymd(); Store.save('tkit');
+  if (n) toast(`Tidied ${n} task${n === 1 ? '' : 's'}`);
+  render();
+}
 // Today + day planner
 function tasksToday() {
   const t = ymd(), open = TK().filter(x => tOpen(x) && !x.someday && inArea(x)), b3 = big3();
@@ -6915,7 +6942,7 @@ function tasksToday() {
   const doneToday = TK().filter(x => doneOn(x) === t && inArea(x)), tm = open.filter(x => x.due === addDays(t, 1)), waiting = open.filter(x => x.waiting).length;
   return `<div class="grid lg:grid-cols-5 gap-4"><div class="lg:col-span-3 space-y-4 min-w-0">
     <div class="card">${cardHead('star', 'This week’s Big 3', `<button class="btn btn-sm btn-ghost" data-action="setTab" data-key="taskTab" data-val="plan">${b3.length ? 'Change' : 'Pick'} ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}${b3.length ? `<div class="space-y-2">${b3.map(x => taskRow(x)).join('')}</div>` : '<p class="text-sm muted">Choose the three things that would make this week a win.</p>'}</div>
-    ${overdue.length ? `<div class="card border-rose-200 dark:border-rose-900">${cardHead('alarm-clock', `Overdue · ${overdue.length}`, `<button class="btn btn-sm" data-action="tdAllToday">Move all to today</button>`)}<div class="space-y-2">${overdue.map(x => taskRow(x, { today: true, push: true })).join('')}</div></div>` : ''}
+    ${overdue.length ? `<div class="card border-rose-200 dark:border-rose-900">${cardHead('alarm-clock', `Overdue · ${overdue.length}`, `<button class="btn btn-sm" data-action="tdAllToday">Move all to today</button>`)}${sweepPrompt()}<div class="space-y-2">${overdue.map(x => taskRow(x, { today: true, push: true })).join('')}</div></div>` : ''}
     <div class="card">${cardHead('sun', `Today · ${fmtDate(t, { weekday: 'long', month: 'short', day: 'numeric' })}`, `${waiting ? (hiddenTabsFor('taskTab').includes('people') ? `<span class="chip">⏳ ${waiting} waiting</span>` : `<button class="chip" data-action="setTab" data-key="taskTab" data-val="people">⏳ ${waiting} waiting</button>`) : ''}`)}${today.length ? `<div class="space-y-2">${today.map(x => taskRow(x, { noDue: true, push: true })).join('')}</div>` : `<p class="text-sm muted">${doneToday.length ? 'All done for today. 🎉' : 'Nothing due today.'}</p>`}
       ${doneToday.length ? `<details class="mt-3"><summary class="text-xs muted cursor-pointer list-none">Done today · ${doneToday.length}</summary><div class="space-y-2 mt-2">${doneToday.map(x => taskRow(x)).join('')}</div></details>` : ''}</div>
     ${tm.length ? `<div class="card">${cardHead('sunrise', `Tomorrow · ${tm.length}`)}<div class="space-y-1">${tm.sort(sortT).map(taskRowMini).join('')}</div></div>` : ''}</div>
@@ -7070,7 +7097,7 @@ function dashTasks(showTasks) {
   return `<form data-submit="taskQuickAdd" class="flex gap-2 mb-3"><input name="title" class="input" placeholder="Add task… “call Jake fri at 9”" autocomplete="off"><button class="btn btn-primary" aria-label="Add">${icon('plus')}</button></form>
     ${b3.length ? `<div class="text-xs muted mb-1 flex items-center gap-1">${icon('star', 'w-3 h-3 text-amber-500')} Big 3 this week</div><div class="space-y-0.5 mb-2">${b3.map(taskRowMini).join('')}</div>` : `<button class="text-xs text-brand-600 hover:underline mb-2" data-action="goWeekPlan">Pick this week’s Big 3 →</button>`}
     ${nb ? `<div class="flex items-center gap-2 text-sm mb-2 rounded-lg bg-brand-50 dark:bg-brand-950/50 px-2 py-1.5">${icon('calendar-clock', 'w-4 h-4 text-brand-600 shrink-0')}<span class="flex-1 truncate">${esc(blockLabel(nb))}</span><span class="text-xs muted">${fmtTime(nb.start)}</span></div>` : ''}
-    ${od ? `<button class="text-sm text-rose-600 dark:text-rose-400 hover:underline mb-1" data-action="goTaskTab" data-tab="today">${od} overdue →</button>` : ''}
+    ${sweepPrompt()}${od ? `<button class="text-sm text-rose-600 dark:text-rose-400 hover:underline mb-1" data-action="goTaskTab" data-tab="today">${od} overdue →</button>` : ''}
     <div class="space-y-1">${showTasks.filter(x => !b3ids.has(x.id)).length ? showTasks.filter(x => !b3ids.has(x.id)).map(taskRowMini).join('') : (b3.length ? '' : '<p class="text-sm muted">Nothing due today. 🎉</p>')}</div>`;
 }
 
@@ -7129,6 +7156,17 @@ const A_TASKS = {
   taskPush: el => {
     const t = tFind(el.dataset.id); if (!t) return; const d = addDays(ymd(), +el.dataset.n || 1);
     t.someday = false; setDue(t, d); Store.save('tasks'); toast(`Moved to ${fmtDate(d, { weekday: 'long', month: 'short', day: 'numeric' })}`); render();
+  },
+  sweepStart: () => { const ids = staleTasks().map(x => x.id); if (!ids.length) return; ui.sweep = { ids, i: 0, changed: 0 }; sweepDraw(); },
+  sweepLater: () => { tkit().swept = ymd(); Store.save('tkit'); render(); },
+  sweepDo: el => {
+    const S_ = ui.sweep, t = S_ && tFind(S_.ids[S_.i]), v = el.dataset.v, today = ymd(); if (!t) return;
+    if (v === 'delete') Store.set('tasks', TK().filter(x => x.id !== t.id));
+    else if (v === 'done') setTaskStatus(t, 'done');
+    else if (v === 'someday') { t.someday = true; t.due = null; }
+    else if (v !== 'skip') { t.someday = false; setDue(t, v === 'today' ? today : v === 'tomorrow' ? addDays(today, 1) : addDays(startOfWeek(), 7)); }
+    if (v !== 'skip') { S_.changed++; Store.save('tasks'); }
+    S_.i++; sweepDraw();
   },
   tdAllToday: () => { const t = ymd(); TK().filter(x => tOpen(x) && !x.someday && x.due && x.due < t && inArea(x)).forEach(x => setDue(x, t)); Store.save('tasks'); render(); },
   tdArea: el => { const t = tFind(el.dataset.id); if (!t) return; t.area = el.dataset.v; Store.save('tasks'); toast(isSorted(t) ? `Moved to ${areaLabel(t.area)}` : `${areaLabel(t.area)} — now give it a due date`); render(); },
@@ -7395,6 +7433,10 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16n', title: 'Tidier tasks on your phone', slides: [
+    { title: 'More tasks on the screen', body: '<p>On a phone, a task’s title now gets the full width, and its buttons (+1, +2, +3, Today and the Big 3 star) sit together on one line underneath. Block time and Focus are still there on a larger screen, and Focus is in each task’s editor.</p>', go: ['tasks', 'taskTab', 'today', 'Open Tasks'] },
+    { title: 'Tidy up old overdue tasks', body: '<p>When tasks have waited 3 days or more past their date, Tasks → Today and the dashboard offer <strong>Tidy up</strong>. It shows them one at a time: move it to today, tomorrow or next week, put it in Someday, mark it already done, or delete it. <strong>Not today</strong> hides the offer until tomorrow.</p>' }
+  ] },
   { id: '2026-10-16m', title: 'A bar at the bottom of your phone', slides: [
     { title: 'Four sections, one tap away', body: '<p>On a phone, a bar along the bottom now holds Dashboard, Tasks, Nutrition and Workouts. The section you’re in is highlighted, and Tasks shows how many are due. Everything else is still in the ☰ menu.</p>' },
     { title: 'The + button', body: '<p>Tap <strong>+</strong> in the middle of the bar to add a <strong>task</strong>, <strong>food</strong>, today’s <strong>weight</strong>, a <strong>journal entry</strong>, a <strong>prayer request</strong> or a <strong>link</strong> from wherever you are. Tasks understand dates the usual way: “call Sam fri at 9”.</p>' },
