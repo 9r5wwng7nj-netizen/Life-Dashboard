@@ -3,6 +3,7 @@
 The app was built in phases, one module at a time. Each phase was tested by upgrading from the previous version's saved data, so nothing ever needed re-importing.
 
 ## Unreleased
+- Library plugin 0.5.1: the Today's note quick action only appears while the Daily notes core plugin is on.
 - Taught record (Library plugin 0.5.0): Mark taught on teaching notes writes `taught` entries (`YYYY-MM-DD — Group`) and sets the status. Title cards show where the note was taught and the same passage taught from other notes (`scriptureKey`: book's first letters + chapter). A Teaching record page in the section bar lists each group's history (Teaching groups setting, `(inactive)` marks a resting group), plus finished teaching with no group recorded, each with a Record button.
 - Library plugin 0.4.0: the Library works as home. It adds quick actions, a section bar (every shelf, Inbox, All folders) and folder pages (tiles for sub-folders with note counts, notes as rows, a clickable path). Library pages join the tab's back/forward history (`navigation`, `getState`/`setState`), and an option folds the left sidebar away. Person cards show initials, roles and last contact, with no status button; series show Active/Planned. The 0.1.3 title-card fixes (no repeated kind label, outlined status, serif note titles) are restored, after being left off main.
 - `@Name` keeps the name in the task title as typed ("Call @dwayne conner" becomes "Call Dwayne Conner", linked to the profile).
