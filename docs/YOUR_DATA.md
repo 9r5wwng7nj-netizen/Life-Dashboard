@@ -58,4 +58,5 @@ Sync keeps one copy of your records in a hidden app folder in your Google Drive.
 - Google sign-in lasts about an hour. When the header button shows a warning cloud, tap it to sign in again; your changes are kept on the device in the meantime.
 - If the same item is edited on two devices before they sync, both edits are kept where they touch different fields; where they touch the same field, the most recent save wins. Deleting an item on one device removes it from the others.
 - If a sync would remove more than 10 records at once, it pauses and asks you first. Choose OK only if you removed them on purpose. (Clearing the grocery list never asks.)
-- Keep exporting backups. Sync copies mistakes to every device as faithfully as it copies everything else.
+- Each day, the first sync also keeps a dated copy of your records in the same private folder: one for each of the last 7 days, then one a week for 8 weeks. **Settings & Sync → Restore from a copy** opens one. *Add back what's missing* returns records deleted since that day and changes nothing else; *Replace everything* puts the device back to that day.
+- Keep exporting backups now and then. Copies in Drive don't include photos, and sync copies mistakes to every device as faithfully as it copies everything else.
