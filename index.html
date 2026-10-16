@@ -3158,6 +3158,20 @@ window.LD_QUERY = q => {
     const last = mine.filter(t => !tOpen(t)).map(doneOn).filter(Boolean).sort().pop() || null;
     return { open, last, today: ymd() };
   }
+  // weekStats: last week and the week before (Monday to Sunday) for the weekly review, plus where things stand now.
+  if (q.weekStats) {
+    const mon = startOfWeek(String(q.weekStats.monday || ymd())), today = ymd(), tr = trendSeries();
+    const week = from => {
+      const to = addDays(from, 6), inR = d => !!d && d >= from && d <= to, end = trendAt(tr, to), start = trendAt(tr, addDays(from, -1)), ch = end != null && start != null ? toUnit(end) - toUnit(start) : null;
+      return { from, to, workouts: W().filter(w => inR(wDate(w))).length, tasksDone: TK().filter(t => inR(doneOn(t))).length,
+        readingDays: new Set(Store.get('readingPlans').flatMap(p => Object.values(p.done || {})).filter(inR)).size, journal: Store.get('journal').filter(j => inR(j.date)).length,
+        weight: end != null ? wFmt(end) : null, weightChange: ch == null ? null : `${ch > 0 ? '+' : ch < 0 ? '−' : '±'}${fmtNum(Math.abs(ch), 1)} ${S.unit}` };
+    };
+    const open = TK().filter(tOpen), last = addDays(mon, -7);
+    return { monday: mon, today, weeks: [week(last), week(addDays(mon, -14))], big3: big3(last).map(t => ({ title: t.title, done: !tOpen(t) })), nextBig3: big3(mon).map(t => t.title),
+      familyReview: Store.get('freviews').some(r => r.week === mon), overdue: open.filter(t => !t.someday && t.due && t.due < today).length,
+      dueThisWeek: open.filter(t => t.due && t.due >= today && t.due <= addDays(mon, 6)).length, inbox: TK().filter(isInbox).length };
+  }
   return null;
 };
 // New sermon in Obsidian → a dashboard project with a "think, pray, write" task each day until the
