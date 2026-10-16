@@ -29,7 +29,11 @@ Besides timings, it verifies grouping identity/order, large-fixture group counts
 ## Remaining work, in priority order
 
 1. **Additional populated-data interaction checks:** baseline coverage now checks all nine views/sections, common edits/searches/imports and multi-year records. Extend it to workout editing, offline Bible/reference imports, additional linked records and failure/recovery paths. It does not test every possible workflow.
-2. **Bound very large lists:** several task/project details, People lists and other historical screens still generate every matching row. Profile full render/layout before deciding on accessible pagination or lazy rendering; do not silently hide records.
+2. **Bound very large lists:** Journal and the Media library page 50 at a time, finished tasks and workout History were already capped. Task/project details, People lists and other historical screens still generate every matching row; use the same `pageOf`/`moreBtn` helpers rather than silently hiding records.
 3. **Strengthen action checks:** the current static action checker is line-based and tracks collisions but does not resolve every dynamic action reference. Add parser-based coverage if future changes expose a need.
 4. **Explicit modular refactor:** keep UI code in index.html under the current repository rule. Splitting modules or introducing a framework needs Seth's explicit approval and migration tests; it is not necessary for these fixes.
-5. **Mobile foundation:** Seth resumed this phase on 2026-10-12 and the offline app shell is built. HTTPS hosting and private sync are still to do; measurements on actual mobile hardware follow once the app is hosted.
+5. **Mobile hardware:** the app is hosted, installable and synced. Timings on an actual iPhone are still to be taken.
+
+## Audit measurements, 2026-10-16
+
+Local Chrome at 375 px wide with three years of synthetic records (1,200 tasks, 730 journal entries, 260 workouts, 1,095 nutrition days, 120 media items). Before paging, drawing Journal took about 200 ms for 8,185 elements, Tasks and Nutrition about 110 ms, and Media was 24 phone screens long. Journal and the Media library now draw 50 items at a time (`pageOf`, `moreBtn`). The Lucide bundle (440 KB, 102 KB compressed) loads about 1,600 icons for the roughly 136 the app uses; trimming it waits for a build step.

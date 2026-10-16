@@ -23,5 +23,5 @@ The providers' current documentation confirms that [Open Food Facts keyword sear
 - VoiceOver/TalkBack reading order and speech: docs/MANUAL_VERIFICATION.md.
 - User-supplied ESV/USDA credentials, if those optional features are wanted. Do not collect credentials in chat or commit them.
 - Podcast audio playback, notifications and dictation permissions. Do not request permissions automatically during an audit.
-- Embedded YouTube/Vimeo playback on the user's actual file origin remains a known limitation; the web-origin/mobile foundation is still paused.
+- Embedded YouTube/Vimeo playback refuses to run from a `file://` copy; the hosted copy, which Seth now uses, has a web origin.
 - Full reference-table imports, other browsers and additional file-origin workflows remain test-expansion work.

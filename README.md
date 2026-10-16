@@ -45,7 +45,9 @@ assets/whatsnew/         pictures for the what’s-new slides
 manifest.webmanifest     install details for the hosted copy
 sw.js                    offline app shell for the hosted copy
 src/app.css              Tailwind source used when styles change
-vendor/                  pinned Lucide and SheetJS browser libraries
+vendor/                  pinned Lucide, SheetJS and ZXing browser libraries
+reader/                  the link reader (a Cloudflare Worker) for recipes and articles
+obsidian/                the Life Dashboard theme and Library plugin for Obsidian
 AGENTS.md / CLAUDE.md    briefs for Codex and Claude Code
 docs/
   ARCHITECTURE.md        how the file is organized and the patterns it uses
@@ -53,7 +55,7 @@ docs/
   DEPENDENCIES.md        local runtime libraries, web services and browser APIs
   YOUR_DATA.md           moving your data safely; backups
 scripts/check.mjs        static safety check
-tests/                   Playwright tests: smoke, accessibility, security, install/offline and sync
+tests/                   Playwright tests: smoke, accessibility, security, install/offline, sync and the Obsidian plugin
 CHANGELOG.md             what was built, phase by phase
 ```
 
