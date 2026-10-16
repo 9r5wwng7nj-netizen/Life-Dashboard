@@ -336,6 +336,20 @@ const core = (() => {
   // --- Quick capture. A thought becomes a note in the inbox: typed by kind, titled from its first words, with any
   // Bible passage it mentions recorded.
   const CAPTURE_KINDS = [['idea', 'Idea'], ['illustration', 'Illustration'], ['sermon-seed', 'Sermon seed'], ['quote', 'Quote']];
+  // --- Phone to dashboard. A Shortcut opens obsidian://ld-send?what=task|weight|prayer&text=…; the item waits
+  // as a small note in the phone inbox folder (Obsidian Sync carries it to the Mac) until the docked dashboard
+  // takes it in. The note keeps the day it was said, so "tomorrow" still means the day after that.
+  const SEND_KINDS = ['task', 'weight', 'prayer'];
+  function phoneNote(what, text, now) {
+    const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 1000), p2 = n => String(n).padStart(2, '0');
+    if (!SEND_KINDS.includes(what) || !t) return null;
+    return { name: `${ymd(now)} ${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())} ${what}`, content: `---\ntype: dashboard-inbox\nwhat: ${what}\ndate: ${ymd(now)}\n---\n\n${t}\n` };
+  }
+  function phoneItem(md, id) {
+    const m = String(md || '').replace(/\r\n/g, '\n').match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/); if (!m) return null;
+    const what = (m[1].match(/^what:\s*(\w+)/m) || [])[1], date = (m[1].match(/^date:\s*(\d{4}-\d{2}-\d{2})/m) || [])[1] || '', text = m[2].trim();
+    return SEND_KINDS.includes(what) && text ? { id: String(id || ''), what, date, text } : null;
+  }
   function captureNote(text, kind, now) {
     const body = String(text || '').replace(/\r/g, '').trim(); if (!body) return null;
     const k = CAPTURE_KINDS.some(([id]) => id === kind) ? kind : 'idea', stamp = `${ymd(now)} ${pad(now.getHours())}${pad(now.getMinutes())}`;
@@ -505,7 +519,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { teachingSoon, healthReport, knownStatus, CAPTURE_KINDS, captureNote, noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { SEND_KINDS, phoneNote, phoneItem, teachingSoon, healthReport, knownStatus, CAPTURE_KINDS, captureNote, noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -858,6 +872,7 @@ const DEFAULTS = {
   passageArchive: '', // archived passage notes, brought back when you open one
   groups: [], // teaching groups, one per line; "(inactive)" after a name for one not taught right now
   peopleFolder: '', // where profiles made from @Name in the dashboard go
+  phoneInbox: '', // where items sent from the phone wait for the dashboard (blank: "Life Dashboard inbox")
   personTemplate: '', // a note whose text new profiles start from
 
   titleCards: true,
@@ -998,6 +1013,7 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'capture', name: 'Capture a thought', callback: () => this.capture() });
     // obsidian://ld-capture?kind=idea&text=… — an iPhone Shortcut (Dictate Text, then Open URL) lands here.
     this.registerObsidianProtocolHandler('ld-weekly', () => this.openWeekly(true));
+    this.registerObsidianProtocolHandler('ld-send', params => this.sendFromPhone(params.what, params.text));
     this.registerObsidianProtocolHandler('ld-capture', async params => { const f = await this.saveCapture(params.text || '', params.kind || 'idea'); if (f && params.open === '1') this.app.workspace.getLeaf(false).openFile(f); });
     this.addCommand({ id: 'move-todos', name: 'Move to-dos from notes to Tasks', callback: () => this.moveTodos() });
     this.addCommand({ id: 'link-attendees', name: 'Link meeting attendees to people', callback: () => this.linkAllAttendees(true) });
@@ -1025,7 +1041,11 @@ class LifeDashboardPlugin extends Plugin {
     this.registerEvent(this.app.vault.on('rename', refresh));
     this.registerEvent(this.app.workspace.on('layout-change', () => this.decorateAll()));
     this.registerEvent(this.app.workspace.on('file-open', () => setTimeout(() => this.decorateAll(), 50)));
-    this.app.workspace.onLayoutReady(() => { this._notes = null; this.decorateAll(); if (this.settings.openOnStartup) this.openLibrary(); });
+    this.app.workspace.onLayoutReady(() => {
+      this._notes = null; this.decorateAll(); if (this.settings.openOnStartup) this.openLibrary();
+      // An item sent from the phone arrives through Obsidian Sync as a new note: hand it to the docked dashboard.
+      this.registerEvent(this.app.vault.on('create', f => { if (Platform.isDesktopApp && f instanceof TFile && core.inFolder(f.path, [this.phoneFolder()])) setTimeout(() => this.drainPhone(), 1500); }));
+    });
   }
   onunload() { document.querySelectorAll('.ldl-titlecard, .ldl-readbar').forEach(e => e.remove()); document.querySelectorAll('.ldl-carded').forEach(e => e.classList.remove('ldl-carded')); }
   async saveSettings() { await this.saveData(this.settings); this._notes = null; this.redraw(); this.decorateAll(); }
@@ -1524,6 +1544,29 @@ class LifeDashboardPlugin extends Plugin {
     }
   }
   // Tell the dashboard it is inside Obsidian, with the note names it can link a task to; then deliver waiting messages.
+  phoneFolder() { return core.safeFolder(this.settings.phoneInbox || '') || 'Life Dashboard inbox'; }
+  async sendFromPhone(what, text) {
+    const n = core.phoneNote(String(what || ''), text, new Date()); if (!n) return new Notice('Nothing was sent: say what to add.');
+    const folder = this.phoneFolder();
+    if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    await this.createUnique(folder, n.name, n.content);
+    new Notice(`Sent to the dashboard (${what}): ${String(text).trim().slice(0, 60)}`);
+    if (Platform.isDesktopApp) this.drainPhone();
+  }
+  // Hand waiting phone items to the docked dashboard, oldest first; each note goes to Obsidian's trash once taken in.
+  async drainPhone(tries = 0) {
+    if (this._draining || !Platform.isDesktopApp) return;
+    const wv = this.app.workspace.getLeavesOfType(VIEW_DASH)[0]?.view?.webview, folder = this.app.vault.getAbstractFileByPath(this.phoneFolder());
+    if (!wv || !folder || !folder.children) return;
+    this._draining = true; let waiting = false;
+    try {
+      for (const f of folder.children.filter(x => x instanceof TFile && x.extension === 'md').sort((a, b) => a.name.localeCompare(b.name))) {
+        const item = core.phoneItem(await this.app.vault.read(f), f.basename); if (!item) continue;
+        if (await this.deliver(wv, { phone: item })) await this.app.vault.trash(f, false); else { waiting = true; break; }
+      }
+    } finally { this._draining = false; }
+    if (waiting && tries < 20) setTimeout(() => this.drainPhone(tries + 1), 3000); // the dashboard is still loading its data
+  }
   greetDashboard(wv) {
     const names = this.notes().filter(n => n.family && !core.inFolder(n.path, this.ignored())).map(n => n.title).slice(0, 5000);
     const people = this.notes().filter(n => n.family === 'person').map(n => n.title);
@@ -1532,6 +1575,7 @@ class LifeDashboardPlugin extends Plugin {
     wv.executeJavaScript(`window.LD_OBSIDIAN = ${JSON.stringify(info)}; window.dispatchEvent(new Event('ld-obsidian'));`).catch(() => { });
     const waiting = this.pending || []; this.pending = [];
     waiting.forEach(msg => this.deliver(wv, msg));
+    setTimeout(() => this.drainPhone(), 1000);
   }
   // The dashboard queues messages until its saved data has loaded, so a message can go as soon as the page is ready.
   async deliver(wv, msg) {
@@ -1558,6 +1602,8 @@ class LibrarySettings extends PluginSettingTab {
       .addTextArea(t => t.setValue(s.ignoreFolders.join('\n')).onChange(v => { s.ignoreFolders = v.split('\n').map(x => x.trim()).filter(Boolean); save(); }));
     new Setting(containerEl).setName('Shelves').setDesc(`In order, separated by commas. Choices: ${Object.keys(core.FAMILIES).join(', ')}.`)
       .addText(t => t.setValue(s.shelves.join(', ')).onChange(v => { s.shelves = v.split(',').map(x => x.trim()).filter(x => core.FAMILIES[x]); save(); }));
+    new Setting(containerEl).setName('Phone inbox folder').setDesc('Tasks, weights and prayer requests sent from the phone (Siri shortcuts) wait here until the dashboard on the Mac takes them in.')
+      .addText(t => t.setValue(s.phoneInbox).setPlaceholder('Life Dashboard inbox').onChange(v => { s.phoneInbox = v.trim(); save(); }));
     new Setting(containerEl).setName('Folder for new sermons').setDesc('Each new sermon gets its own folder inside this one.')
       .addText(t => t.setValue(s.sermonFolder).setPlaceholder('e.g. 02 Projects').onChange(v => { s.sermonFolder = v.trim(); save(); }));
     new Setting(containerEl).setName('Area for new sermons').setDesc('The area note each new sermon project links to (its area property), so it shows on that area’s page. Leave empty for none.')
