@@ -436,3 +436,12 @@ test('a book page lists its contents, and a chapter gets the reading bar', async
   expect(out.bar).toContain('2 of 3');
   expect(out.calls).toEqual(['open:Summa - Prima Pars - Question 10.md', 'book', 'book', 'open:Summa - Prima Pars - Question 2.md', 'book', 'open:Summa - Secunda - Question 1.md']);
 });
+
+test('Granola attendee handles are linked to the person who owns them', () => {
+  const aliases = new Map([['jthigpen', 'Jordan Thigpen'], ['aaron a.lamb', 'Aaron Lamb']]), exists = t => t === 'Sam Rivera';
+  expect(core.linkAttendees(['[[Jthigpen]]', '[[Sam Rivera]]', '[[Aaron A.lamb]]', '[[Stranger]]'], aliases, exists)).toEqual(['[[Jordan Thigpen]]', '[[Sam Rivera]]', '[[Aaron Lamb]]', '[[Stranger]]']);
+  expect(core.linkAttendees(['[[Sam Rivera]]', '[[Stranger]]'], aliases, exists)).toBeNull(); // nothing to change
+  expect(core.linkAttendees('[[Jthigpen]]', aliases, exists)).toEqual(['[[Jordan Thigpen]]']);
+  const n = core.noteInfo({ path: 'p/Jordan Thigpen.md', basename: 'Jordan Thigpen' }, { type: 'person', aliases: ['Jthigpen'] }, '2026-10-15');
+  expect(n.aliases).toEqual(['Jthigpen']);
+});

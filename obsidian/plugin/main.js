@@ -106,6 +106,7 @@ const core = (() => {
       mtime: file.mtime || 0, scripture: plain(fm.scripture || fm.passage), series: plain(fm.series),
       roles: plain(fm.roles), lastContact: isoDate(fm.last_contact), nextContact: isoDate(fm.next_contact), rawStatus: String(fm.status || '').trim().toLowerCase(), taught: parseTaught(fm.taught), scriptureKey: scriptureKey(fm.scripture || fm.passage),
       projectLink: linkTarget(fm.project), projectPath: null, status: status.key, statusLabel: status.label,
+      aliases: [].concat(fm.aliases || []).map(a => String(a).trim()).filter(Boolean), people: [].concat(fm.people || []).map(String),
       basename: file.basename, partOfLink: linkTarget(fm.part_of), partOfPath: null, author: plain(fm.author), sourceMeetingLink: linkTarget(fm.source_meeting), sourceMeetingPath: null,
       kind: family ? FAMILIES[family].kind : '', cover: coverText(title, fm.scripture || fm.passage),
       color: PALETTE[hash(title) % PALETTE.length], hub: family === 'series' || String(fm.type || '').toLowerCase() === 'project'
@@ -326,6 +327,17 @@ const core = (() => {
   const passageCallout = (r, verses, translation) => `> [!quote] ${r.label}${translation ? ` (${translation})` : ''}\n${verses.map(([n, t]) => `> **${n}** ${t}`).join('\n')}\n`;
   const passageNoteText = (book, c, today) => `---\ntype: scripture-note\ncreated: ${today}\nscripture: "${book} ${c}"\nbook: ${book}\ntestament: ${BIBLE.indexOf(book) >= 39 ? 'New Testament' : 'Old Testament'}\n---\n\n# ${book} ${c}\n\n## Notes\n\n## Canonical connections\n\n## Related notes\n\n`;
 
+  // --- Meeting attendees. Granola links attendees by email handle ("[[Jthigpen]]"); a person's `aliases` say which
+  // handles are theirs. Returns the people list with known handles replaced by the person's note, or null if nothing changed.
+  function linkAttendees(people, aliasToName, resolves) {
+    let changed = false;
+    const out = [].concat(people || []).map(v => {
+      const t = linkTarget(v); if (!t || resolves(t)) return v;
+      const name = aliasToName.get(t.toLowerCase()); if (!name) return v;
+      changed = true; return `[[${name}]]`;
+    });
+    return changed ? out : null;
+  }
   // --- Filing. Rules are lines like "person: People" or "project: Projects/{title}" ({title}, {year} and {month} are filled in).
   const parseRules = lines => [].concat(lines || []).map(String).map(l => l.match(/^\s*([\w-]+)\s*(?::|→|->)\s*(.+?)\s*$/)).filter(Boolean)
     .map(m => ({ type: m[1].toLowerCase(), folder: m[2].replace(/^\/+|\/+$/g, '') }));
@@ -372,6 +384,7 @@ const core = (() => {
     } else L.push('_The dashboard’s numbers fill in on the Mac with the dashboard docked: run **Refresh the weekly review** there._');
     L.push('', '## Clear the decks', '');
     L.push(d.meetings.length ? `**Meetings to process:** ${d.meetings.map(m => `${wl(m.title)}${m.date ? ` (${shortDay(m.date, d.today)})` : ''}`).join(' · ')}` : '**Meetings to process:** none');
+    if ((d.unknownAttendees || []).length) L.push(`**Meeting attendees with no profile:** ${d.unknownAttendees.join(' · ')} (run **Match a Granola attendee**)`);
     L.push(d.inboxNotes.length ? `**Notes waiting in the inbox:** ${d.inboxNotes.map(wl).join(' · ')}${d.inboxMore ? ` and ${d.inboxMore} more` : ''} (run **File the inbox**)` : '**Notes waiting in the inbox:** none');
     L.push('', '## Teaching this week', '');
     if (d.teaching.length) d.teaching.forEach(t => L.push(`- ${wl(t.title)}${t.scripture ? ` · ${t.scripture}` : ''} · ${shortDay(t.date, d.today)}${t.statusLabel ? ` · ${t.statusLabel}` : ''}`)); else L.push('Nothing scheduled.');
@@ -428,7 +441,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -862,6 +875,10 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'open-dashboard', name: 'Open Life Dashboard in the sidebar', callback: () => this.openDashboard() });
     this.addCommand({ id: 'new-sermon', name: 'New sermon', callback: () => this.newSermon() });
     this.addCommand({ id: 'meeting-tasks', name: 'Send this meeting’s action items to Tasks', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickActions(f.path); return true; } });
+    this.addCommand({ id: 'link-attendees', name: 'Link meeting attendees to people', callback: () => this.linkAllAttendees(true) });
+    this.addCommand({ id: 'attendee-alias', name: 'Match a Granola attendee to a person', callback: () => this.matchAttendee() });
+    // A meeting that arrives (or changes) with attendee handles we know is linked to the right people.
+    this.registerEvent(this.app.metadataCache.on('changed', file => { if (/meeting/.test(String(this.app.metadataCache.getFileCache(file)?.frontmatter?.type || this.app.metadataCache.getFileCache(file)?.frontmatter?.granola_id && 'meeting'))) { clearTimeout(this._att); this._att = setTimeout(() => this.linkAttendeesIn(file), 1500); } }));
     this.addCommand({ id: 'file-inbox', name: 'File the inbox', callback: () => this.fileInbox() });
     this.addCommand({ id: 'archive-projects', name: 'Archive finished projects', callback: () => this.archiveProjects() });
     this.addCommand({ id: 'add-contents', name: 'Add a contents list to this project note', checkCallback: checking => { const f = this.app.workspace.getActiveFile(), n = f && this.library().hubs.get(f.path); if (!n) return false; if (!checking) this.refreshContents(f, true); return true; } });
@@ -1106,6 +1123,33 @@ class LifeDashboardPlugin extends Plugin {
       const s = this._subjects.get(path); if (s && !r.querySelector('.ldl-row-meta')) r.querySelector('.ldl-row-text')?.append(Object.assign(r.ownerDocument.createElement('span'), { className: 'ldl-row-meta', textContent: s }));
     }
   }
+  // --- Meeting attendees
+  aliasMap() { const m = new Map(); for (const n of this.notes()) if (n.family === 'person') { m.set(n.title.toLowerCase(), n.title); n.aliases.forEach(a => m.set(a.toLowerCase(), n.title)); } return m; }
+  async linkAttendeesIn(file, aliases) {
+    if (!(file instanceof TFile)) return false; const fm = this.app.metadataCache.getFileCache(file)?.frontmatter; if (!fm || !fm.people) return false;
+    const next = core.linkAttendees(fm.people, aliases || this.aliasMap(), t => !!this.app.metadataCache.getFirstLinkpathDest(t, file.path)); if (!next) return false;
+    await this.app.fileManager.processFrontMatter(file, f => { f.people = next; }); return true;
+  }
+  async linkAllAttendees(tell) {
+    const aliases = this.aliasMap(); let n = 0;
+    for (const note of this.notes()) if (note.family === 'meeting' && note.people.length) { const f = this.app.vault.getAbstractFileByPath(note.path); if (await this.linkAttendeesIn(f, aliases)) n++; }
+    if (tell) new Notice(n ? `Linked attendees in ${n} meeting${n === 1 ? '' : 's'}` : 'Every known attendee is already linked');
+    return n;
+  }
+  // Teach the Library a new handle: it joins that person's aliases (making a profile if there isn't one), then meetings relink.
+  matchAttendee() {
+    new TextModal(this.app, 'Match a Granola attendee', [{ key: 'handle', label: 'Attendee as Granola writes it', placeholder: 'e.g. Jthigpen' }, { key: 'name', label: 'Person', placeholder: 'e.g. Jordan Thigpen' }], async v => {
+      const handle = v.handle.replace(/^\[\[|\]\]$/g, '').trim(), name = core.safeName(v.name); if (!handle || !name) return new Notice('Fill in both');
+      let f = this.app.metadataCache.getFirstLinkpathDest(name, '');
+      if (!(f instanceof TFile)) {
+        const folder = core.safeFolder(this.settings.peopleFolder || '') || '', tf = this.settings.personTemplate && this.app.vault.getAbstractFileByPath(normalizePath(this.settings.personTemplate.replace(/(\.md)?$/, '.md')));
+        if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+        f = await this.createUnique(folder, name, core.personNote(name, tf instanceof TFile ? await this.app.vault.cachedRead(tf) : '', core.ymd(new Date())));
+      }
+      await this.app.fileManager.processFrontMatter(f, fm => { const a = [].concat(fm.aliases || []); if (!a.includes(handle)) a.push(handle); fm.aliases = a; });
+      this._notes = null; setTimeout(async () => { const n = await this.linkAllAttendees(false); new Notice(`${handle} is ${f.basename}${n ? `; linked in ${n} meeting${n === 1 ? '' : 's'}` : ''}`); }, 800);
+    }, 'Save').open();
+  }
   // --- Filing
   // Move a note or folder, making folders on the way; Obsidian updates the links. Skips anything that would overwrite.
   async moveTo(file, folder, name) {
@@ -1172,9 +1216,10 @@ class LifeDashboardPlugin extends Plugin {
     const teaching = notes.filter(n => core.teachable(n) && n.status !== 'done' && n.date && n.date >= monday && n.date <= end).map(n => lib.byPath.get(n.path) || n).sort((a, b) => a.date.localeCompare(b.date));
     const people = notes.filter(n => n.family === 'person' && n.nextContact && n.nextContact <= end).sort((a, b) => a.nextContact.localeCompare(b.nextContact)).slice(0, 15);
     const projects = notes.filter(n => n.hub && ['active', 'in-progress', 'live'].includes(n.rawStatus)).map(n => lib.byPath.get(n.path) || n).sort((a, b) => a.title.localeCompare(b.title));
+    const aliases = this.aliasMap(), unknown = [...new Set(notes.filter(n => n.family === 'meeting').flatMap(n => n.people.map(core.linkTarget)).filter(t => t && !aliases.has(t.toLowerCase()) && !this.app.metadataCache.getFirstLinkpathDest(t, '')))].slice(0, 12);
     const stats = Platform.isDesktopApp ? await this.queryDashboard({ weekStats: { monday } }) : null;
     const updated = new Date().toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    return { monday, today, stats, meetings, inboxNotes: inboxNotes.slice(0, 10), inboxMore: Math.max(0, inboxNotes.length - 10), teaching, people, projects, updated };
+    return { monday, today, stats, unknownAttendees: unknown, meetings, inboxNotes: inboxNotes.slice(0, 10), inboxMore: Math.max(0, inboxNotes.length - 10), teaching, people, projects, updated };
   }
   async openWeekly(refresh) {
     const d = await this.weeklyData(), base = core.safeFolder(this.settings.reviewFolder || '') || '', folder = normalizePath([base, d.monday.slice(0, 4)].filter(Boolean).join('/'));
