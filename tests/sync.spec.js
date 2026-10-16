@@ -39,13 +39,16 @@ function fakeDrive() {
       return json(route, { files: (url.searchParams.get('q') || '').includes("name='") ? sync : [...sync, ...drive.copies.map(({ id, name, size, createdTime }) => ({ id, name, size, createdTime }))] });
     }
     if (url.pathname === '/upload/drive/v3/files' && method === 'POST') {
-      const parts = req.postData().split('\r\n\r\n'), meta = JSON.parse(parts[1].split('\r\n--')[0]), body = parts[2].split('\r\n--')[0];
+      const buf = req.postDataBuffer(), text = buf.toString('latin1'), first = text.indexOf('\r\n\r\n') + 4, second = text.indexOf('\r\n\r\n', first) + 4;
+      const meta = JSON.parse(text.slice(first, text.indexOf('\r\n--', first))), bytes = buf.subarray(second, text.lastIndexOf('\r\n--'));
+      if (meta.name.startsWith('photo-')) { const c = drive.copy(meta.name, bytes); return json(route, { id: c.id }); }
+      const body = bytes.toString('utf8');
       if (meta.name !== 'life-dashboard-sync.json') { const c = drive.copy(meta.name, body); return json(route, { id: c.id, version: '1' }); }
       return save(body);
     }
     const copy = drive.copies.find(c => url.pathname === '/drive/v3/files/' + c.id);
     if (copy && method === 'DELETE') { drive.copies = drive.copies.filter(c => c !== copy); return route.fulfill({ status: 204, headers: cors }); }
-    if (copy) return route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': 'application/json' }, body: copy.body });
+    if (copy) return route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': copy.name.startsWith('photo-') ? 'image/png' : 'application/json' }, body: copy.body });
     if (url.pathname === '/upload/drive/v3/files/file-1' && method === 'PATCH') return save(req.postData());
     if (url.pathname === '/drive/v3/files/file-1') return url.searchParams.get('alt') === 'media' ? route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': 'application/json' }, body: drive.file.body }) : json(route, { version: drive.file.version });
     return json(route, { error: 'not found' }, 404);
@@ -110,7 +113,7 @@ test('two devices converge, including deletions, and private items stay on the d
   expect((await sync(laptop.page)).error).toBe('');
   expect(drive.file.body).toContain('Buy milk');
   expect(drive.file.body).not.toContain('secret-esv-key');
-  expect(JSON.parse(drive.file.body).data.photoMeta).toBeUndefined();
+  expect(JSON.parse(drive.file.body).data.photoMeta).toEqual([]); // progress photos' records sync now that photos do
 
   // A device with no shared history asks before touching anything.
   await sync(phone.page);
@@ -338,4 +341,55 @@ test('with the Worker set up, sign-in lasts: the code is traded once, and an exp
   await expect.poll(() => drive.gauth.calls.filter(c => c.path === '/google/revoke').map(c => c.body.token)).toEqual(['refresh-2']);
   expect(d.errors).toEqual([]);
   await d.context.close();
+});
+
+test('photos travel with the records, a batch per sync, and progress photos come along', async ({ browser }) => {
+  const drive = fakeDrive(), laptop = await device(browser, drive), phone = await device(browser, drive);
+  // 14 journal photos and one progress photo on the laptop.
+  await laptop.page.evaluate(async () => {
+    const png = n => new Blob([new Uint8Array([137, 80, 78, 71, n, 0, 255, 13, 10])], { type: 'image/png' });
+    const ids = Array.from({ length: 14 }, (_, i) => 'jp_photo' + i);
+    for (const [i, id] of ids.entries()) await Photos.put(id, png(i));
+    await Photos.put('prog1', png(99));
+    Store.set('journal', [{ id: 'j1', type: 'journal', date: ymd(), title: 'Trip', body: 'x', photos: ids, created: new Date().toISOString() }]);
+    Store.set('photoMeta', [{ id: 'prog1', date: ymd(), pose: 'front' }]);
+  });
+  expect((await sync(laptop.page)).error).toBe('');
+  const photoFiles = () => drive.copies.filter(c => c.name.startsWith('photo-')).map(c => c.name).sort();
+  expect(photoFiles()).toHaveLength(12); // one batch per sync
+  expect(await laptop.page.evaluate(() => syncMeta().photosLeft)).toBe(3);
+  expect((await sync(laptop.page)).error).toBe('');
+  expect(photoFiles()).toHaveLength(15);
+  expect(await laptop.page.evaluate(() => syncMeta().photosLeft)).toBe(0);
+  expect(Array.from(drive.copies.find(c => c.name === 'photo-jp_photo3').body)).toEqual([137, 80, 78, 71, 3, 0, 255, 13, 10]); // bytes intact
+
+  // The phone takes the Drive copy, then the photos arrive over two syncs.
+  await sync(phone.page);
+  await phone.page.click('[data-action="syncFirst"][data-mode="theirs"]');
+  await phone.page.waitForFunction(() => !Sync.busy && syncMeta().last);
+  expect((await sync(phone.page)).error).toBe('');
+  const have = () => phone.page.evaluate(async () => (await photoKeys()).sort());
+  expect((await have()).length).toBeGreaterThanOrEqual(12);
+  expect((await sync(phone.page)).error).toBe('');
+  expect(await have()).toEqual(['jp_photo0', 'jp_photo1', 'jp_photo10', 'jp_photo11', 'jp_photo12', 'jp_photo13', 'jp_photo2', 'jp_photo3', 'jp_photo4', 'jp_photo5', 'jp_photo6', 'jp_photo7', 'jp_photo8', 'jp_photo9', 'prog1']);
+  expect(await phone.page.evaluate(async () => [...new Uint8Array(await (await Photos.get('prog1')).arrayBuffer())])).toEqual([137, 80, 78, 71, 99, 0, 255, 13, 10]);
+  expect(await phone.page.evaluate(() => Store.get('photoMeta').map(p => p.id))).toEqual(['prog1']);
+  // Nothing left to move: another sync uploads and downloads nothing.
+  const before = drive.copies.length;
+  expect((await sync(phone.page)).error).toBe('');
+  expect(drive.copies.length).toBe(before);
+  expect(await phone.page.evaluate(() => syncMeta().photosLeft)).toBe(0);
+  expect([...laptop.errors, ...phone.errors]).toEqual([]);
+  await laptop.context.close(); await phone.context.close();
+});
+
+test('photo references are found wherever records keep them', async ({ page }) => {
+  await page.goto(pathToFileURL(path.resolve('index.html')).href);
+  await page.waitForFunction(() => typeof photoRefs === 'function');
+  const ids = await page.evaluate(() => photoRefs({
+    journal: [{ id: 'j', photos: ['jp_a', 'jp_b'] }], memories: [{ id: 'm', photos: ['fm_c'] }], dateLog: [{ id: 'd', photos: ['fm_d'] }],
+    recipes: [{ id: 'r', photo: 'rp_e' }, { id: 'r2', photo: null }], photoMeta: [{ id: 'plain1', date: '2026-10-01' }],
+    nested: { deep: [{ photo: 'x_f' }] }, odd: [{ photos: ['bad id with spaces', 7] }]
+  }).sort());
+  expect(ids).toEqual(['fm_c', 'fm_d', 'jp_a', 'jp_b', 'plain1', 'rp_e', 'x_f']);
 });

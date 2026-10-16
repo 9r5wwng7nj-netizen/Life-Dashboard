@@ -7482,6 +7482,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16r', title: 'Photos sync too', slides: [
+    { title: 'Your photos on every device', body: '<p>Photos in journal entries, family memories, date nights, recipes and progress photos now sync through your private Google Drive folder, so a photo taken on your phone shows up on the Mac and the other way round.</p><p>They move a dozen at a time, so a device with many photos catches up over a few syncs. Settings &amp; Sync shows how many are left.</p>' }
+  ] },
   { id: '2026-10-16q', title: 'Stay signed in to Google', slides: [
     { title: 'No more signing in every hour', body: '<p>Sync and Find a video now stay signed in on each device. The next time the cloud button asks, sign in once more: Google asks you to allow access again, and after that the dashboard keeps itself signed in.</p><p>Stopping sync (or disconnecting YouTube) signs that device out at Google too.</p>' }
   ] },
@@ -7648,11 +7651,12 @@ const A_HELP = {
    ===================================================================== */
 // One snapshot of personal records lives in the Google account's hidden app folder. Each device
 // merges it with its own records against the last snapshot both sides agreed on (the "base"), so
-// edits and deletions from either device survive. Photos, API keys and downloaded libraries stay
-// on the device. Sign-in is a plain redirect, so no Google script is loaded.
+// edits and deletions from either device survive. Photos travel as their own files in the same folder
+// (Sync.photos); API keys and downloaded libraries stay on the device. Sign-in is a plain redirect, so no
+// Google script is loaded.
 const DRIVE = { clientId: '868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.googleusercontent.com', scope: 'https://www.googleapis.com/auth/drive.appdata', file: 'life-dashboard-sync.json', api: 'https://www.googleapis.com', auth: 'https://accounts.google.com/o/oauth2/v2/auth' };
 const SYNC_SETTINGS = ['name', 'familyName', 'hiddenTabs', 'tabsV', 'hiddenCards', 'cardOrder', 'bar', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
-const SYNC_SKIP = ['photoMeta'];
+const SYNC_SKIP = []; // photoMeta used to stay on each device; photos sync since 2026-10 (Sync.photos)
 const SYNC_BASE = 'sync.base';
 // A sync that would remove more than this many records (outside the lists that are routinely
 // cleared) stops and asks first, whatever the cause.
@@ -7821,12 +7825,49 @@ async function driveFind() {
   const q = new URLSearchParams({ spaces: 'appDataFolder', q: `name='${DRIVE.file}' and trashed=false`, orderBy: 'createdTime', fields: 'files(id,version)' });
   return (await (await driveFetch('/drive/v3/files?' + q)).json()).files?.[0] || null;
 }
+// Every file in the app folder (the sync file, dated copies and photos), following Drive's pages.
+async function driveList() {
+  const out = []; let page = '';
+  do {
+    const q = new URLSearchParams({ spaces: 'appDataFolder', q: 'trashed=false', fields: 'nextPageToken,files(id,name,size,createdTime)', pageSize: '1000', ...(page ? { pageToken: page } : {}) });
+    const d = await (await driveFetch('/drive/v3/files?' + q)).json(); out.push(...(d.files || [])); page = d.nextPageToken || '';
+  } while (page && out.length < 20000);
+  return out;
+}
 // The dated copies in the app folder, newest first.
 async function driveCopies() {
-  const q = new URLSearchParams({ spaces: 'appDataFolder', q: 'trashed=false', fields: 'files(id,name,size,createdTime)', pageSize: '100' });
-  const files = (await (await driveFetch('/drive/v3/files?' + q)).json()).files || [];
+  const files = await driveList();
   return files.map(f => ({ id: String(f.id), date: copyDate(f.name), size: +f.size || 0, created: f.createdTime || '' })).filter(c => c.date)
     .sort((a, b) => b.date.localeCompare(a.date) || b.created.localeCompare(a.created));
+}
+// --- Photo sync. Each photo is its own file in the same private folder, named photo-<id>. After the
+// records sync, photos that records use are uploaded when Drive lacks them and downloaded when this
+// device lacks them, PHOTO_BATCH each way per sync so a sync never runs long (the rest follow on the
+// next ones). Nothing is deleted from Drive: a restored record can always find its photo again.
+const PHOTO_FILE = 'photo-', PHOTO_BATCH = 12;
+// Photo ids the records point at: `photo` and `photos` fields anywhere, and progress photos (photoMeta).
+function photoRefs(data) {
+  const ids = new Set();
+  const walk = v => {
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (!v || typeof v !== 'object') return;
+    for (const [k, x] of Object.entries(v)) {
+      if (k === 'photo' && typeof x === 'string' && x) ids.add(x);
+      else if (k === 'photos' && Array.isArray(x)) x.forEach(p => { if (typeof p === 'string' && p) ids.add(p); });
+      else if (x && typeof x === 'object') walk(x);
+    }
+  };
+  for (const [k, v] of Object.entries(data || {})) { if (k === 'photoMeta') (v || []).forEach(p => { if (p && p.id != null) ids.add(String(p.id)); }); else walk(v); }
+  return [...ids].filter(id => /^[A-Za-z0-9_.:-]+$/.test(id));
+}
+function photoKeys() {
+  if (!Photos.ok()) return Promise.resolve([]);
+  return new Promise((res, rej) => { const q = Photos.tx('readonly').getAllKeys(); q.onsuccess = () => res(q.result.map(String)); q.onerror = () => rej(q.error); });
+}
+async function driveUploadBlob(name, blob) {
+  const mark = 'ld' + uid(), meta = JSON.stringify({ name, parents: ['appDataFolder'] });
+  const body = new Blob([`--${mark}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${mark}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`, blob, `\r\n--${mark}--`]);
+  return (await driveFetch('/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + mark }, body })).json();
 }
 async function driveLoad(id) {
   const res = await driveFetch(`/drive/v3/files/${encodeURIComponent(id)}?alt=media`);
@@ -7874,12 +7915,13 @@ const Sync = {
     if (!this.signedIn() && !(await gauthRenew(syncMeta(), setSyncMeta))) { if (signIn) syncSignIn(); else this.draw(); return; }
     if (navigator.onLine === false) { if (announce) toast('You are offline. Sync will run when you reconnect.', 'error'); return; }
     this.busy = true; this.draw();
-    let paused = '';
+    let paused = '', photosChanged = false;
     try {
       const changed = await this.exchange();
       setSyncMeta({ last: new Date().toISOString(), error: '' });
       try { await this.keepCopy(); } catch (e) { setSyncMeta({ copyError: e.message }); } // a missed copy never stops the sync
-      if (changed) { ensureSeeds(); sortWorkouts(); render(); }
+      try { if (await this.photos()) photosChanged = true; } catch (e) { setSyncMeta({ photoError: e.message }); }
+      if (changed || photosChanged) { ensureSeeds(); sortWorkouts(); render(); }
       if (announce) toast(changed ? 'Synced. This device was updated.' : 'Synced');
     } catch (e) {
       if (e.losses) {
@@ -7938,6 +7980,23 @@ const Sync = {
     setSyncMeta({ copied: today, copyError: '' });
     return true;
   },
+  // Photos the records use, both ways, a batch at a time. Returns true when photos arrived on this device.
+  async photos() {
+    if (!Photos.ok()) return false;
+    const want = photoRefs(Store.data), have = new Set(await photoKeys()), files = await driveList(), inDrive = new Map();
+    for (const f of files) if (f.name && f.name.startsWith(PHOTO_FILE)) inDrive.set(f.name.slice(PHOTO_FILE.length), f.id);
+    const up = want.filter(id => have.has(id) && !inDrive.has(id)), down = want.filter(id => !have.has(id) && inDrive.has(id));
+    let sent = 0, got = 0;
+    for (const id of up.slice(0, PHOTO_BATCH)) { const blob = await Photos.get(id); if (blob) { await driveUploadBlob(PHOTO_FILE + id, blob); sent++; } }
+    for (const id of down.slice(0, PHOTO_BATCH)) {
+      const res = await driveFetch(`/drive/v3/files/${encodeURIComponent(inDrive.get(id))}?alt=media`), blob = await res.blob();
+      if (blob.size) { await Photos.put(id, blob); got++; }
+    }
+    const left = Math.max(0, up.length - sent) + Math.max(0, down.length - got);
+    setSyncMeta({ photosLeft: left, photoError: '' });
+    if (left) this.soon(); // the rest go in the next syncs
+    return got > 0;
+  },
   async disconnect() { clearTimeout(this.timer); gauthRevoke(syncMeta().refresh); localStorage.removeItem('ld.sync'); if (BibleDb.ok()) await BibleDb.del(SYNC_BASE); this.draw(); },
   status() {
     const m = syncMeta();
@@ -7961,11 +8020,11 @@ const Sync = {
 function syncBox() {
   if (!syncAvailable()) return `<p class="text-xs muted">${DRIVE.clientId ? 'Syncing between devices works in the hosted copy of the app (its web address), not in a copy opened as a file.' : 'Syncing between devices is not set up yet.'}</p>`;
   if (!Sync.connected()) return `<p class="text-sm">Keep this device and your others in step through a private app folder in your Google Drive.</p>
-    <p class="text-xs muted">Records and basic settings sync. Photos, API keys and downloaded libraries stay on each device.</p>
+    <p class="text-xs muted">Records, photos and basic settings sync. API keys and downloaded libraries stay on each device.</p>
     <button type="button" class="btn btn-sm" data-action="syncConnect">${icon('cloud', 'w-3.5 h-3.5')} Connect Google Drive</button>`;
   const m = syncMeta();
   return `<p class="text-sm" role="status">${icon('cloud', 'w-4 h-4 inline')} Google Drive sync is on · ${esc(Sync.status())}</p>
-    <p class="text-xs muted">Records and basic settings sync. Photos, API keys and downloaded libraries stay on each device.</p>
+    <p class="text-xs muted">Records, photos and basic settings sync. API keys and downloaded libraries stay on each device.${m.photosLeft ? ` ${m.photosLeft} photo${m.photosLeft === 1 ? '' : 's'} still to sync; they follow over the next few syncs.` : ''}${m.photoError ? ` Photos stopped: ${esc(m.photoError)}` : ''}</p>
     ${m.refresh ? '<p class="text-xs muted">This device stays signed in to Google; Stop syncing signs it out.</p>' : ''}
     <p class="text-xs muted">${m.copied ? `A dated copy of your records is kept in Drive each day (latest: ${fmtDate(m.copied)}).` : 'Each day, the first sync also keeps a dated copy of your records in Drive.'} Copies cover the last 7 days, then one a week for 8 weeks.${m.copyError ? ` The last copy could not be made: ${esc(m.copyError)}` : ''}</p>
     <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="syncNow" ${Sync.busy ? 'disabled' : ''}>${icon('refresh-cw', 'w-3.5 h-3.5')} Sync now</button><button type="button" class="btn btn-sm" data-action="syncCopies">${icon('history', 'w-3.5 h-3.5')} Restore from a copy…</button><button type="button" class="btn btn-sm" data-action="syncDisconnect">${icon('cloud-off', 'w-3.5 h-3.5')} Stop syncing this device</button></div>`;
