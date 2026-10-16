@@ -165,7 +165,8 @@ const SETTINGS_DEFAULT = {
   aiKey: '', aiModel: 'claude-haiku-5-5', miyoOn: false, miyoUrl: 'http://127.0.0.1:8742', vaultName: '', vaultSkip: '', obsFolder: '', ytShorts: false, familyName: '', tour: '', newsSeen: '', taskHelp: false,
   hiddenTabs: { taskTab: ['stats', 'people'], medTab: ['stats'] }, // section tabs the person chose to hide, by section; see tabs()
   tabsV: 0, // which default-hidden tabs have been applied to saved settings (see below)
-  hiddenCards: [] // dashboard cards the person chose to hide; see DASH_CARDS
+  hiddenCards: [], // dashboard cards the person chose to hide; see DASH_CARDS
+  cardOrder: [] // the dashboard cards' order, by id; empty means the DASH_CARDS order
 };
 let S = loadSettings();
 function loadSettings() {
@@ -398,6 +399,13 @@ function tabsEditModal(key) {
   Modal.open(modalShell('Show or hide tabs', `<p class="text-sm muted">Hidden tabs keep everything in them. Show them again here at any time.</p>
     <div class="space-y-1">${list.map(([id, label, ic]) => `<label class="flex items-center gap-3 py-1.5"><input type="checkbox" class="accent-brand-600" data-change="tabsToggle" data-key="${key}" data-val="${id}" ${hidden.includes(id) ? '' : 'checked'}> ${ic ? icon(ic, 'w-4 h-4 muted') : ''}<span>${esc(label)}</span></label>`).join('')}</div>`,
     `<button type="button" class="btn btn-primary" data-action="closeModal">Done</button>`), { onClose: () => render() });
+}
+// Long lists show PAGE items at first, then PAGE more per tap. `key` names the list in ui.more for this visit.
+const PAGE = 50;
+const pageOf = (key, list) => list.slice(0, (ui.more || {})[key] || PAGE);
+function moreBtn(key, list) {
+  const shown = (ui.more || {})[key] || PAGE, left = list.length - shown;
+  return left > 0 ? `<button type="button" class="btn btn-sm w-full mt-2" data-action="showMore" data-key="${key}">Show ${Math.min(PAGE, left)} more <span class="muted">· ${fmtNum(left)} not shown</span></button>` : '';
 }
 function cardHead(ic, title, right = '') {
   return `<div class="flex items-center gap-2 mb-3"><div class="w-7 h-7 rounded-lg bg-brand-50 dark:bg-brand-950 text-brand-600 dark:text-brand-400 grid place-items-center">${icon(ic, 'w-4 h-4')}</div><h3 class="font-semibold">${title}</h3><div class="ml-auto flex items-center gap-1">${right}</div></div>`;
@@ -645,10 +653,15 @@ function miniBar(label, val, target, color) {
 // Dashboard cards the person can hide (S.hiddenCards); the order here is the order on the page.
 const DASH_CARDS = [['nutrition', 'Nutrition today', 'apple'], ['weight', 'Body weight', 'scale'], ['training', 'Training', 'dumbbell'], ['tasks', 'Tasks', 'list-checks'], ['faith', 'Faith & reflection', 'book-open'], ['family', 'Marriage & family', 'heart'], ['meals', 'Meals', 'chef-hat']];
 const dashShow = id => !(S.hiddenCards || []).includes(id);
-function dashCardsModal() {
-  Modal.open(modalShell('Show or hide cards', `<p class="text-sm muted">Choose which cards the dashboard shows. Hiding a card hides nothing else; the section is still in the menu.</p>
-    <div class="space-y-1">${DASH_CARDS.map(([id, label, ic]) => `<label class="flex items-center gap-3 py-1.5"><input type="checkbox" class="accent-brand-600" data-change="dashCardToggle" data-val="${id}" ${dashShow(id) ? 'checked' : ''}> ${icon(ic, 'w-4 h-4 muted')}<span>${esc(label)}</span></label>`).join('')}</div>`,
+// The cards in the person's order (S.cardOrder); any card not in it yet keeps its place from DASH_CARDS at the end.
+function dashOrder() { const ids = DASH_CARDS.map(c => c[0]), saved = (S.cardOrder || []).filter(id => ids.includes(id)); return [...new Set([...saved, ...ids])]; }
+function dashCardsModal(focus) {
+  const order = dashOrder(), byId = Object.fromEntries(DASH_CARDS.map(c => [c[0], c]));
+  Modal.open(modalShell('Show, hide or reorder cards', `<p class="text-sm muted">Choose which cards the dashboard shows and in what order. Hiding a card hides nothing else; the section is still in the menu.</p>
+    <div class="space-y-1">${order.map((id, i) => { const [, label, ic] = byId[id]; return `<div class="flex items-center gap-2 py-1"><label class="flex flex-1 min-w-0 items-center gap-3 py-0.5"><input type="checkbox" class="accent-brand-600" data-change="dashCardToggle" data-val="${id}" ${dashShow(id) ? 'checked' : ''}> ${icon(ic, 'w-4 h-4 muted')}<span class="truncate">${esc(label)}</span></label>
+      <button type="button" class="btn btn-sm btn-ghost" data-action="dashCardMove" data-val="${id}" data-d="-1" aria-label="Move ${esc(label)} up" ${i ? '' : 'disabled'}>${icon('arrow-up', 'w-4 h-4')}</button><button type="button" class="btn btn-sm btn-ghost" data-action="dashCardMove" data-val="${id}" data-d="1" aria-label="Move ${esc(label)} down" ${i < order.length - 1 ? '' : 'disabled'}>${icon('arrow-down', 'w-4 h-4')}</button></div>`; }).join('')}</div>`,
     `<button type="button" class="btn btn-primary" data-action="closeModal">Done</button>`), { onClose: () => render() });
+  if (focus) { const b = $(`[data-action="dashCardMove"][data-val="${focus[0]}"][data-d="${focus[1]}"]`); (b && !b.disabled ? b : $(`[data-action="dashCardMove"][data-val="${focus[0]}"]:not([disabled])`))?.focus(); }
 }
 function renderDashboard() {
   const t = ymd(), tot = dayTotals(t), T = targetsFor(t);
@@ -667,30 +680,26 @@ function renderDashboard() {
   const sm = syncMeta(), copied = sm.on && sm.copied && daysBetween(sm.copied, t) <= 7; // a recent daily copy in Drive counts as a backup
   const needBackup = hasData && !copied && (!S.lastExport || Date.now() - new Date(S.lastExport) > 7 * 864e5);
   const lastMedia = Store.get('media').filter(m => m.status === 'active').sort((a, b) => (b.updated || '').localeCompare(a.updated || ''))[0] || Store.get('media').filter(m => m.status === 'queue').sort((a, b) => (a.qpos ?? 1e9) - (b.qpos ?? 1e9))[0];
-  return `
-  <div class="mb-6 flex items-start gap-2"><div class="flex-1 min-w-0"><h2 class="text-2xl font-bold tracking-tight">${greet}${S.name ? `, ${esc(S.name)}` : ''}</h2><p class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div><button class="btn btn-sm btn-ghost" data-action="dashCardsEdit" aria-label="Show or hide cards" title="Show or hide cards">${icon('sliders-horizontal', 'w-4 h-4')}</button></div>
-  ${dashNotices()}
-  ${needBackup ? `<div class="card mb-4 flex flex-wrap items-center gap-3 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40">${icon('hard-drive-download', 'w-5 h-5 text-amber-600')}<div class="flex-1 text-sm min-w-[12rem]">${S.lastExport ? `Last backup: ${fmtDate(ymd(new Date(S.lastExport)))}.` : "You haven't exported a backup yet."} ${sm.on ? 'Sync copies mistakes to every device too, so keep a backup of your own.' : 'Your data lives only in this browser.'}</div><button class="btn btn-sm btn-primary" data-action="exportAll">Back up now</button></div>` : ''}
-  <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-    ${dashShow('nutrition') ? `<div class="card">${cardHead('apple', 'Nutrition today', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="nutrition">Log ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+  const cards = {
+    nutrition: () => `<div class="card">${cardHead('apple', 'Nutrition today', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="nutrition">Log ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       <div class="flex items-center gap-4"><div class="relative shrink-0">${ring(tot.cal / T.cal, '#0d9488', 108, 11)}<div class="absolute inset-0 grid place-items-center text-center"><div><div class="text-xl font-bold tabular-nums">${fmtNum(tot.cal)}</div><div class="text-[11px] muted">of ${fmtNum(T.cal)} kcal</div></div></div></div>
       <div class="flex-1 space-y-2">${miniBar('Protein', tot.p, T.p, '#e11d48')}${miniBar('Carbs', tot.c, T.c, '#f59e0b')}${miniBar('Fat', tot.f, T.f, '#6366f1')}</div></div>
-    </div>` : ''}
-    ${dashShow('weight') ? `<div class="card">${cardHead('scale', 'Body weight', `<button class="btn btn-sm btn-ghost" data-action="goNutTab" data-tab="trend">Trend ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+    </div>`,
+    weight: () => `<div class="card">${cardHead('scale', 'Body weight', `<button class="btn btn-sm btn-ghost" data-action="goNutTab" data-tab="trend">Trend ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       <div class="flex items-end gap-4"><div><div class="text-xs muted">7-day trend</div><div class="text-2xl font-bold tabular-nums">${last ? wFmt(last.t) : '–'}</div>
       ${last && wk != null ? `<div class="text-xs ${last.t - wk > 0 ? 'text-amber-600' : 'text-emerald-600'}">${last.t - wk > 0 ? '▲' : '▼'} ${fmtNum(Math.abs(toUnit(last.t) - toUnit(wk)), 1)} ${S.unit} this week</div>` : '<div class="text-xs muted">Log weigh-ins to see a trend</div>'}</div>
       <div class="flex-1">${sparkline(tr.slice(-30).map(p => p.t))}</div></div>
       <div class="flex items-center gap-2 mt-3"><input type="number" step="0.1" inputmode="decimal" class="input" placeholder="Today's weight (${S.unit})" value="${wDisp(day(t).weight)}" data-change="nutWeightToday"><span class="text-xs muted shrink-0">${day(t).weight != null ? 'Logged ✓' : ''}</span></div>
-    </div>` : ''}
-    ${dashShow('training') ? `<div class="card">${cardHead('dumbbell', 'Training', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="fitness">Open ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+    </div>`,
+    training: () => `<div class="card">${cardHead('dumbbell', 'Training', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="fitness">Open ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       ${aw ? `<div class="rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 p-3 flex items-center gap-3"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span><div class="flex-1"><div class="font-medium">${esc(aw.name)}</div><div class="text-xs muted">In progress since ${new Date(aw.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div></div><button class="btn btn-sm btn-primary" data-action="go" data-view="fitness">Resume</button></div>`
         : `<div class="grid grid-cols-2 gap-2 mb-3"><div class="stat"><div class="text-xs muted">This week</div><div class="text-xl font-bold">${weekCount}</div></div><div class="stat"><div class="text-xs muted">Last workout</div><div class="text-sm font-semibold truncate">${lw ? esc(lw.name) : '—'}</div><div class="text-xs muted">${lw ? fmtDate(wDate(lw), { month: 'short', day: 'numeric' }) : ''}</div></div></div>
         <div class="flex flex-wrap gap-1.5">${Store.get('routines').slice(0, 4).map(r => `<button class="btn btn-sm" data-action="startRoutine" data-id="${r.id}">${icon('play', 'w-3 h-3')} ${esc(r.name)}</button>`).join('')}<button class="btn btn-sm" data-action="startEmpty">${icon('plus', 'w-3 h-3')} Empty</button></div>`}
-    </div>` : ''}
-    ${dashShow('tasks') ? `<div class="card">${cardHead('list-checks', 'Tasks', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="tasks">All ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+    </div>`,
+    tasks: () => `<div class="card">${cardHead('list-checks', 'Tasks', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="tasks">All ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       ${dashTasks(showTasks)}
-    </div>` : ''}
-    ${dashShow('faith') ? `<div class="card">${cardHead('book-open', 'Faith & reflection')}
+    </div>`,
+    faith: () => `<div class="card">${cardHead('book-open', 'Faith & reflection')}
       <div class="grid grid-cols-3 gap-2 mb-3">
         <button class="stat text-left hover:ring-2 ring-brand-400" data-action="journalNew" data-type="journal"><div class="text-xs muted">Journal</div><div class="text-sm font-semibold">${journaledToday ? 'Written ✓' : 'Write'}</div></button>
         <button class="stat text-left hover:ring-2 ring-brand-400" data-action="gratitudeOpen"><div class="text-xs muted">Gratitude</div><div class="text-sm font-semibold">3 things</div></button>
@@ -699,13 +708,20 @@ function renderDashboard() {
       ${dashScripture()}
       <p class="text-sm"><span class="muted">Journal prompt:</span> ${esc(todaysJournalPrompt())}</p>
       ${lastMedia ? `<button class="mt-3 w-full text-left text-sm rounded-lg border border-slate-200 dark:border-slate-800 p-2 hover:bg-slate-50 dark:hover:bg-slate-800" data-action="mediaOpen" data-id="${lastMedia.id}"><span class="muted text-xs">${lastMedia.status === 'active' ? 'Continue' : 'Up next'}${mProgress(lastMedia) != null ? ` · ${mProgress(lastMedia)}%` : ''}</span><div class="font-medium truncate">${esc(lastMedia.title || 'Untitled')}</div></button>` : ''}
-    </div>` : ''}
-    ${dashShow('family') ? `<div class="card">${cardHead('heart', 'Marriage & family', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="family">Open ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
+    </div>`,
+    family: () => `<div class="card">${cardHead('heart', 'Marriage & family', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="family">Open ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       ${dashFamily()}
       ${ms.length ? `<div class="space-y-1.5 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">${ms.map(m => `<div class="flex items-center gap-2 text-sm"><span class="chip">${daysBetween(t, m.date) === 0 ? 'Today' : `${daysBetween(t, m.date)}d`}</span><span class="truncate">${esc(m.title)}</span></div>`).join('')}</div>` : ''}
-    </div>` : ''}
-    ${dashShow('meals') ? dashMeals() : ''}
-  </div>${DASH_CARDS.every(([id]) => !dashShow(id)) ? `<p class="text-sm muted text-center mt-6">Every card is hidden. Tap <button class="underline" data-action="dashCardsEdit">Show or hide cards</button> to bring some back.</p>` : ''}`;
+    </div>`,
+    meals: () => dashMeals()
+  };
+  return `
+  <div class="mb-6 flex items-start gap-2"><div class="flex-1 min-w-0"><h2 class="text-2xl font-bold tracking-tight">${greet}${S.name ? `, ${esc(S.name)}` : ''}</h2><p class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div><button class="btn btn-sm btn-ghost" data-action="dashCardsEdit" aria-label="Show, hide or reorder cards" title="Show, hide or reorder cards">${icon('sliders-horizontal', 'w-4 h-4')}</button></div>
+  ${dashNotices()}
+  ${needBackup ? `<div class="card mb-4 flex flex-wrap items-center gap-3 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40">${icon('hard-drive-download', 'w-5 h-5 text-amber-600')}<div class="flex-1 text-sm min-w-[12rem]">${S.lastExport ? `Last backup: ${fmtDate(ymd(new Date(S.lastExport)))}.` : "You haven't exported a backup yet."} ${sm.on ? 'Sync copies mistakes to every device too, so keep a backup of your own.' : 'Your data lives only in this browser.'}</div><button class="btn btn-sm btn-primary" data-action="exportAll">Back up now</button></div>` : ''}
+  <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+    ${dashOrder().filter(dashShow).map(id => cards[id]()).join('')}
+  </div>${DASH_CARDS.every(([id]) => !dashShow(id)) ? `<p class="text-sm muted text-center mt-6">Every card is hidden. Tap <button class="underline" data-action="dashCardsEdit">Show, hide or reorder cards</button> to bring some back.</p>` : ''}`;
 }
 
 /* =====================================================================
@@ -1700,6 +1716,8 @@ function nutToday() {
     <div class="ml-auto flex gap-1.5">${dd.entries.length ? `<button class="btn btn-sm" data-action="dayCopy">${icon('copy', 'w-3.5 h-3.5')} Copy day</button>` : ''}${ui.clip ? `<button class="btn btn-sm" data-action="clipPaste">${icon('clipboard-paste', 'w-3.5 h-3.5')} Paste ${ui.clip.items.length}</button><button class="btn btn-ghost btn-sm" data-action="clipClear" title="Clear clipboard">${icon('x', 'w-3.5 h-3.5')}</button>` : `<button class="btn btn-sm" data-action="nutCopyPrev">${icon('history', 'w-3.5 h-3.5')} Copy yesterday</button>`}</div>
   </div>
   ${checkinBanner()}
+  <div class="lg:hidden mb-4 space-y-2"><button class="btn btn-primary w-full" data-action="lfOpen">${icon('search')} Log food</button>
+    ${recents.length ? `<div class="flex gap-1.5 overflow-x-auto scroll-thin pb-1" role="group" aria-label="Add a recent food again">${recents.slice(0, 8).map(f => `<button class="chip whitespace-nowrap" data-action="quickFood" data-id="${esc(f.id)}" aria-label="Add ${esc(f.name)} again">${icon('plus', 'w-3 h-3')} ${esc(f.name)}</button>`).join('')}</div>` : ''}</div>
   <div class="grid lg:grid-cols-3 gap-4 mb-4">
     <div class="card lg:col-span-2"><div class="flex flex-col sm:flex-row items-center gap-6">
       <div class="relative shrink-0">${ring(tot.cal / T.cal, MACRO_COLORS.cal, 150, 14)}<div class="absolute inset-0 grid place-items-center text-center"><div><div class="text-3xl font-bold tabular-nums">${fmtNum(tot.cal)}</div><div class="text-xs muted">of ${fmtNum(T.cal)} kcal</div><div class="text-xs font-medium ${tot.cal > T.cal ? 'text-rose-500' : 'text-brand-600'}">${tot.cal > T.cal ? `${fmtNum(tot.cal - T.cal)} over` : `${fmtNum(T.cal - tot.cal)} left`}</div></div></div></div>
@@ -4218,7 +4236,7 @@ function jList(all) {
   return `<input id="j-search" class="input mb-2" placeholder="Search entries…" value="${esc(ui.jSearch)}" data-input="jSearch">
     <div class="flex flex-wrap gap-1 mb-2">${['all', ...Object.keys(JTYPES)].map(t => `<button class="chip ${ui.jType === t ? 'chip-on' : ''}" data-action="jFilter" data-v="${t}">${t === 'all' ? 'All' : JTYPES[t][0]}</button>`).join('')}</div>
     ${ui.jDay ? `<div class="flex items-center gap-2 text-xs mb-2"><span class="chip chip-on">${fmtDate(ui.jDay)}</span><button class="underline muted" data-action="jDayClear">Show all days</button></div>` : ''}
-    <div class="space-y-0.5 max-h-[60vh] overflow-y-auto scroll-thin">${list.map(j => `<button class="w-full text-left rounded-lg px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 ${j.id === ui.jId ? 'bg-brand-50 dark:bg-brand-950' : ''}" data-action="journalOpen" data-id="${j.id}" data-jlist="${j.id}"><div class="flex items-center gap-1.5 text-xs muted">${icon((JTYPES[j.type] || JTYPES.journal)[1], 'w-3 h-3')} ${fmtDate(j.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}<span class="ml-auto">${moodEmoji(j.mood)}${(j.photos || []).length ? ' 📷' : ''}</span></div><div class="jl-title text-sm font-medium truncate">${esc(j.title || firstLine(j.body) || 'Untitled')}</div></button>`).join('') || `<p class="text-sm muted p-2">${all.length ? 'No entries match.' : 'No entries yet.'}</p>`}</div>`;
+    <div class="space-y-0.5 max-h-[60vh] overflow-y-auto scroll-thin">${pageOf('journal', list).map(j => `<button class="w-full text-left rounded-lg px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 ${j.id === ui.jId ? 'bg-brand-50 dark:bg-brand-950' : ''}" data-action="journalOpen" data-id="${j.id}" data-jlist="${j.id}"><div class="flex items-center gap-1.5 text-xs muted">${icon((JTYPES[j.type] || JTYPES.journal)[1], 'w-3 h-3')} ${fmtDate(j.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}<span class="ml-auto">${moodEmoji(j.mood)}${(j.photos || []).length ? ' 📷' : ''}</span></div><div class="jl-title text-sm font-medium truncate">${esc(j.title || firstLine(j.body) || 'Untitled')}</div></button>`).join('') || `<p class="text-sm muted p-2">${all.length ? 'No entries match.' : 'No entries yet.'}</p>`}${moreBtn('journal', list)}</div>`;
 }
 function jCalendar(all) {
   const [y, m] = (ui.jMonth || ymd().slice(0, 7)).split('-').map(Number), first = new Date(y, m - 1, 1), days = new Date(y, m, 0).getDate(), lead = first.getDay(), by = {};
@@ -4717,7 +4735,7 @@ function medLibrary() {
       ${mkit().clipHidden ? `<button class="btn btn-sm btn-ghost ml-auto" data-action="mClipShow">${icon('paperclip', 'w-3.5 h-3.5')} Clipper</button>` : ''}</div>
     <div class="flex flex-wrap gap-1.5 mb-2"><button class="chip ${F.kind === 'all' ? 'chip-on' : ''}" data-action="mfKind" data-v="all">All formats</button>${Object.entries(MEDIA_KINDS).map(([k, [l, ic]]) => `<button class="chip ${F.kind === k ? 'chip-on' : ''}" data-action="mfKind" data-v="${k}">${icon(ic, 'w-3 h-3 inline -mt-0.5')} ${l}</button>`).join('')}</div>
     <div class="flex gap-1.5 overflow-x-auto scroll-thin pb-2 mb-4"><button class="chip whitespace-nowrap ${ui.medMin === 'all' ? 'chip-on' : ''}" data-action="medMin" data-v="all">All sources (${all.length})</button>${mins.map(m => `<button class="chip whitespace-nowrap ${ui.medMin === m.id ? 'chip-on' : ''}" data-action="medMin" data-v="${m.id}">${esc(m.name)} (${count(m.id)})</button>`).join('')}</div>
-    ${list.length ? `<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${list.map(mediaCard).join('')}</div>` : emptyState('library', all.length ? 'Nothing matches those filters' : 'Your library is empty', 'Add a sermon, podcast, video, book or article — paste a link and the details fill in.', `<button class="btn btn-primary" data-action="mediaNew">${icon('plus')} Add</button>`)}`;
+    ${list.length ? `<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${pageOf('media', list).map(mediaCard).join('')}</div>${moreBtn('media', list)}` : emptyState('library', all.length ? 'Nothing matches those filters' : 'Your library is empty', 'Add a sermon, podcast, video, book or article — paste a link and the details fill in.', `<button class="btn btn-primary" data-action="mediaNew">${icon('plus')} Add</button>`)}`;
 }
 // Detail page
 function mediaDetail(o) {
@@ -7331,6 +7349,11 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16l', title: 'Quicker on your phone', slides: [
+    { title: 'Log food comes first', body: '<p>On a phone, Nutrition’s daily log now starts with a <strong>Log food</strong> button and your recent foods. Tap a food to add it again; it goes into the meal for this time of day.</p>', go: ['nutrition', 'nutTab', 'today', 'Open Nutrition'] },
+    { title: 'Put your cards in order', body: '<p>On the Dashboard, tap the sliders button at the top right. Besides showing or hiding cards, you can now move each one up or down, so the card you look at first sits at the top. The order follows you to your other devices.</p>', go: ['dashboard', '', '', 'Open the Dashboard'] },
+    { title: 'Long lists open faster', body: '<p>Journal and the Media library now show 50 at a time, with <strong>Show 50 more</strong> at the bottom. Search still looks through everything.</p>' }
+  ] },
   { id: '2026-10-16k', title: 'Daily copies in Google Drive', slides: [
     { title: 'A copy every day', body: '<p>With sync on, the dashboard now keeps a dated copy of your records in your private Google Drive folder: one for each of the last 7 days, then one a week for 8 weeks. It happens on its own the first time a device syncs each day.</p>' },
     { title: 'Undo a mistake', body: '<p>Deleted something by accident, even after it synced? Open <strong>Settings &amp; Sync → Restore from a copy</strong>, pick a day and choose <strong>Add back what’s missing</strong>. Anything newer stays as it is. <strong>Replace everything</strong> puts this device back to that day instead.</p>' },
@@ -7423,7 +7446,7 @@ const TOUR = [
   { title: 'Faith', body: '<ul class="list-disc pl-5 space-y-1"><li><strong>Scripture</strong>: read, follow a reading plan, memorize verses with typing practice, and keep a prayer list.</li><li><strong>Journal</strong>: write entries from templates, with mood and photos.</li><li><strong>Media Library</strong>: save sermons, podcasts, articles and books, with your notes and quotes.</li></ul>', go: ['scripture', '', '', 'Open Scripture'] },
   { title: 'Home', body: '<ul class="list-disc pl-5 space-y-1"><li><strong>Marriage &amp; Family</strong>: a weekly family review, date ideas, and notes on the people you love.</li><li><strong>Recipes &amp; Meals</strong>: recipes, a meal plan and a grocery list.</li><li><strong>Tasks</strong>: type something like <em>call Jake fri at 9</em> and it is dated for you. A task waits in the Inbox until it has a due date and an area or project.</li></ul>', go: ['tasks', '', '', 'Open Tasks'] },
   { title: 'Put it on your phone', body: '<p>Open this page’s web address on your phone. On an iPhone use Safari: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>. On Android use Chrome: open the <strong>⋮</strong> menu and choose <strong>Add to Home screen</strong>.</p><p>It then opens like any other app and works without a connection.</p>' },
-  { title: 'Keep your records safe', body: '<p>Your records live only on this device. Removing the app from your home screen, or clearing the browser’s data, erases them.</p><p>Every so often, open <strong>Settings &amp; Sync</strong> and tap <strong>Back up personal data + photos</strong>. Keep the file somewhere safe; you can import it on a new phone.</p><p>You can open this tour again from <strong>Help &amp; what’s new</strong> in the menu.</p>' }
+  { title: 'Keep your records safe', body: '<p>Your records live on this device. Removing the app from your home screen, or clearing the browser’s data, erases them.</p><p>In <strong>Settings &amp; Sync</strong>, <strong>Connect Google Drive</strong> keeps your devices in step and saves a dated copy each day that you can restore from. Every so often, also tap <strong>Back up personal data + photos</strong> and keep the file somewhere safe: it’s the only copy with your photos.</p><p>You can open this tour again from <strong>Help &amp; what’s new</strong> in the menu.</p>' }
 ];
 const newsWaiting = () => S.tour !== 'new' && !!RELEASES.length && S.newsSeen !== RELEASES[0].id;
 const helpWaiting = () => S.tour === 'new' || newsWaiting();
@@ -7475,7 +7498,7 @@ const A_HELP = {
 // edits and deletions from either device survive. Photos, API keys and downloaded libraries stay
 // on the device. Sign-in is a plain redirect, so no Google script is loaded.
 const DRIVE = { clientId: '868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.googleusercontent.com', scope: 'https://www.googleapis.com/auth/drive.appdata', file: 'life-dashboard-sync.json', api: 'https://www.googleapis.com', auth: 'https://accounts.google.com/o/oauth2/v2/auth' };
-const SYNC_SETTINGS = ['name', 'familyName', 'hiddenTabs', 'tabsV', 'hiddenCards', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
+const SYNC_SETTINGS = ['name', 'familyName', 'hiddenTabs', 'tabsV', 'hiddenCards', 'cardOrder', 'unit', 'restSeconds', 'timerSound', 'targets', 'translation', 'bwFallback'];
 const SYNC_SKIP = ['photoMeta'];
 const SYNC_BASE = 'sync.base';
 // A sync that would remove more than this many records (outside the lists that are routinely
@@ -7767,9 +7790,14 @@ const A_SYNC = {
 const A = {
   // shell
   go: el => go(el.dataset.view),
+  showMore: el => { const k = el.dataset.key; ui.more = { ...(ui.more || {}), [k]: ((ui.more || {})[k] || PAGE) + PAGE }; render(); },
   setTab: el => { ui[el.dataset.key] = el.dataset.val; render(); },
   tabsEdit: el => tabsEditModal(el.dataset.key),
   dashCardsEdit: () => dashCardsModal(),
+  dashCardMove: el => {
+    const order = dashOrder(), i = order.indexOf(el.dataset.val), j = i + +el.dataset.d; if (i < 0 || j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]]; S.cardOrder = order; saveSettings(); syncTouch(); dashCardsModal([el.dataset.val, el.dataset.d]);
+  },
   dashCardToggle: el => { const id = el.dataset.val, h = (S.hiddenCards || []).filter(x => x !== id); S.hiddenCards = el.checked ? h : [...h, id]; saveSettings(); syncTouch(); },
   tabsToggle: el => {
     const key = el.dataset.key, id = el.dataset.val, all = (TAB_LISTS[key] || []).map(t => t[0]), H = S.hiddenTabs = { ...(S.hiddenTabs || {}) };

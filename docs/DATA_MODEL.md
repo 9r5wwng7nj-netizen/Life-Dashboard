@@ -16,6 +16,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 | localStorage | `ld.settings` → `hiddenTabs` | Section tabs the person hid, as `{ taskTab: ['stats'], … }`; synced between devices | ✅ (with settings) |
 | localStorage | `ld.settings` → `tabsV` | Which default-hidden tabs have been applied to saved settings (2 = Tasks People and Media Stats); synced | ✅ (with settings) |
 | localStorage | `ld.settings` → `hiddenCards` | Dashboard cards the person hid, by id from `DASH_CARDS` (`nutrition`, `weight`, `training`, `tasks`, `faith`, `family`, `meals`); synced | ✅ (with settings) |
+| localStorage | `ld.settings` → `cardOrder` | The dashboard cards' order, by id from `DASH_CARDS`; empty means the default order, and cards it doesn't list follow at the end; synced | ✅ (with settings) |
 | localStorage | `ld.settings` → `ytShorts` | Whether Find a video shows Shorts (default off; device only) | ✅ (with settings) |
 | localStorage | `ld.settings` → `vaultName`, `obsFolder` | The Obsidian vault's name and the folder that Send to Obsidian saves into (device only, not synced) | ✅ (with settings) |
 | localStorage | `ld.youtube` | YouTube connection for Find a video: `{ on, token, exp, state, view, error }`. The token is read-only and lasts about an hour | ❌ |
