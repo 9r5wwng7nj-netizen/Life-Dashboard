@@ -177,3 +177,16 @@ test('a long food name never makes a page wider than a phone', async ({ page }) 
   expect(Object.entries(wide).filter(([, n]) => n > 0)).toEqual([]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('a birthday ten days away becomes one gift task with the saved ideas', async ({ page }) => {
+  const errors = await open(page);
+  const r = await page.evaluate(() => {
+    const d = addDays(ymd(), 7), bday = '1990' + d.slice(4);
+    Store.set('fpeople', [{ id: 'p1', name: 'Sam', role: 'spouse', birthday: bday }, { id: 'p2', name: 'Far', role: 'child', birthday: '2015' + addDays(ymd(), 40).slice(4) }]);
+    Store.set('gifts', [{ id: 'g1', personId: 'p1', idea: 'Hiking boots', price: 120, status: 'idea' }]);
+    ui._giftDay = null; render(); ui._giftDay = null; render();
+    return TK().map(t => [t.title.startsWith('Gift for Sam'), t.due === addDays(d, -3), t.notes, t.person]);
+  });
+  expect(r).toEqual([[true, true, 'Gift ideas:\n- Hiking boots (about $120)', 'Sam']]);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
