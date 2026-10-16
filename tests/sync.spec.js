@@ -10,18 +10,30 @@ let server, base;
 test.beforeAll(async () => { server = await serveRepo(); base = `http://localhost:${server.address().port}`; });
 test.afterAll(() => stopServer(server));
 
-// One file in the hidden app folder, with the version number Drive bumps on every save.
+// The hidden app folder: the sync file, with the version number Drive bumps on every save, and the
+// dated daily copies (`copies`, newest last), which can be listed, downloaded and deleted.
 function fakeDrive() {
-  const drive = { file: null, saves: 0 };
+  const drive = { file: null, saves: 0, copies: [], made: 0 };
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': '*' };
   const json = (route, body, status = 200) => route.fulfill({ status, headers: { ...cors, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  drive.copy = (name, body = '{}') => { const c = { id: 'copy-' + (++drive.made), name, body, size: String(body.length), createdTime: new Date().toISOString() }; drive.copies.push(c); return c; };
   drive.attach = context => context.route('https://www.googleapis.com/**', route => {
     const req = route.request(), url = new URL(req.url()), method = req.method();
     if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
     if (req.headers().authorization !== `Bearer ${TOKEN}`) return json(route, { error: 'unauthorized' }, 401);
     const save = text => { drive.saves++; drive.file = { id: 'file-1', version: String(+(drive.file?.version || 0) + 1), body: text }; return json(route, { id: drive.file.id, version: drive.file.version }); };
-    if (url.pathname === '/drive/v3/files') return json(route, { files: drive.file ? [{ id: drive.file.id, version: drive.file.version }] : [] });
-    if (url.pathname === '/upload/drive/v3/files' && method === 'POST') return save(req.postData().split('\r\n\r\n')[2].split('\r\n--')[0]);
+    if (url.pathname === '/drive/v3/files') {
+      const sync = drive.file ? [{ id: drive.file.id, name: 'life-dashboard-sync.json', version: drive.file.version }] : [];
+      return json(route, { files: (url.searchParams.get('q') || '').includes("name='") ? sync : [...sync, ...drive.copies.map(({ id, name, size, createdTime }) => ({ id, name, size, createdTime }))] });
+    }
+    if (url.pathname === '/upload/drive/v3/files' && method === 'POST') {
+      const parts = req.postData().split('\r\n\r\n'), meta = JSON.parse(parts[1].split('\r\n--')[0]), body = parts[2].split('\r\n--')[0];
+      if (meta.name !== 'life-dashboard-sync.json') { const c = drive.copy(meta.name, body); return json(route, { id: c.id, version: '1' }); }
+      return save(body);
+    }
+    const copy = drive.copies.find(c => url.pathname === '/drive/v3/files/' + c.id);
+    if (copy && method === 'DELETE') { drive.copies = drive.copies.filter(c => c !== copy); return route.fulfill({ status: 204, headers: cors }); }
+    if (copy) return route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': 'application/json' }, body: copy.body });
     if (url.pathname === '/upload/drive/v3/files/file-1' && method === 'PATCH') return save(req.postData());
     if (url.pathname === '/drive/v3/files/file-1') return url.searchParams.get('alt') === 'media' ? route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': 'application/json' }, body: drive.file.body }) : json(route, { version: drive.file.version });
     return json(route, { error: 'not found' }, 404);
@@ -209,4 +221,69 @@ test('file copy offers no sync and makes no sync requests', async ({ page }) => 
   await expect(page.locator('#sync-btn')).toBeHidden();
   expect(await page.evaluate(() => localStorage.getItem('ld.sync'))).toBeNull();
   expect(requests).toEqual([]);
+});
+
+test('daily copies: one per day for a week, then one a week, and nothing older', async ({ page }) => {
+  await page.goto(pathToFileURL(path.resolve('index.html')).href);
+  await page.waitForFunction(() => typeof copiesToDrop === 'function');
+  const dropped = await page.evaluate(() => copiesToDrop([
+    { id: 'g', date: '2026-08-14' }, { id: 'a', date: '2026-10-16' }, { id: 'b2', date: '2026-10-15', created: '2026-10-15T09:00:00Z' },
+    { id: 'b', date: '2026-10-15', created: '2026-10-15T10:00:00Z' }, { id: 'c', date: '2026-10-10' }, { id: 'd', date: '2026-10-09' },
+    { id: 'e', date: '2026-10-06' }, { id: 'f', date: '2026-09-01' }
+  ], '2026-10-16').map(c => c.id));
+  // b2 is a second copy of the same day, e shares d's week, and g is more than 8 weeks before the daily ones.
+  expect(dropped).toEqual(['b2', 'e', 'g']);
+  expect(await page.evaluate(() => [copyDate('life-dashboard-copy-2026-10-16.json'), copyDate('life-dashboard-sync.json'), copyDate('life-dashboard-copy-2026-10-16.json.bak')])).toEqual(['2026-10-16', '', '']);
+});
+
+test('adding back what is missing restores deleted records and leaves newer edits alone', async ({ page }) => {
+  await page.goto(pathToFileURL(path.resolve('index.html')).href);
+  await page.waitForFunction(() => typeof Store !== 'undefined' && Store.data && Array.isArray(Store.data.tasks));
+  const r = await page.evaluate(() => {
+    Store.data.tasks = [{ id: 't1', title: 'Edited since' }, { id: 't3', title: 'Added since' }];
+    Store.data.nutrition = { '2026-10-01': { entries: [{ id: 'e1', name: 'Oats' }] } };
+    S.vaultName = 'My Vault'; S.unit = 'lbs';
+    const copy = { app: 'life-dashboard', version: 1, sync: 1, exportedAt: '2026-10-10T12:00:00Z', settings: { unit: 'kg' }, data: {
+      tasks: [{ id: 't1', title: 'Before the edit' }, { id: 't2', title: 'Deleted by mistake' }],
+      nutrition: { '2026-10-01': { weight: 80, entries: [{ id: 'e1', name: 'Old oats' }, { id: 'e2', name: 'Eggs' }] }, '2026-09-30': { entries: [{ id: 'e0', name: 'Toast' }] } } } };
+    const add = planBackupImport(copy, 'missing'), replace = planBackupImport(copy, 'replace');
+    return { tasks: add.data.tasks.map(t => t.title), day: add.data.nutrition['2026-10-01'], older: !!add.data.nutrition['2026-09-30'], added: add.added, unit: add.settings.unit,
+      replaced: replace.data.tasks.map(t => t.title), replaceKeeps: [replace.settings.vaultName, replace.settings.unit] };
+  });
+  expect(r.tasks).toEqual(['Edited since', 'Added since', 'Deleted by mistake']);
+  expect(r.day).toEqual({ weight: 80, entries: [{ id: 'e1', name: 'Oats' }, { id: 'e2', name: 'Eggs' }] });
+  expect([r.older, r.added, r.unit]).toEqual([true, 4, 'lbs']);
+  // Replacing from a sync copy changes the synced settings only; the vault name was never in the copy.
+  expect(r.replaced).toEqual(['Before the edit', 'Deleted by mistake']);
+  expect(r.replaceKeeps).toEqual(['My Vault', 'kg']);
+});
+
+test('the first sync of the day keeps a dated copy, and a deleted task can be added back from it', async ({ browser }) => {
+  const drive = fakeDrive(), d = await device(browser, drive);
+  const day = n => { const x = new Date(); x.setDate(x.getDate() - n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+  drive.copy(`life-dashboard-copy-${day(100)}.json`); drive.copy(`life-dashboard-copy-${day(1)}.json`);
+  await d.page.evaluate(() => { addTask('Keep me'); addTask('Delete me by mistake'); });
+  expect((await sync(d.page)).error).toBe('');
+  expect(drive.copies.map(c => c.name).sort()).toEqual([`life-dashboard-copy-${day(1)}.json`, `life-dashboard-copy-${day(0)}.json`]);
+  const today = drive.copies.find(c => c.name.includes(day(0)));
+  expect(JSON.parse(today.body).data.tasks.map(t => t.title).sort()).toEqual(['Delete me by mistake', 'Keep me']);
+
+  // Later the same day: the task is deleted and synced; no second copy is made.
+  await d.page.evaluate(() => { Store.set('tasks', Store.get('tasks').filter(t => t.title !== 'Delete me by mistake')); });
+  expect((await sync(d.page)).error).toBe('');
+  expect(drive.copies).toHaveLength(2);
+  expect(JSON.parse(drive.file.body).data.tasks.map(t => t.title)).toEqual(['Keep me']);
+
+  // Settings & Sync → Restore from a copy → today → Add back what's missing.
+  await d.page.evaluate(() => openSettings());
+  await d.page.click('[data-action="syncCopies"]');
+  await d.page.click(`[data-action="syncCopyOpen"][data-date="${day(0)}"]`);
+  await expect(d.page.locator('#modal')).toContainText('Add back what’s missing');
+  await d.page.click('[data-action="doImport"][data-mode="missing"]');
+  await d.page.waitForFunction(() => Store.get('tasks').length === 2);
+  expect(await titles(d.page)).toEqual(['Delete me by mistake', 'Keep me']);
+  expect((await sync(d.page)).error).toBe('');
+  expect(JSON.parse(drive.file.body).data.tasks.map(t => t.title).sort()).toEqual(['Delete me by mistake', 'Keep me']);
+  expect(d.errors).toEqual([]);
+  await d.context.close();
 });

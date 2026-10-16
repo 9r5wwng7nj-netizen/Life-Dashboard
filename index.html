@@ -664,12 +664,13 @@ function renderDashboard() {
   const ms = Store.get('milestones').filter(m => !m.done && m.date && m.date >= t).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
   const hr = new Date().getHours(), greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
   const hasData = ws.length || Object.keys(N()).length || journal.length || Store.get('tasks').length;
-  const needBackup = hasData && (!S.lastExport || Date.now() - new Date(S.lastExport) > 7 * 864e5);
+  const sm = syncMeta(), copied = sm.on && sm.copied && daysBetween(sm.copied, t) <= 7; // a recent daily copy in Drive counts as a backup
+  const needBackup = hasData && !copied && (!S.lastExport || Date.now() - new Date(S.lastExport) > 7 * 864e5);
   const lastMedia = Store.get('media').filter(m => m.status === 'active').sort((a, b) => (b.updated || '').localeCompare(a.updated || ''))[0] || Store.get('media').filter(m => m.status === 'queue').sort((a, b) => (a.qpos ?? 1e9) - (b.qpos ?? 1e9))[0];
   return `
   <div class="mb-6 flex items-start gap-2"><div class="flex-1 min-w-0"><h2 class="text-2xl font-bold tracking-tight">${greet}${S.name ? `, ${esc(S.name)}` : ''}</h2><p class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div><button class="btn btn-sm btn-ghost" data-action="dashCardsEdit" aria-label="Show or hide cards" title="Show or hide cards">${icon('sliders-horizontal', 'w-4 h-4')}</button></div>
   ${dashNotices()}
-  ${needBackup ? `<div class="card mb-4 flex flex-wrap items-center gap-3 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40">${icon('hard-drive-download', 'w-5 h-5 text-amber-600')}<div class="flex-1 text-sm min-w-[12rem]">${S.lastExport ? `Last backup: ${fmtDate(ymd(new Date(S.lastExport)))}.` : "You haven't exported a backup yet."} Your data lives only in this browser.</div><button class="btn btn-sm btn-primary" data-action="exportAll">Back up now</button></div>` : ''}
+  ${needBackup ? `<div class="card mb-4 flex flex-wrap items-center gap-3 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40">${icon('hard-drive-download', 'w-5 h-5 text-amber-600')}<div class="flex-1 text-sm min-w-[12rem]">${S.lastExport ? `Last backup: ${fmtDate(ymd(new Date(S.lastExport)))}.` : "You haven't exported a backup yet."} ${sm.on ? 'Sync copies mistakes to every device too, so keep a backup of your own.' : 'Your data lives only in this browser.'}</div><button class="btn btn-sm btn-primary" data-action="exportAll">Back up now</button></div>` : ''}
   <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
     ${dashShow('nutrition') ? `<div class="card">${cardHead('apple', 'Nutrition today', `<button class="btn btn-sm btn-ghost" data-action="go" data-view="nutrition">Log ${icon('chevron-right', 'w-3.5 h-3.5')}</button>`)}
       <div class="flex items-center gap-4"><div class="relative shrink-0">${ring(tot.cal / T.cal, '#0d9488', 108, 11)}<div class="absolute inset-0 grid place-items-center text-center"><div><div class="text-xl font-bold tabular-nums">${fmtNum(tot.cal)}</div><div class="text-[11px] muted">of ${fmtNum(T.cal)} kcal</div></div></div></div>
@@ -2381,16 +2382,42 @@ function parseBackup(text) {
   let d; try { d = JSON.parse(text); } catch (e) { throw new Error('That file is not valid JSON.'); }
   return validateBackup(d);
 }
+// Add back what a backup has and this device doesn't, leaving everything already here as it is.
+// Returns how many records were added.
+function addMissing(data, key, inc) {
+  const cur = data[key]; let n = 0;
+  if (key === 'activeWorkout') return 0; // never bring back an old workout in progress
+  if (cur == null) { data[key] = inc; return Array.isArray(inc) ? inc.length : 1; }
+  const byId = list => list.every(x => plainObject(x) && x.id != null);
+  const addList = (into, from) => {
+    if (byId(into) && byId(from)) { const have = new Set(into.map(x => String(x.id))); for (const x of from) if (!have.has(String(x.id))) { into.push(x); n++; } }
+    else for (const x of from) if (!into.some(y => sameJson(y, x))) { into.push(x); n++; }
+  };
+  if (Array.isArray(cur) && Array.isArray(inc)) addList(cur, inc);
+  else if (key === 'nutrition') for (const [day, rec] of Object.entries(inc)) {
+    if (!cur[day]) { cur[day] = rec; n += (rec.entries || []).length + (rec.weight != null ? 1 : 0); continue; }
+    if (!Array.isArray(cur[day].entries)) cur[day].entries = [];
+    addList(cur[day].entries, rec.entries || []);
+    if (cur[day].weight == null && rec.weight != null) { cur[day].weight = rec.weight; n++; }
+  }
+  else if (plainObject(cur) && plainObject(inc)) for (const [k, v] of Object.entries(inc)) {
+    if (!Object.hasOwn(cur, k)) { cur[k] = v; n++; }
+    else if (Array.isArray(cur[k]) && Array.isArray(v)) addList(cur[k], v);
+  }
+  return n;
+}
 function planBackupImport(d, mode) {
   validateBackup(d);
-  if (!['merge', 'replace'].includes(mode)) throw new Error('Choose Merge or Replace.');
+  if (!['merge', 'replace', 'missing'].includes(mode)) throw new Error('Choose Merge or Replace.');
   const data = structuredClone(Store.data), photos = d.assets ? d.assets.photos.map(p => [p.id, dataUrlToBlob(p.data)]) : null;
   if (photos?.length && !Photos.ok()) throw new Error('This browser cannot store photos. Import on a browser with photo storage enabled.');
+  let added = 0;
   for (const key of Object.keys(COLLECTIONS)) {
     const has = Object.hasOwn(d.data, key), inc = structuredClone(d.data[key]), cur = data[key];
     if (key === 'photoMeta' && photos === null) continue;
     if (mode === 'replace') { data[key] = has ? inc : structuredClone(COLLECTIONS[key]); continue; }
     if (!has || inc == null) continue;
+    if (mode === 'missing') { added += addMissing(data, key, inc); continue; }
     if (key === 'activeWorkout') { if (!cur) data[key] = inc; continue; }
     if (cur == null) { data[key] = inc; continue; }
     if (Array.isArray(cur) && Array.isArray(inc)) {
@@ -2406,9 +2433,11 @@ function planBackupImport(d, mode) {
   let settings = structuredClone(S);
   if (mode === 'replace' && d.settings) {
     const { esvKey, fdcKey, aiKey, view, collapsed } = S;
-    settings = { ...SETTINGS_DEFAULT, ...d.settings, esvKey, fdcKey, aiKey, view, collapsed, targets: { ...SETTINGS_DEFAULT.targets, ...d.settings.targets } };
+    // A sync copy from Google Drive carries only the synced settings, so the rest stay as they are.
+    settings = d.sync === 1 ? { ...settings, ...structuredClone(d.settings), targets: { ...S.targets, ...(d.settings.targets || {}) } }
+      : { ...SETTINGS_DEFAULT, ...d.settings, esvKey, fdcKey, aiKey, view, collapsed, targets: { ...SETTINGS_DEFAULT.targets, ...d.settings.targets } };
   }
-  return { data, photos, settings, mode };
+  return { data, photos, settings, mode, added };
 }
 async function commitBackupImport(plan) {
   // Keep every collection and photo change in one IndexedDB transaction.
@@ -2435,6 +2464,22 @@ async function commitBackupImport(plan) {
   Store.data = plan.data; S = plan.settings;
   Photos.clearURLs();
   applyTheme(); applyCollapse();
+}
+// What a backup holds and how to bring it in. `day` is set for a dated copy from Google Drive, which
+// is offered as "add back what's missing" (the safe undo) or "replace everything".
+function importChoice(d, day) {
+  ui.pendingImport = d;
+  const size = v => Array.isArray(v) ? v.length : typeof v === 'object' ? Object.keys(v).length : 1;
+  const counts = Object.entries(d.data).filter(([k, v]) => k in COLLECTIONS && v != null && (!day || size(v))).map(([k, v]) => `<span class="chip">${esc(k)}: ${size(v)}</span>`).join(' '),
+    photos = d.assets && Array.isArray(d.assets.photos) ? d.assets.photos.length : null;
+  if (day) return Modal.open(modalShell(`Restore from ${fmtDate(day, { weekday: 'long', month: 'long', day: 'numeric' })}`, `<div class="flex flex-wrap gap-1">${counts}</div>
+      <p class="text-sm"><strong>Add back what’s missing</strong> brings back records that are in this copy but no longer on this device, such as something deleted by mistake. Everything already here stays as it is.</p>
+      <p class="text-sm muted"><strong>Replace everything</strong> puts this device’s records back exactly as they were that day. Photos stay. With sync on, the next sync asks before removing newer records from your other devices.</p>`,
+    `<button type="button" class="btn" data-action="closeModal">Cancel</button><button type="button" class="btn btn-danger" data-action="doImport" data-mode="replace">Replace everything</button><button type="button" class="btn btn-primary" data-action="doImport" data-mode="missing">Add back what’s missing</button>`));
+  Modal.open(modalShell('Import backup', `<p class="text-sm">Backup from <strong>${d.exportedAt ? fmtDateTime(d.exportedAt) : 'an unknown date'}</strong>.</p><div class="flex flex-wrap gap-1">${counts}</div>
+      <p class="text-sm muted">${photos == null ? 'Legacy backup: it does not contain photos, so your existing photos will be kept.' : `${photos} photo${photos === 1 ? '' : 's'} included.`}</p>
+      <p class="text-sm muted"><strong>Merge</strong> keeps your current data and adds or updates items from the file. <strong>Replace</strong> restores personal records and included photos. Device API keys and downloaded reference libraries are kept.</p>`,
+    `<button type="button" class="btn" data-action="closeModal">Cancel</button><button type="button" class="btn" data-action="doImport" data-mode="merge">Merge</button><button type="button" class="btn btn-danger" data-action="doImport" data-mode="replace">Replace everything</button>`));
 }
 async function buildBackupPayload() {
   const { esvKey, fdcKey, aiKey, view, collapsed, ...settings } = S;
@@ -7286,6 +7331,11 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16k', title: 'Daily copies in Google Drive', slides: [
+    { title: 'A copy every day', body: '<p>With sync on, the dashboard now keeps a dated copy of your records in your private Google Drive folder: one for each of the last 7 days, then one a week for 8 weeks. It happens on its own the first time a device syncs each day.</p>' },
+    { title: 'Undo a mistake', body: '<p>Deleted something by accident, even after it synced? Open <strong>Settings &amp; Sync → Restore from a copy</strong>, pick a day and choose <strong>Add back what’s missing</strong>. Anything newer stays as it is. <strong>Replace everything</strong> puts this device back to that day instead.</p>' },
+    { title: 'Fewer backup reminders', body: '<p>While a recent copy is in Drive, the weekly <strong>Back up now</strong> card stays away. Downloading a backup now and then is still worth it: it’s the only copy that includes your photos.</p>' }
+  ] },
   { id: '2026-10-16j', title: 'Verses in your notes', slides: [
     { title: 'Point at a reference to read it', body: '<p>In Obsidian, Bible references in your notes (John 13:1–17, Rom 8:28, Ps 23) are underlined. Point at one on the Mac, or tap it on the iPhone, to read the verses. <strong>Open in reader</strong> opens this dashboard’s Bible at that passage.</p><p>Insert a Bible passage (Cmd+P) puts the verses into your note as a quote, and Passage note opens or starts your notes on that chapter.</p>' }
   ] },
@@ -7431,6 +7481,19 @@ const SYNC_BASE = 'sync.base';
 // A sync that would remove more than this many records (outside the lists that are routinely
 // cleared) stops and asks first, whatever the cause.
 const SYNC_LOSS_LIMIT = 10, SYNC_CLEARED_OFTEN = ['grocery', 'passageCache'];
+// Each day the first sync also keeps a dated copy (life-dashboard-copy-YYYY-MM-DD.json) in the same folder:
+// one for each of the last SYNC_COPY_DAYS days, then one a week for SYNC_COPY_WEEKS weeks.
+const SYNC_COPY = 'life-dashboard-copy-', SYNC_COPY_DAYS = 7, SYNC_COPY_WEEKS = 8;
+const copyDate = name => (String(name || '').match(/^life-dashboard-copy-(\d{4}-\d{2}-\d{2})\.json$/) || [])[1] || '';
+// The copies to delete: a second copy of the same day (or, for older ones, the same week), and anything older.
+function copiesToDrop(copies, today) {
+  const keep = new Set(), drop = [], dayCut = addDays(today, -(SYNC_COPY_DAYS - 1)), oldest = addDays(dayCut, -7 * SYNC_COPY_WEEKS);
+  for (const c of [...copies].sort((a, b) => b.date.localeCompare(a.date) || (b.created || '').localeCompare(a.created || ''))) {
+    const key = c.date >= dayCut ? 'd' + c.date : 'w' + startOfWeek(c.date);
+    if (c.date < oldest || keep.has(key)) drop.push(c); else keep.add(key);
+  }
+  return drop;
+}
 const syncMeta = () => { try { return JSON.parse(localStorage.getItem('ld.sync') || '{}'); } catch (e) { return {}; } };
 const setSyncMeta = patch => localStorage.setItem('ld.sync', JSON.stringify({ ...syncMeta(), ...patch }));
 const syncAvailable = () => !!DRIVE.clientId && BibleDb.ok() && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname));
@@ -7520,16 +7583,23 @@ async function driveFind() {
   const q = new URLSearchParams({ spaces: 'appDataFolder', q: `name='${DRIVE.file}' and trashed=false`, orderBy: 'createdTime', fields: 'files(id,version)' });
   return (await (await driveFetch('/drive/v3/files?' + q)).json()).files?.[0] || null;
 }
+// The dated copies in the app folder, newest first.
+async function driveCopies() {
+  const q = new URLSearchParams({ spaces: 'appDataFolder', q: 'trashed=false', fields: 'files(id,name,size,createdTime)', pageSize: '100' });
+  const files = (await (await driveFetch('/drive/v3/files?' + q)).json()).files || [];
+  return files.map(f => ({ id: String(f.id), date: copyDate(f.name), size: +f.size || 0, created: f.createdTime || '' })).filter(c => c.date)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.created.localeCompare(a.created));
+}
 async function driveLoad(id) {
   const res = await driveFetch(`/drive/v3/files/${encodeURIComponent(id)}?alt=media`);
   let d; try { d = validateBackup(await res.json()); }
   catch (e) { throw new Error('The copy in Google Drive could not be read, so nothing was changed. (' + e.message + ')'); }
   return { data: d.data, settings: Object.fromEntries(SYNC_SETTINGS.filter(k => d.settings?.[k] != null).map(k => [k, d.settings[k]])), exportedAt: typeof d.exportedAt === 'string' ? d.exportedAt : '' };
 }
-async function driveSave(id, snap) {
+async function driveSave(id, snap, name = DRIVE.file) {
   const body = JSON.stringify({ app: 'life-dashboard', version: 1, sync: 1, exportedAt: new Date().toISOString(), data: snap.data, settings: snap.settings });
   if (id) return (await driveFetch(`/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,version`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })).json();
-  const mark = 'ld' + uid(), meta = JSON.stringify({ name: DRIVE.file, parents: ['appDataFolder'] });
+  const mark = 'ld' + uid(), meta = JSON.stringify({ name, parents: ['appDataFolder'] });
   return (await driveFetch('/upload/drive/v3/files?uploadType=multipart&fields=id,version', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + mark },
     body: `--${mark}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${mark}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${mark}--` })).json();
 }
@@ -7569,6 +7639,7 @@ const Sync = {
     try {
       const changed = await this.exchange();
       setSyncMeta({ last: new Date().toISOString(), error: '' });
+      try { await this.keepCopy(); } catch (e) { setSyncMeta({ copyError: e.message }); } // a missed copy never stops the sync
       if (changed) { ensureSeeds(); sortWorkouts(); render(); }
       if (announce) toast(changed ? 'Synced. This device was updated.' : 'Synced');
     } catch (e) {
@@ -7618,6 +7689,16 @@ const Sync = {
     }
     throw new Error('Another device kept saving at the same time. Try again in a moment.');
   },
+  // Once a day: keep a dated copy of the records this sync agreed on, then thin out old copies.
+  async keepCopy() {
+    const today = ymd(); if (syncMeta().copied === today) return false;
+    const snap = BibleDb.ok() ? await BibleDb.get(SYNC_BASE) : null; if (!snap) return false;
+    const copies = await driveCopies();
+    if (!copies.some(c => c.date === today)) { const made = await driveSave(null, snap, SYNC_COPY + today + '.json'); copies.unshift({ id: String(made.id), date: today, created: new Date().toISOString() }); }
+    for (const c of copiesToDrop(copies, today)) await driveFetch(`/drive/v3/files/${encodeURIComponent(c.id)}`, { method: 'DELETE' });
+    setSyncMeta({ copied: today, copyError: '' });
+    return true;
+  },
   async disconnect() { clearTimeout(this.timer); localStorage.removeItem('ld.sync'); if (BibleDb.ok()) await BibleDb.del(SYNC_BASE); this.draw(); },
   status() {
     const m = syncMeta();
@@ -7643,9 +7724,11 @@ function syncBox() {
   if (!Sync.connected()) return `<p class="text-sm">Keep this device and your others in step through a private app folder in your Google Drive.</p>
     <p class="text-xs muted">Records and basic settings sync. Photos, API keys and downloaded libraries stay on each device.</p>
     <button type="button" class="btn btn-sm" data-action="syncConnect">${icon('cloud', 'w-3.5 h-3.5')} Connect Google Drive</button>`;
+  const m = syncMeta();
   return `<p class="text-sm" role="status">${icon('cloud', 'w-4 h-4 inline')} Google Drive sync is on · ${esc(Sync.status())}</p>
     <p class="text-xs muted">Records and basic settings sync. Photos, API keys and downloaded libraries stay on each device.</p>
-    <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="syncNow" ${Sync.busy ? 'disabled' : ''}>${icon('refresh-cw', 'w-3.5 h-3.5')} Sync now</button><button type="button" class="btn btn-sm" data-action="syncDisconnect">${icon('cloud-off', 'w-3.5 h-3.5')} Stop syncing this device</button></div>`;
+    <p class="text-xs muted">${m.copied ? `A dated copy of your records is kept in Drive each day (latest: ${fmtDate(m.copied)}).` : 'Each day, the first sync also keeps a dated copy of your records in Drive.'} Copies cover the last 7 days, then one a week for 8 weeks.${m.copyError ? ` The last copy could not be made: ${esc(m.copyError)}` : ''}</p>
+    <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="syncNow" ${Sync.busy ? 'disabled' : ''}>${icon('refresh-cw', 'w-3.5 h-3.5')} Sync now</button><button type="button" class="btn btn-sm" data-action="syncCopies">${icon('history', 'w-3.5 h-3.5')} Restore from a copy…</button><button type="button" class="btn btn-sm" data-action="syncDisconnect">${icon('cloud-off', 'w-3.5 h-3.5')} Stop syncing this device</button></div>`;
 }
 // The first sync on a device that finds an existing Drive copy has no shared base, so ask.
 function syncAskFirst() {
@@ -7659,6 +7742,21 @@ const A_SYNC = {
   syncFirst: el => {
     if (el.dataset.mode === 'theirs' && !confirm('Replace the records on this device with the copy in Google Drive? This cannot be undone.')) return;
     Sync.first = el.dataset.mode; Sync.allowLoss = el.dataset.mode === 'theirs'; Modal.close(); Sync.run({ announce: true });
+  },
+  // The dated copies in Drive, newest first; choosing one opens the restore choices.
+  syncCopies: async () => {
+    if (!Sync.signedIn()) return toast('Sign in to Google first: tap Sync now, then try again.', 'error');
+    Modal.open(modalShell('Restore from a copy', `<p class="text-sm muted">A copy is made the first time you sync each day: one for each of the last 7 days, then one a week for 8 weeks. Photos aren’t in copies, and restoring never removes them.</p><div id="copy-list" class="text-sm" role="status">Looking in Google Drive…</div>`, `<button type="button" class="btn" data-action="closeModal">Close</button>`));
+    let list; try { list = await driveCopies(); } catch (e) { const box = $('#copy-list'); if (box) box.textContent = e.message; return; }
+    const box = $('#copy-list'); if (!box) return;
+    const size = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+    box.innerHTML = list.length ? list.map(c => `<div class="flex items-center gap-3 py-2 border-t border-slate-100 dark:border-slate-800"><div class="flex-1 min-w-0"><div class="font-medium">${fmtDate(c.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>${c.size ? `<div class="text-xs muted">${size(c.size)}</div>` : ''}</div><button type="button" class="btn btn-sm" data-action="syncCopyOpen" data-id="${esc(c.id)}" data-date="${c.date}">Choose</button></div>`).join('')
+      : '<p class="muted">No copies yet. The first one is made the next time this device syncs.</p>';
+  },
+  syncCopyOpen: async el => {
+    if (ui.importing || el.disabled) return; el.disabled = true;
+    try { importChoice(parseBackup(await (await driveFetch(`/drive/v3/files/${encodeURIComponent(el.dataset.id)}?alt=media`)).text()), el.dataset.date); }
+    catch (e) { el.disabled = false; toast('That copy could not be opened: ' + e.message, 'error'); }
   },
   syncDisconnect: async () => { if (!confirm('Stop syncing this device? Your records stay on this device and in Google Drive.')) return; await Sync.disconnect(); toast('Sync is off on this device'); }
 };
@@ -7693,23 +7791,19 @@ const A = {
   importAll: () => pickFile('.json,application/json', text => {
     ui.pendingImport = null;
     let d; try { d = parseBackup(text); } catch (e) { return toast(e.message, 'error'); }
-    ui.pendingImport = d;
-    const counts = Object.entries(d.data).filter(([k, v]) => k in COLLECTIONS && v != null).map(([k, v]) => `<span class="chip">${esc(k)}: ${Array.isArray(v) ? v.length : typeof v === 'object' ? Object.keys(v).length : 1}</span>`).join(' '),
-      photos = d.assets && Array.isArray(d.assets.photos) ? d.assets.photos.length : null;
-    Modal.open(modalShell('Import backup', `<p class="text-sm">Backup from <strong>${d.exportedAt ? fmtDateTime(d.exportedAt) : 'an unknown date'}</strong>.</p><div class="flex flex-wrap gap-1">${counts}</div>
-      <p class="text-sm muted">${photos == null ? 'Legacy backup: it does not contain photos, so your existing photos will be kept.' : `${photos} photo${photos === 1 ? '' : 's'} included.`}</p>
-      <p class="text-sm muted"><strong>Merge</strong> keeps your current data and adds or updates items from the file. <strong>Replace</strong> restores personal records and included photos. Device API keys and downloaded reference libraries are kept.</p>`,
-      `<button type="button" class="btn" data-action="closeModal">Cancel</button><button type="button" class="btn" data-action="doImport" data-mode="merge">Merge</button><button type="button" class="btn btn-danger" data-action="doImport" data-mode="replace">Replace everything</button>`));
+    importChoice(d);
   }, BACKUP_LIMIT),
   doImport: async el => {
     const d = ui.pendingImport, mode = el.dataset.mode; if (!d || ui.importing) return;
     let plan; try { plan = planBackupImport(d, mode); } catch (e) { return toast('Import stopped: ' + e.message, 'error'); }
+    if (mode === 'missing' && !plan.added) { ui.pendingImport = null; Modal.close(); return toast('Nothing was missing: this device already has everything in that copy.'); }
     if (mode === 'replace' && !confirm('Replace current personal records and included photos with this backup? This cannot be undone.')) return;
     ui.importing = true;
     try { await commitBackupImport(plan); }
     catch (e) { return toast('Import was not saved: ' + e.message, 'error'); }
     finally { ui.importing = false; }
-    ensureSeeds(); sortWorkouts(); ui.pendingImport = null; Modal.close(); toast(mode === 'replace' ? 'Backup restored' : 'Backup merged'); render();
+    ensureSeeds(); sortWorkouts(); ui.pendingImport = null; Modal.close(); syncTouch(); // restored records reach the other devices on the next sync
+    toast(mode === 'replace' ? 'Backup restored' : mode === 'missing' ? `Added back ${plan.added} item${plan.added === 1 ? '' : 's'}` : 'Backup merged'); render();
   },
   persistStorage: async () => { try { const ok = await navigator.storage.persist(); toast(ok ? 'Browser will keep your data ✓' : 'Browser declined — keep exporting backups', ok ? 'ok' : 'error'); } catch (e) { toast('Not supported in this browser', 'error'); } },
   enableNotifications: async () => { if (!('Notification' in window)) return toast('Notifications not supported here', 'error'); const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Notifications enabled' : 'Notifications blocked', p === 'granted' ? 'ok' : 'error'); },
