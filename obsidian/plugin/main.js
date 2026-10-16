@@ -267,6 +267,33 @@ const core = (() => {
   const passageCallout = (r, verses, translation) => `> [!quote] ${r.label}${translation ? ` (${translation})` : ''}\n${verses.map(([n, t]) => `> **${n}** ${t}`).join('\n')}\n`;
   const passageNoteText = (book, c, today) => `---\ntype: scripture-note\ncreated: ${today}\nscripture: "${book} ${c}"\nbook: ${book}\ntestament: ${BIBLE.indexOf(book) >= 39 ? 'New Testament' : 'Old Testament'}\n---\n\n# ${book} ${c}\n\n## Notes\n\n## Canonical connections\n\n## Related notes\n\n`;
 
+  // --- Filing. Rules are lines like "person: People" or "project: Projects/{title}" ({title}, {year} and {month} are filled in).
+  const parseRules = lines => [].concat(lines || []).map(String).map(l => l.match(/^\s*([\w-]+)\s*(?::|→|->)\s*(.+?)\s*$/)).filter(Boolean)
+    .map(m => ({ type: m[1].toLowerCase(), folder: m[2].replace(/^\/+|\/+$/g, '') }));
+  // Where a note belongs: its project's folder when it belongs to one, else its type's rule; null when it's already there.
+  function fileTarget(n, rules, ctx = {}) {
+    let folder = null;
+    if (n.projectPath && ctx.hubFolder && ctx.hubFolder !== n.folder) folder = ctx.hubFolder;
+    if (!folder) {
+      const r = rules.find(x => x.type === String(n.type || '').toLowerCase()); if (!r) return null;
+      const when = n.date || ctx.today || '';
+      folder = r.folder.replace(/\{title\}/g, safeName(n.title)).replace(/\{year\}/g, when.slice(0, 4)).replace(/\{month\}/g, when.slice(5, 7));
+      folder = safeFolder(folder); if (folder === null) return null;
+    }
+    return folder === n.folder ? null : folder;
+  }
+  const FINISHED = ['done', 'complete', 'completed', 'archived', 'finished', 'preached', 'taught', 'delivered'];
+  // A project or series note's contents, refreshed when the note opens.
+  const CONTENTS_START = '<!-- life-dashboard:contents -->', CONTENTS_END = '<!-- /life-dashboard:contents -->';
+  function contentsBlock(members, today) {
+    const lines = members.map((m, i) => `${i + 1}. [[${m.title}]]${[m.scripture, m.date ? fmtDate(m.date, today) : '', m.statusLabel, (m.taught || []).length ? `taught ${m.taught.map(t => `${fmtDate(t.date, today)}${t.group ? ` (${t.group})` : ''}`).join(', ')}` : ''].filter(Boolean).map(x => ` · ${x}`).join('')}`);
+    return [CONTENTS_START, '## Contents', '', ...(lines.length ? lines : ['No notes in this project yet.']), '', '_Kept up to date by Life Dashboard each time this note opens._', CONTENTS_END].join('\n');
+  }
+  function setContents(text, block) {
+    const a = text.indexOf(CONTENTS_START), b = text.indexOf(CONTENTS_END);
+    return a >= 0 && b > a ? text.slice(0, a) + block + text.slice(b + CONTENTS_END.length) : `${text.replace(/\s*$/, '')}\n\n${block}\n`;
+  }
+
   // --- Weekly review. The top of the note (between the markers) is filled in and refreshed; everything below is yours.
   const AUTO_START = '<!-- life-dashboard:auto -->', AUTO_END = '<!-- /life-dashboard:auto -->';
   function weekOf(today) { const [y, m, d] = today.split('-').map(Number), dow = (new Date(y, m - 1, d).getDay() + 6) % 7; return addDays(today, -dow); }
@@ -286,7 +313,7 @@ const core = (() => {
     } else L.push('_The dashboard’s numbers fill in on the Mac with the dashboard docked: run **Refresh the weekly review** there._');
     L.push('', '## Clear the decks', '');
     L.push(d.meetings.length ? `**Meetings to process:** ${d.meetings.map(m => `${wl(m.title)}${m.date ? ` (${shortDay(m.date, d.today)})` : ''}`).join(' · ')}` : '**Meetings to process:** none');
-    L.push(d.inboxNotes.length ? `**Notes waiting in the inbox:** ${d.inboxNotes.map(wl).join(' · ')}${d.inboxMore ? ` and ${d.inboxMore} more` : ''}` : '**Notes waiting in the inbox:** none');
+    L.push(d.inboxNotes.length ? `**Notes waiting in the inbox:** ${d.inboxNotes.map(wl).join(' · ')}${d.inboxMore ? ` and ${d.inboxMore} more` : ''} (run **File the inbox**)` : '**Notes waiting in the inbox:** none');
     L.push('', '## Teaching this week', '');
     if (d.teaching.length) d.teaching.forEach(t => L.push(`- ${wl(t.title)}${t.scripture ? ` · ${t.scripture}` : ''} · ${shortDay(t.date, d.today)}${t.statusLabel ? ` · ${t.statusLabel}` : ''}`)); else L.push('Nothing scheduled.');
     L.push('', '## People to reach', '');
@@ -342,7 +369,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -472,6 +499,7 @@ const render = (() => {
     });
     root.append(top, el(doc, 'h1', 'ldl-h1', data ? data.name : 'Folder not found'));
     if (!data) return root;
+    if (data.isInbox && on.fileInbox) { const b = el(doc, 'button', 'ldl-btn ldl-btn-primary', 'File these notes'); b.type = 'button'; b.addEventListener('click', () => on.fileInbox()); root.append(b); }
     if (data.folders.length) {
       const grid = el(doc, 'div', 'ldl-folders');
       data.folders.forEach(f => {
@@ -605,7 +633,10 @@ const DEFAULTS = {
   ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
   shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'classic', 'article', 'person'],
   sermonFolder: '',
-  reviewFolder: '', // weekly reviews go here, in a folder per year
+  reviewFolder: '',
+  fileRules: [], // "type: folder" lines for File the inbox
+  archiveFolder: '', // where finished projects go
+  sermonArchive: '', // where finished sermon projects go // weekly reviews go here, in a folder per year
   versePreviews: true, // Bible references in notes show their verses
   bibleSuffix: 'WEB', // chapter notes are named "John 13 (WEB)"
   passageFolder: '', // where passage notes live, one folder per book like the Bible's
@@ -688,20 +719,20 @@ class TextModal extends Modal {
 }
 // A list of items to tick; items already sent are shown greyed out.
 class PickModal extends Modal {
-  constructor(app, title, items, onSubmit) { super(app); this.title = title; this.items = items; this.onSubmit = onSubmit; }
+  constructor(app, title, items, onSubmit, opts = {}) { super(app); this.title = title; this.items = items; this.onSubmit = onSubmit; this.opts = opts; }
   onOpen() {
     const { contentEl } = this; this.setTitle ? this.setTitle(this.title) : contentEl.createEl('h2', { text: this.title });
-    contentEl.createEl('p', { text: 'Tick the ones that are yours. Follow-ups become “waiting on” tasks.', cls: 'ldl-muted' });
+    contentEl.createEl('p', { text: this.opts.intro || 'Tick the ones that are yours. Follow-ups become “waiting on” tasks.', cls: 'ldl-muted' });
     const form = contentEl.createEl('form', { cls: 'ldl-form' }), boxes = [];
     let last = null;
     this.items.forEach(it => {
       if (it.section !== last) { form.createEl('div', { text: it.section, cls: 'ldl-kicker' }); last = it.section; }
       const lab = form.createEl('label', { cls: 'ldl-field ldl-field-check' + (it.done ? ' ldl-done' : '') });
-      const box = lab.createEl('input', { type: 'checkbox' }); box.disabled = !!it.done;
-      lab.createEl('span', { text: it.done ? `${it.text} (already sent)` : it.text });
+      const box = lab.createEl('input', { type: 'checkbox' }); box.disabled = !!it.done; box.checked = !!it.checked;
+      lab.createEl('span', { text: it.done ? `${it.text} (${this.opts.doneLabel || 'already sent'})` : it.text });
       boxes.push([box, it]);
     });
-    form.createEl('button', { text: 'Send to Tasks', cls: 'mod-cta', type: 'submit' });
+    form.createEl('button', { text: this.opts.button || 'Send to Tasks', cls: 'mod-cta', type: 'submit' });
     form.addEventListener('submit', e => { e.preventDefault(); const picked = boxes.filter(([b]) => b.checked && !b.disabled).map(([, it]) => it); this.close(); this.onSubmit(picked); });
   }
   onClose() { this.contentEl.empty(); }
@@ -723,6 +754,10 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'open-dashboard', name: 'Open Life Dashboard in the sidebar', callback: () => this.openDashboard() });
     this.addCommand({ id: 'new-sermon', name: 'New sermon', callback: () => this.newSermon() });
     this.addCommand({ id: 'meeting-tasks', name: 'Send this meeting’s action items to Tasks', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickActions(f.path); return true; } });
+    this.addCommand({ id: 'file-inbox', name: 'File the inbox', callback: () => this.fileInbox() });
+    this.addCommand({ id: 'archive-projects', name: 'Archive finished projects', callback: () => this.archiveProjects() });
+    this.addCommand({ id: 'add-contents', name: 'Add a contents list to this project note', checkCallback: checking => { const f = this.app.workspace.getActiveFile(), n = f && this.library().hubs.get(f.path); if (!n) return false; if (!checking) this.refreshContents(f, true); return true; } });
+    this.registerEvent(this.app.workspace.on('file-open', f => { if (f) setTimeout(() => this.refreshContents(f), 300); }));
     this.addCommand({ id: 'weekly-review', name: 'Open this week’s review', callback: () => this.openWeekly() });
     this.addCommand({ id: 'weekly-refresh', name: 'Refresh the weekly review', callback: () => this.openWeekly(true) });
     this.addCommand({ id: 'insert-passage', name: 'Insert a Bible passage', editorCallback: editor => this.insertPassage(editor) });
@@ -773,7 +808,7 @@ class LifeDashboardPlugin extends Plugin {
     const folders = f.children.filter(c => c.children && !c.name.startsWith('.')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })).map(c => ({ path: c.path, name: c.name, count: count(c) }));
     const notes = f.children.filter(c => c.extension === 'md').map(c => byPath.get(c.path) || core.noteInfo({ path: c.path, basename: c.basename, folder: f.path, mtime: c.stat.mtime }, {}, today)).sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
     const parts = path ? path.split('/') : [];
-    return { path, name: parts.length ? parts[parts.length - 1] : 'All folders', crumbs: parts.map((p, i) => ({ name: p, path: parts.slice(0, i + 1).join('/') })), folders, notes: notes.slice(0, 300), more: Math.max(0, notes.length - 300) };
+    return { path, isInbox: !!path && path === this.inboxFolder(), name: parts.length ? parts[parts.length - 1] : 'All folders', crumbs: parts.map((p, i) => ({ name: p, path: parts.slice(0, i + 1).join('/') })), folders, notes: notes.slice(0, 300), more: Math.max(0, notes.length - 300) };
   }
   runCommand(id, missing) { const ok = this.app.commands?.executeCommandById?.(id); if (ok === false) new Notice(missing); }
   async newNote() {
@@ -816,6 +851,7 @@ class LifeDashboardPlugin extends Plugin {
       taughtBefore: n => core.taughtBefore(n, this.notes().filter(x => !core.inFolder(x.path, this.ignored()))),
       newSermon: () => this.newSermon(),
       weekly: () => this.openWeekly(),
+      fileInbox: () => this.fileInbox(),
       // Today's note only when the Daily notes core plugin is on (a person may let the Life Dashboard own the day).
       today: this.app.internalPlugins?.plugins?.['daily-notes']?.enabled ? () => this.runCommand('daily-notes', 'Turn on Daily notes in Settings → Core plugins to use Today’s note.') : undefined,
       search: q => { view.q = q; view.draw(); },
@@ -916,6 +952,61 @@ class LifeDashboardPlugin extends Plugin {
     const view = this.app.workspace.getLeavesOfType(VIEW_DASH)[0]?.view, wv = view?.webview;
     if (!wv || wv.isLoading?.()) return null;
     try { return await wv.executeJavaScript(`window.LD_QUERY ? window.LD_QUERY(${JSON.stringify(q)}) : null`); } catch (e) { return null; }
+  }
+  // --- Filing
+  // Move a note or folder, making folders on the way; Obsidian updates the links. Skips anything that would overwrite.
+  async moveTo(file, folder, name) {
+    const dest = normalizePath(`${folder ? folder + '/' : ''}${name}`);
+    if (this.app.vault.getAbstractFileByPath(dest)) return false;
+    if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    await this.app.fileManager.renameFile(file, dest); return true;
+  }
+  async fileInbox() {
+    const inbox = this.inboxFolder(); if (!inbox) return new Notice('Set a folder for new notes in Settings → Files and links first.');
+    const rules = core.parseRules(this.settings.fileRules), lib = this.library(), today = core.ymd(new Date());
+    const here = this.notes().filter(n => n.folder === inbox), moves = [], untyped = [];
+    for (const n of here) {
+      const hub = n.projectPath && lib.byPath.get(n.projectPath);
+      const target = core.fileTarget(n, rules, { hubFolder: hub ? hub.folder : null, today });
+      if (target) moves.push({ n, target }); else if (!n.type) untyped.push(n.title);
+    }
+    if (!moves.length) return new Notice(untyped.length ? `Nothing to file. ${untyped.length} note${untyped.length === 1 ? '' : 's'} need a type first.` : 'The inbox is already sorted.');
+    const items = moves.map(m => ({ text: `${m.n.title}  →  ${m.target}`, section: 'Move', checked: true, move: m }));
+    new PickModal(this.app, `File the inbox · ${moves.length} note${moves.length === 1 ? '' : 's'}`, items, async picked => {
+      let done = 0, skipped = 0;
+      for (const it of picked) { const f = this.app.vault.getAbstractFileByPath(it.move.n.path); if (f instanceof TFile && await this.moveTo(f, it.move.target, f.name)) done++; else skipped++; }
+      new Notice(`Filed ${done} note${done === 1 ? '' : 's'}${skipped ? `; ${skipped} skipped because a note with that name is already there` : ''}${untyped.length ? `. ${untyped.length} still need a type.` : '.'}`);
+    }, { intro: `Untick any you want to keep in the inbox.${untyped.length ? ` Not listed: ${untyped.length} with no type (${untyped.slice(0, 3).join(', ')}${untyped.length > 3 ? '…' : ''}).` : ''}`, button: 'File them' }).open();
+  }
+  // Finished projects: sermons to the sermon archive, the rest to the archive. A project in its own folder moves with its folder.
+  archiveProjects() {
+    const lib = this.library(), arc = core.safeFolder(this.settings.archiveFolder || ''), sarc = core.safeFolder(this.settings.sermonArchive || '') || arc;
+    if (!arc && !sarc) return new Notice('Choose an archive folder in Settings → Life Dashboard Library first.');
+    const items = [];
+    for (const { note: n } of lib.hubs.values()) {
+      if (!core.FINISHED.includes(n.rawStatus)) continue;
+      const dest = n.family === 'sermon' ? sarc : arc; if (!dest || n.path.startsWith(dest + '/')) continue;
+      const own = n.folder && n.folder.split('/').pop() === n.title;
+      items.push({ text: `${n.title}  →  ${dest}${own ? ' (with its folder)' : ''}`, section: n.family === 'sermon' ? 'Sermons' : 'Projects', checked: true, n, dest, own });
+    }
+    if (!items.length) return new Notice('No finished projects to archive. A project is finished when its status is done or complete.');
+    new PickModal(this.app, 'Archive finished projects', items, async picked => {
+      let done = 0;
+      for (const it of picked) {
+        const target = it.own ? this.app.vault.getAbstractFileByPath(it.n.folder) : this.app.vault.getAbstractFileByPath(it.n.path);
+        if (target && await this.moveTo(target, it.dest, target.name)) done++;
+      }
+      new Notice(`Archived ${done} project${done === 1 ? '' : 's'}`);
+    }, { intro: 'Untick any you want to keep where they are.', button: 'Archive them' }).open();
+  }
+  // A project note's contents list: added on request, then refreshed whenever the note opens (only when it changed).
+  async refreshContents(file, add) {
+    if (!(file instanceof TFile) || file.extension !== 'md') return;
+    const hub = this.library().hubs.get(file.path); if (!hub) return;
+    if (!add) { const text = await this.app.vault.cachedRead(file); if (!text.includes(core.CONTENTS_START)) return; }
+    const block = core.contentsBlock(hub.members, core.ymd(new Date()));
+    await this.app.vault.process(file, text => { const next = core.setContents(text, block); return next === text ? text : next; });
+    if (add) new Notice('Contents list added; it updates each time this note opens.');
   }
   // --- Weekly review: this week's note, made or opened; its top section filled from the vault and the docked dashboard.
   async weeklyData() {
@@ -1095,6 +1186,12 @@ class LibrarySettings extends PluginSettingTab {
       .addText(t => t.setValue(s.peopleFolder).setPlaceholder('e.g. 04 People').onChange(v => { s.peopleFolder = v.trim(); save(); }));
     new Setting(containerEl).setName('Template for new people').setDesc('A note new profiles start from. {{title}} and {{date}} are filled in.')
       .addText(t => t.setValue(s.personTemplate).setPlaceholder('e.g. Templates/Person').onChange(v => { s.personTemplate = v.trim(); save(); }));
+    new Setting(containerEl).setName('Filing rules').setDesc('One per line, “type: folder”. {title} is the note’s name; {year} and {month} come from its date. Notes that belong to a project always go to the project’s folder.')
+      .addTextArea(t => t.setValue(s.fileRules.join('\n')).setPlaceholder('person: People\nbook: Library/Books\nproject: Projects/{title}').onChange(v => { s.fileRules = v.split('\n').map(x => x.trim()).filter(Boolean); save(); }));
+    new Setting(containerEl).setName('Archive for finished projects')
+      .addText(t => t.setValue(s.archiveFolder).setPlaceholder('e.g. Archive').onChange(v => { s.archiveFolder = v.trim(); save(); }));
+    new Setting(containerEl).setName('Archive for finished sermons').setDesc('Leave empty to use the archive above.')
+      .addText(t => t.setValue(s.sermonArchive).setPlaceholder('e.g. Library/Sermons').onChange(v => { s.sermonArchive = v.trim(); save(); }));
     new Setting(containerEl).setName('Weekly reviews folder').setDesc('Each week’s review is made here, in a folder per year, named like “2026-10-19 - Weekly Review”.')
       .addText(t => t.setValue(s.reviewFolder).setPlaceholder('e.g. Reviews/Weekly').onChange(v => { s.reviewFolder = v.trim(); save(); }));
     new Setting(containerEl).setName('Verse previews').setDesc('Bible references in notes show their verses when you point at or tap them.')

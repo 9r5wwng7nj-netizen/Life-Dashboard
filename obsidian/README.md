@@ -58,7 +58,7 @@ Statuses are read loosely and shown the same way everywhere: Idea (idea, planned
 | 4 ✅ | **Verse previews:** references in reading view show their verses from the vault's chapter notes (settings: translation suffix, passage notes folder, archive). Open in reader, Passage note (open, restore or create), Read the chapter; commands Insert a Bible passage and Open or start a passage note. | plugin + bridge |
 | 4 ✅ | **Weekly review:** one note a week (setting: weekly reviews folder). The top refreshes from the vault and the docked dashboard (`weekStats`); the reflection below is the person's. | plugin + bridge |
 | 3 ✅ | **Library as home:** quick actions (New note, New sermon, Today's note), a section bar for every shelf plus Inbox and All folders, folder pages with a clickable path, Library pages in the tab's back and forward history, and a setting to fold the left sidebar away. | plugin |
-| 4 | **Auto-filer:** notes file themselves by `type`; each series gets an index page. | plugin |
+| 4 ✅ | **Filing:** *File the inbox* (rules `type: folder` with `{title}`, `{year}`, `{month}`; project notes follow their project), *Archive finished projects*, and contents lists on project notes that refresh when opened. Everything is listed for confirmation first. | plugin |
 
 ## Developing
 

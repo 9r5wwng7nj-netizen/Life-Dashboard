@@ -335,3 +335,31 @@ test('the weekly review: the week, the filled-in top, and a refresh that keeps y
   expect(refreshed).toContain('| Workouts | 4 | 3 |');
   expect(refreshed.split(core.AUTO_START).length).toBe(2); // one top section, not two
 });
+
+test('filing: rules, project folders first, and nothing moves that is already in place', () => {
+  const rules = core.parseRules(['person: 04 People', 'meeting-review → 05 Meetings/Reviews', 'project: 02 Projects/{title}', 'review: 01 Inbox/Reviews/Weekly/{year}', 'nonsense line']);
+  expect(rules.map(r => r.type)).toEqual(['person', 'meeting-review', 'project', 'review']);
+  const n = (title, fm, folder = '01 Inbox') => ({ ...core.noteInfo({ path: `${folder}/${title}.md`, basename: title, folder }, fm, '2026-10-15') });
+  expect(core.fileTarget(n('Sam Rivera', { type: 'person' }), rules)).toBe('04 People');
+  expect(core.fileTarget(n('Sam Rivera', { type: 'person' }, '04 People'), rules)).toBeNull(); // already there
+  expect(core.fileTarget(n('Retreat: Fall?', { type: 'project' }), rules)).toBe('02 Projects/Retreat Fall'); // {title}, made safe
+  expect(core.fileTarget(n('Week', { type: 'review', date: '2026-10-12' }), rules)).toBe('01 Inbox/Reviews/Weekly/2026');
+  expect(core.fileTarget(n('Leaders', { type: 'meeting-review', date: '2026-08-04' }), core.parseRules(['meeting-review: 05 Meetings/Reviews/{year}/{month}']))).toBe('05 Meetings/Reviews/2026/08');
+  const outline = { ...n('Outline', { type: 'sermon-outline', project: '[[John 13]]' }), projectPath: '02 Projects/John 13/John 13.md' };
+  expect(core.fileTarget(outline, rules, { hubFolder: '02 Projects/John 13' })).toBe('02 Projects/John 13'); // follows its project
+  expect(core.fileTarget(n('Loose thought', {}), rules)).toBeNull(); // no type, no move
+});
+
+test('a project note’s contents list, added once and refreshed in place', () => {
+  const today = '2026-10-15', mk = (title, fm) => core.noteInfo({ path: `P/${title}.md`, basename: title, folder: 'P' }, fm, today);
+  const members = [mk('Outline', { type: 'sermon-outline', status: 'done', date: '2026-10-20', scripture: 'John 13' }), mk('Manuscript', { type: 'sermon', status: 'preached', date: '2026-10-28', taught: ['2026-10-28 — College Night'] })];
+  const block = core.contentsBlock(members, today);
+  expect(block).toContain('1. [[Outline]] · John 13 · Oct 20 · Done');
+  expect(block).toContain('2. [[Manuscript]] · Oct 28 · Preached · taught Oct 28 (College Night)');
+  const note = '---\ntype: project\n---\n\n# John 13\n\nMy notes.\n';
+  const once = core.setContents(note, block), twice = core.setContents(once, core.contentsBlock(members.slice(0, 1), today));
+  expect(once).toContain('My notes.\n\n<!-- life-dashboard:contents -->');
+  expect(twice.split(core.CONTENTS_START).length).toBe(2);
+  expect(twice).not.toContain('[[Manuscript]]');
+  expect(twice).toContain('My notes.');
+});
