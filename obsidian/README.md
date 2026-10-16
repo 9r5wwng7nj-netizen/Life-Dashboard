@@ -60,6 +60,7 @@ Statuses are read loosely and shown the same way everywhere: Idea (idea, planned
 | 4 ✅ | **Weekly review:** one note a week (setting: weekly reviews folder). The top refreshes from the vault and the docked dashboard (`weekStats`); the reflection below is the person's. | plugin + bridge |
 | 3 ✅ | **Library as home:** quick actions (New note, New sermon, Today's note), a section bar for every shelf plus Inbox and All folders, folder pages with a clickable path, Library pages in the tab's back and forward history, and a setting to fold the left sidebar away. | plugin |
 | 4 ✅ | **Filing:** *File the inbox* (rules `type: folder` with `{title}`, `{year}`, `{month}`; project notes follow their project), *Archive finished projects*, and contents lists on project notes that refresh when opened. Everything is listed for confirmation first. | plugin |
+| 4 ✅ | **Vault health:** a Library page (and command) listing what is worth a look: notes with no type, unusual status words, broken links, to-dos in notes, attendees with no profile, quiet projects. Each row opens its note; it changes nothing by itself. | plugin |
 
 ## Capture by voice on the iPhone
 
