@@ -529,3 +529,14 @@ test('teaching for the docked dashboard: the next 7 days, not done, outside left
     { title: 'The Servant King', note: 'John 13', date: '2026-10-28', scripture: 'John 13' }
   ]);
 });
+
+test('phone items: a Shortcut’s text becomes a small dated note, and the note reads back as an item', () => {
+  const now = new Date(2026, 9, 16, 9, 5, 7);
+  const n = core.phoneNote('task', '  Call the plumber   tomorrow ', now);
+  expect(n.name).toBe('2026-10-16 090507 task');
+  expect(n.content).toBe('---\ntype: dashboard-inbox\nwhat: task\ndate: 2026-10-16\n---\n\nCall the plumber tomorrow\n');
+  expect(core.phoneItem(n.content, n.name)).toEqual({ id: '2026-10-16 090507 task', what: 'task', date: '2026-10-16', text: 'Call the plumber tomorrow' });
+  expect([core.phoneNote('weight', '', now), core.phoneNote('email', 'hi', now)]).toEqual([null, null]);
+  expect(core.phoneItem('just text', 'x')).toBeNull();
+  expect(core.phoneItem('---\nwhat: prayer\n---\n\nSam', 'p').date).toBe('');
+});

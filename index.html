@@ -3249,8 +3249,9 @@ const obsNoteChip = note => note ? `<button class="chip text-[11px] hover:ring-1
 const obsNoteList = () => inObsidian() && Array.isArray(window.LD_OBSIDIAN.notes) ? `<datalist id="obs-notes">${window.LD_OBSIDIAN.notes.slice(0, 3000).map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>` : '';
 // Messages from the plugin (it calls window.LD_FROM_OBSIDIAN). They wait until saved data has loaded.
 const obsInbox = { ready: false, queue: [] };
-window.LD_FROM_OBSIDIAN = msg => { obsInbox.queue.push(msg); if (obsInbox.ready) obsDrain(); return true; };
-function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.sermonPrep) sermonPrep(m.sermonPrep); if (m && m.addTasks) obsAddTasks(m.addTasks); if (m && m.completeTask) obsComplete(m.completeTask); if (m && m.openPassage) obsOpenPassage(m.openPassage); } catch (e) { console.warn('Obsidian message', e); } } }
+// A phone item is refused until saved data has loaded, so the plugin keeps its note and tries again.
+window.LD_FROM_OBSIDIAN = msg => { if (msg && msg.phone && !obsInbox.ready) return false; obsInbox.queue.push(msg); if (obsInbox.ready) obsDrain(); return true; };
+function obsDrain() { while (obsInbox.queue.length) { const m = obsInbox.queue.shift(); try { if (m && m.phone) obsPhone(m.phone); if (m && m.sermonPrep) sermonPrep(m.sermonPrep); if (m && m.addTasks) obsAddTasks(m.addTasks); if (m && m.completeTask) obsComplete(m.completeTask); if (m && m.openPassage) obsOpenPassage(m.openPassage); } catch (e) { console.warn('Obsidian message', e); } } }
 window.addEventListener('ld-obsidian', () => { render(); obsSyncPeople(); });
 // Tasks added with @Name whose person has no Obsidian profile yet: ask the plugin to create them, once.
 let _obsPeopleT = null;
@@ -3266,6 +3267,33 @@ function obsSyncPeople() {
 }
 // Action items picked in a meeting note → tasks linked to that note. Dates and tags in the text are read as
 // usual; follow-ups become "waiting on" tasks. A task already open from the same note and text is not added again.
+// Run fn as if today were `day` (a phone item said yesterday reads "tomorrow" from yesterday). Only the
+// task parser runs inside, synchronously, and Date is put back straight after.
+function asOf(day, fn) {
+  if (!day || day === ymd()) return fn();
+  const Real = Date, shift = parseYmd(day).getTime() - parseYmd(ymd()).getTime();
+  class Then extends Real { constructor(...a) { if (a.length) super(...a); else super(Real.now() + shift); } static now() { return Real.now() + shift; } }
+  window.Date = Then;
+  try { return fn(); } finally { window.Date = Real; }
+}
+// Items sent from the phone (a Siri shortcut, through Obsidian on the Mac): a task, a weight or a prayer
+// request, dated the day they were said. Ids already taken in are remembered on this device, so a
+// second delivery adds nothing.
+function obsPhone(m) {
+  let seen = []; try { seen = JSON.parse(localStorage.getItem('ld.phoneSeen') || '[]'); } catch (e) { }
+  const id = String(m.id || '').slice(0, 120), text = String(m.text || '').slice(0, 1000).trim(), day = /^\d{4}-\d{2}-\d{2}$/.test(m.date || '') && m.date <= ymd() ? m.date : ymd();
+  if (!text || (id && seen.includes(id))) return;
+  if (m.what === 'task') { const t = asOf(day, () => addParsedTask(parseTaskInput(text), {})); if (t) toast(`From your phone: “${t.title}”${t.due ? ` · ${fmtDate(t.due, { weekday: 'short', month: 'short', day: 'numeric' })}` : ' · Inbox'}`); }
+  else if (m.what === 'weight') {
+    const w = text.replace(',', '.').match(/(\d+(?:\.\d+)?)\s*(kg|kilo\w*|lb|lbs|pounds?)?/i), v = w ? +w[1] : 0;
+    if (!(v > 0)) return; const kg = (w[2] ? /^k/i.test(w[2]) : S.unit === 'kg') ? v : v * LB;
+    ensureDay(day).weight = kg; Store.save('nutrition'); toast(`From your phone: weight ${wFmt(kg)}${day !== ymd() ? ` on ${fmtDate(day, { weekday: 'short', month: 'short', day: 'numeric' })}` : ''}`);
+  }
+  else if (m.what === 'prayer') { Store.get('prayers').push({ id: uid(), title: text.slice(0, 300), details: '', cat: 'Personal', created: new Date().toISOString(), lastPrayed: null, count: 0, answered: null }); Store.save('prayers'); toast('From your phone: added to your prayer list'); }
+  else return;
+  if (id) try { localStorage.setItem('ld.phoneSeen', JSON.stringify([...seen, id].slice(-300))); } catch (e) { }
+  render();
+}
 function obsAddTasks(m) {
   const source = String(m.source || '').slice(0, 200), items = Array.isArray(m.items) ? m.items.slice(0, 100) : [];
   const area = (AREAS.find(([k, l]) => [k, l.toLowerCase()].includes(String(m.area || '').trim().toLowerCase())) || [])[0]; // the meeting's area, when it names one
@@ -7482,6 +7510,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-16s', title: 'Tell Siri, and it lands here', slides: [
+    { title: 'A task, a weight or a prayer request by voice', body: '<p>With the Siri shortcuts, say <strong>“Dashboard Task”</strong>, <strong>“Log Weight”</strong> or <strong>“Prayer Request”</strong> on your iPhone. Obsidian keeps the item, and the next time the dashboard is open in Obsidian on your Mac it lands in Tasks, your weight log or your prayer list.</p><p>Dates are read from the day you said it, so “call the plumber tomorrow” said on Monday is due Tuesday even if it arrives later.</p>' }
+  ] },
   { id: '2026-10-16r', title: 'Photos sync too', slides: [
     { title: 'Your photos on every device', body: '<p>Photos in journal entries, family memories, date nights, recipes and progress photos now sync through your private Google Drive folder, so a photo taken on your phone shows up on the Mac and the other way round.</p><p>They move a dozen at a time, so a device with many photos catches up over a few syncs. Settings &amp; Sync shows how many are left.</p>' }
   ] },
