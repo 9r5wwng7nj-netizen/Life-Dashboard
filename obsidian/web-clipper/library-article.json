@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "0.1.0",
+  "name": "Library article",
+  "behavior": "create",
+  "noteNameFormat": "{{title|safe_name}}",
+  "path": "Library/Articles",
+  "properties": [
+    {
+      "name": "type",
+      "value": "article",
+      "type": "text"
+    },
+    {
+      "name": "status",
+      "value": "saved",
+      "type": "text"
+    },
+    {
+      "name": "created",
+      "value": "{{date|date:\"YYYY-MM-DD\"}}",
+      "type": "date"
+    },
+    {
+      "name": "date_saved",
+      "value": "{{date|date:\"YYYY-MM-DD\"}}",
+      "type": "date"
+    },
+    {
+      "name": "author",
+      "value": "{{author}}",
+      "type": "text"
+    },
+    {
+      "name": "publication",
+      "value": "{{site}}",
+      "type": "text"
+    },
+    {
+      "name": "published",
+      "value": "{{published|date:\"YYYY-MM-DD\"}}",
+      "type": "date"
+    },
+    {
+      "name": "source_url",
+      "value": "{{url}}",
+      "type": "text"
+    },
+    {
+      "name": "related_projects",
+      "value": "",
+      "type": "multitext"
+    }
+  ],
+  "triggers": [],
+  "noteContentFormat": "> [!info] Saved from [{{site}}]({{url}}) on {{date|date:\"MMMM D, YYYY\"}}\n\n## Source text\n\n{{content}}\n\n## Summary\n\n{{description}}\n\n## Key quotations\n\n## My reflections\n\n## Connections and applications\n"
+}
