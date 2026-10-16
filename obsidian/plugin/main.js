@@ -399,6 +399,30 @@ const core = (() => {
     return a >= 0 && b > a ? text.slice(0, a) + block + text.slice(b + CONTENTS_END.length) : `${text.replace(/\s*$/, '')}\n\n${block}\n`;
   }
 
+  // --- Vault health: what is worth a look, from the notes plus lists the plugin gathers (links that go nowhere,
+  // to-dos still in notes, Granola attendees with no profile). It only reports; nothing in a note changes.
+  const STATUS_EXTRA = ['waiting', 'on-hold', 'paused', 'live', 'imported', 'captured'];
+  const knownStatus = s => !s || !!STATUS_OF[s] || STATUS_EXTRA.includes(s);
+  // d: { today, skip (folders left out), inBook (paths of books and their chapters, which need no type), broken: [{ path, targets }],
+  //      todos: [{ path, count }], attendees: [name], staleDays }
+  function healthReport(notes, d) {
+    const kept = notes.filter(n => !inFolder(n.path, d.skip || [])), inBook = new Set(d.inBook || []), byPath = new Map(kept.map(n => [n.path, n]));
+    const item = (n, detail) => ({ path: n.path, title: n.title, detail });
+    const newest = (a, b) => (b.mtime || 0) - (a.mtime || 0);
+    const touched = new Map(); kept.forEach(n => { const k = n.projectPath || n.partOfPath; if (k) touched.set(k, Math.max(touched.get(k) || 0, n.mtime || 0)); });
+    const cutoff = Date.parse(d.today) - (d.staleDays || 30) * 864e5;
+    const stale = kept.filter(n => n.hub && ['draft', 'ready'].includes(STATUS_OF[n.rawStatus]) && Math.max(n.mtime || 0, touched.get(n.path) || 0) < cutoff);
+    const sections = [
+      { id: 'untyped', title: 'Notes with no type', why: 'Without a type a note stays off the shelves and the areas’ live lists.', items: kept.filter(n => !n.type && !inBook.has(n.path)).sort(newest).map(n => item(n, n.folder || 'Top of the vault')) },
+      { id: 'status', title: 'Status words outside the usual set', why: 'Shelves read these as Draft. Use Set status to pick a usual word.', items: kept.filter(n => !knownStatus(n.rawStatus)).sort(newest).map(n => item(n, `status: ${n.rawStatus}`)) },
+      { id: 'broken', title: 'Links that go nowhere', why: 'The linked note doesn’t exist: fix the name, or leave it as a note to write.', items: (d.broken || []).filter(b => byPath.has(b.path)).map(b => item(byPath.get(b.path), `${b.targets.slice(0, 3).join(', ')}${b.targets.length > 3 ? ` and ${b.targets.length - 3} more` : ''}`)) },
+      { id: 'todos', title: 'To-dos still in notes', why: 'The dashboard keeps the one task list.', action: 'moveTodos', actionLabel: 'Move to-dos to Tasks', items: (d.todos || []).filter(t => byPath.has(t.path)).map(t => item(byPath.get(t.path), `${t.count} to-do${t.count === 1 ? '' : 's'}`)) },
+      { id: 'attendees', title: 'Meeting attendees with no profile', why: 'Match each one to a person once and their meetings link up.', action: 'matchAttendee', actionLabel: 'Match an attendee', items: (d.attendees || []).map(a => ({ path: '', title: a, detail: 'Granola attendee' })) },
+      { id: 'stale', title: `Projects untouched for ${d.staleDays || 30} days`, why: 'Still under way? Pick it up, or set its status to done or waiting.', items: stale.sort((a, b) => a.mtime - b.mtime).map(n => item(n, n.rawStatus)) }
+    ];
+    return { sections, total: sections.reduce((a, x) => a + x.items.length, 0) };
+  }
+
   // --- Weekly review. The top of the note (between the markers) is filled in and refreshed; everything below is yours.
   const AUTO_START = '<!-- life-dashboard:auto -->', AUTO_END = '<!-- /life-dashboard:auto -->';
   function weekOf(today) { const [y, m, d] = today.split('-').map(Number), dow = (new Date(y, m - 1, d).getDay() + 6) % 7; return addDays(today, -dow); }
@@ -475,7 +499,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { CAPTURE_KINDS, captureNote, noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { healthReport, knownStatus, CAPTURE_KINDS, captureNote, noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -534,6 +558,7 @@ const render = (() => {
     if (on.taught && lib.teaching) navBtn('Teaching record', lib.teaching, () => on.taught());
     if (lib.inbox && on.folder) navBtn('Inbox', null, () => on.folder(lib.inbox));
     if (on.folder) navBtn('All folders', null, () => on.folder(''));
+    if (on.health) navBtn('Vault health', null, () => on.health());
     root.append(nav);
     if (q) {
       const box = el(doc, 'section', 'ldl-section');
@@ -761,6 +786,35 @@ const render = (() => {
     }
     return root;
   }
+  // Vault health. rep is null while the check runs.
+  function health(doc, rep, on) {
+    const root = el(doc, 'div', 'ldl-root');
+    const back = el(doc, 'button', 'ldl-back ldl-back-plain', '‹ Library'); back.type = 'button'; back.addEventListener('click', () => on.home());
+    root.append(back, el(doc, 'h1', 'ldl-h1', 'Vault health'));
+    if (!rep) { root.append(el(doc, 'p', 'ldl-muted', 'Checking the vault…')); return root; }
+    const top = el(doc, 'div', 'ldl-section-head');
+    top.append(el(doc, 'p', 'ldl-muted', rep.total ? `${rep.total} thing${rep.total === 1 ? '' : 's'} worth a look. Nothing here changes a note.` : 'All clear.'));
+    const again = el(doc, 'button', 'ldl-link', 'Check again'); again.type = 'button'; again.addEventListener('click', () => on.recheck()); top.append(again); root.append(top);
+    const clear = [];
+    for (const s of rep.sections) {
+      if (!s.items.length) { clear.push(s.title); continue; }
+      const sec = el(doc, 'section', 'ldl-section'), head = el(doc, 'div', 'ldl-section-head');
+      head.append(el(doc, 'h2', 'ldl-h2', `${s.title} · ${s.items.length}`));
+      if (s.action && on[s.action]) { const b = el(doc, 'button', 'ldl-btn ldl-btn-soft', s.actionLabel); b.type = 'button'; b.addEventListener('click', () => on[s.action]()); head.append(b); }
+      sec.append(head, el(doc, 'p', 'ldl-muted ldl-small', s.why));
+      const list = el(doc, 'div', 'ldl-list');
+      s.items.slice(0, 50).forEach(it => {
+        const r = el(doc, 'div', 'ldl-row ldl-row-static'), mid = el(doc, 'span', 'ldl-row-text');
+        mid.append(el(doc, 'span', 'ldl-row-title', it.title)); if (it.detail) mid.append(el(doc, 'span', 'ldl-row-meta', it.detail)); r.append(mid);
+        if (it.path) { const b = el(doc, 'button', 'ldl-btn ldl-btn-soft', 'Open'); b.type = 'button'; b.setAttribute('aria-label', `Open ${it.title}`); b.addEventListener('click', () => on.open(it.path)); r.append(b); }
+        list.append(r);
+      });
+      if (s.items.length > 50) list.append(el(doc, 'p', 'ldl-muted ldl-small', `and ${s.items.length - 50} more`));
+      sec.append(list); root.append(sec);
+    }
+    if (clear.length && rep.total) root.append(el(doc, 'p', 'ldl-muted ldl-small ldl-gap', `All clear: ${clear.join(' · ')}`));
+    return root;
+  }
   // A passage preview. data: { label, translation, verses: [[n, text]], more, missing }
   function versePreview(doc, data, on) {
     const box = el(doc, 'div', 'ldl-verses'); box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', data.label);
@@ -776,7 +830,7 @@ const render = (() => {
     box.append(acts);
     return box;
   }
-  return { home, hub, shelf, folder, taught, book, readingBar, titleCard, followUps, versePreview };
+  return { home, hub, shelf, folder, taught, health, book, readingBar, titleCard, followUps, versePreview };
 })();
 
 /* =============================== 3. plugin =============================== */
@@ -811,7 +865,7 @@ class LibraryView extends ItemView {
   getViewType() { return VIEW_LIBRARY; }
   // Each Library page is part of the tab's history, so Obsidian's back and forward arrows step through it.
   getState() { return { page: this.page }; }
-  async setState(state, result) { if (state && state.page) this.page = state.page; this.q = ''; this.draw(); this.contentEl.scrollTop = 0; return super.setState(state, result); }
+  async setState(state, result) { if (state && state.page) this.page = state.page; this.q = ''; this.health = null; this.draw(); this.contentEl.scrollTop = 0; return super.setState(state, result); }
   getDisplayText() { return 'Library'; }
   getIcon() { return 'library'; }
   async onOpen() { this.contentEl.addClass('ldl-view'); this.draw(); }
@@ -823,6 +877,14 @@ class LibraryView extends ItemView {
     else if (this.page.name === 'shelf') node = render.shelf(doc, lib, this.page.id, on);
     else if (this.page.name === 'book') { const b = this.plugin.books().byPath.get(this.page.path); node = b ? render.book(doc, b, this.plugin.progressFor(b.path), on) : render.home(doc, lib, on, '', []); }
     else if (this.page.name === 'taught') node = render.taught(doc, this.plugin.teaching(), lib.today, on);
+    else if (this.page.name === 'health') {
+      node = render.health(doc, this.health, on);
+      if (!this.health && !this.checking) {
+        this.checking = true;
+        this.plugin.healthData().catch(e => ({ sections: [{ id: 'error', title: 'The check stopped', why: String(e && e.message || e), items: [] }], total: 0 }))
+          .then(h => { this.checking = false; this.health = h; if (this.page.name === 'health') this.draw(); });
+      }
+    }
     else if (this.page.name === 'folder') node = render.folder(doc, this.plugin.folderData(this.page.path || ''), lib.today, on);
     else node = render.home(doc, lib, on, this.q, this.q ? core.search(this.plugin.notes(), this.q, this.plugin.ignored()) : []);
     const focused = doc.activeElement && doc.activeElement.classList.contains('ldl-search');
@@ -935,6 +997,7 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'attendee-alias', name: 'Match a Granola attendee to a person', callback: () => this.matchAttendee() });
     // A meeting that arrives (or changes) with attendee handles we know is linked to the right people.
     this.registerEvent(this.app.metadataCache.on('changed', file => { if (/meeting/.test(String(this.app.metadataCache.getFileCache(file)?.frontmatter?.type || this.app.metadataCache.getFileCache(file)?.frontmatter?.granola_id && 'meeting'))) { clearTimeout(this._att); this._att = setTimeout(() => this.linkAttendeesIn(file), 1500); } }));
+    this.addCommand({ id: 'vault-health', name: 'Check vault health', callback: () => this.openLibrary({ name: 'health' }) });
     this.addCommand({ id: 'file-inbox', name: 'File the inbox', callback: () => this.fileInbox() });
     this.addCommand({ id: 'archive-projects', name: 'Archive finished projects', callback: () => this.archiveProjects() });
     this.addCommand({ id: 'add-contents', name: 'Add a contents list to this project note', checkCallback: checking => { const f = this.app.workspace.getActiveFile(), n = f && this.library().hubs.get(f.path); if (!n) return false; if (!checking) this.refreshContents(f, true); return true; } });
@@ -1059,7 +1122,11 @@ class LifeDashboardPlugin extends Plugin {
       today: this.app.internalPlugins?.plugins?.['daily-notes']?.enabled ? () => this.runCommand('daily-notes', 'Turn on Daily notes in Settings → Core plugins to use Today’s note.') : undefined,
       search: q => { view.q = q; view.draw(); },
       status: path => this.pickStatus(path),
-      meetingTasks: path => this.pickActions(path)
+      meetingTasks: path => this.pickActions(path),
+      health: () => view ? view.show({ name: 'health' }) : this.openLibrary({ name: 'health' }),
+      recheck: () => { view.health = null; view.draw(); },
+      moveTodos: () => this.moveTodos(),
+      matchAttendee: () => this.matchAttendee()
     };
   }
   redraw() { for (const leaf of this.app.workspace.getLeavesOfType(VIEW_LIBRARY)) leaf.view.draw?.(); }
@@ -1210,6 +1277,21 @@ class LifeDashboardPlugin extends Plugin {
       }
       new Notice(`Moved ${picked.length} to-do${picked.length === 1 ? '' : 's'} to Tasks`);
     }, { intro: 'Tick the ones that are real tasks. Leave checklists that belong inside their note unticked.', button: 'Move to Tasks' }).open();
+  }
+  // --- Vault health: the same checks as moveTodos and the weekly review, across the whole vault.
+  async healthData() {
+    const today = core.ymd(new Date()), skip = [...this.ignored(), core.safeFolder(this.settings.archiveFolder || '') || ''].filter(Boolean), notes = this.notes();
+    const kept = notes.filter(n => !core.inFolder(n.path, skip)), mc = this.app.metadataCache;
+    const broken = Object.entries(mc.unresolvedLinks || {}).map(([path, t]) => ({ path, targets: Object.keys(t || {}) })).filter(b => b.targets.length);
+    const todos = [];
+    for (const n of kept) {
+      if (n.family === 'meeting') continue;
+      const f = this.app.vault.getAbstractFileByPath(n.path); if (!(f instanceof TFile)) continue;
+      const count = core.noteTodos(await this.app.vault.cachedRead(f)).length; if (count) todos.push({ path: n.path, count });
+    }
+    const aliases = this.aliasMap(), attendees = [...new Set(kept.filter(n => n.family === 'meeting').flatMap(n => n.people.map(core.linkTarget)).filter(t => t && !aliases.has(t.toLowerCase()) && !mc.getFirstLinkpathDest(t, '')))].sort();
+    const b = this.books(), inBook = [...b.index.keys(), ...b.byPath.keys()];
+    return core.healthReport(notes, { today, skip, inBook, broken, todos, attendees });
   }
   // --- Meeting attendees
   aliasMap() { const m = new Map(); for (const n of this.notes()) if (n.family === 'person') { m.set(n.title.toLowerCase(), n.title); n.aliases.forEach(a => m.set(a.toLowerCase(), n.title)); } return m; }
