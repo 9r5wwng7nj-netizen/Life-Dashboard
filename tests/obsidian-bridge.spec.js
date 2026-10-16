@@ -184,3 +184,22 @@ test('Open in reader from Obsidian opens the Bible reader at that passage', asyn
   expect(r).toEqual({ view: 'scripture', tab: 'read', book: 'John', c: 13, focus: [1, 17] });
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('the plugin can ask for the week’s numbers for the weekly review', async ({ page }) => {
+  const errors = await open(page, { obsidian: true });
+  const r = await page.evaluate(() => {
+    const mon = startOfWeek(), last = addDays(mon, -7), at = (d, h) => new Date(`${d}T${h}:00`).toISOString();
+    const t = (id, extra) => ({ id, title: id, notes: '', status: 'todo', priority: 'med', tags: [], created: at(last, '08'), ...extra });
+    Store.set('workouts', [{ id: 'w1', name: 'Push', start: at(addDays(last, 1), '07'), exercises: [] }, { id: 'w2', name: 'Pull', start: at(addDays(last, 3), '07'), exercises: [] }, { id: 'w3', name: 'Old', start: at(addDays(last, -3), '07'), exercises: [] }]);
+    Store.set('tasks', [t('Done A', { status: 'done', completedAt: at(addDays(last, 2), '10') }), t('Done B', { status: 'done', completedAt: at(addDays(last, 5), '10') }), t('Late', { due: addDays(ymd(), -2) }), t('Loose')]);
+    Store.set('readingPlans', [{ id: 'rp', name: 'Plan', start: last, done: { 0: last, 1: addDays(last, 1), 2: addDays(last, 4), 3: addDays(last, -1) } }]);
+    Store.set('journal', [{ id: 'j1', date: addDays(last, 2), body: 'x' }]);
+    const k = tkit(); k.weeks[last] = { big3: ['Done A', 'Late'] }; Store.save('tkit');
+    return LD_QUERY({ weekStats: { monday: mon } });
+  });
+  expect(r.weeks[0]).toMatchObject({ workouts: 2, tasksDone: 2, readingDays: 3, journal: 1 });
+  expect(r.weeks[1]).toMatchObject({ workouts: 1, readingDays: 1 });
+  expect(r.big3).toEqual([{ title: 'Done A', done: true }, { title: 'Late', done: false }]);
+  expect([r.overdue, r.familyReview]).toEqual([1, false]);
+  expect(errors, errors.join('\n')).toEqual([]);
+});

@@ -310,3 +310,28 @@ test('the verse preview card shows the verses and its actions', async ({ page })
   expect(out.calls).toEqual(['reader', 'note', 'chapter']);
   if (process.env.LDL_SHOTS) await page.screenshot({ path: `${process.env.LDL_SHOTS}/verse-preview.png`, clip: { x: 0, y: 0, width: 440, height: 260 } });
 });
+
+test('the weekly review: the week, the filled-in top, and a refresh that keeps your writing', () => {
+  expect([core.weekOf('2026-10-15'), core.weekOf('2026-10-12'), core.weekOf('2026-10-18')]).toEqual(['2026-10-12', '2026-10-12', '2026-10-12']);
+  const base = { monday: '2026-10-19', today: '2026-10-19', meetings: [{ title: 'Leaders meeting', date: '2026-10-13' }], inboxNotes: ['Idea'], inboxMore: 0,
+    teaching: [{ title: 'John 13 - October 28, 2026', scripture: 'John 13', date: '2026-10-21', statusLabel: 'This week' }], people: [{ title: 'Sam Rivera', nextContact: '2026-10-17' }], projects: [{ title: 'Experiencing God', statusLabel: 'Active', count: 6 }], updated: 'Mon 9:00' };
+  const stats = { weeks: [{ from: '2026-10-12', to: '2026-10-18', workouts: 4, tasksDone: 23, readingDays: 6, journal: 3, weight: '182.4 lbs', weightChange: '−0.8 lbs' }, { from: '2026-10-05', to: '2026-10-11', workouts: 3, tasksDone: 18, readingDays: 5, journal: 2, weight: '183.2 lbs', weightChange: null }],
+    big3: [{ title: 'Outline John 13', done: true }, { title: 'Call Sam', done: false }], nextBig3: [], familyReview: false, overdue: 2, dueThisWeek: 9, inbox: 4 };
+  const withStats = core.weeklyAuto({ ...base, stats });
+  expect(withStats).toContain('| Workouts | 4 | 3 |');
+  expect(withStats).toContain('| Bible reading | 6 of 7 days | 5 of 7 days |');
+  expect(withStats).toContain('| Weight trend | 182.4 lbs (−0.8 lbs) | 183.2 lbs |');
+  expect(withStats).toContain('**Last week’s Big 3:** ✓ Outline John 13 · ○ Call Sam');
+  expect(withStats).toContain('**Right now:** 2 overdue · 9 due this week · 4 in the dashboard Inbox');
+  expect(withStats).toContain('- [[John 13 - October 28, 2026]] · John 13 · ');
+  expect(withStats).toContain('- [[Sam Rivera]] · overdue since ');
+  expect(withStats).not.toContain('- [ ]'); // no checkboxes: the dashboard is the only to-do list
+  const note = core.weeklyNote({ ...base, stats: null });
+  expect(note).toMatch(/^---\ntype: review\nreview_kind: weekly\nstatus: open\ndate: "2026-10-19"/);
+  expect(note).toContain('run **Refresh the weekly review** there');
+  const written = note.replace('### What went well?\n', '### What went well?\nA good week of teaching.\n');
+  const refreshed = core.replaceAuto(written, withStats);
+  expect(refreshed).toContain('A good week of teaching.');
+  expect(refreshed).toContain('| Workouts | 4 | 3 |');
+  expect(refreshed.split(core.AUTO_START).length).toBe(2); // one top section, not two
+});

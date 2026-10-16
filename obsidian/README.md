@@ -56,7 +56,7 @@ Statuses are read loosely and shown the same way everywhere: Idea (idea, planned
 | 3 ✅ | **@Name in tasks:** links the task to a person; inside Obsidian the plugin creates a missing profile in the People folder from the Person template (settings: *Folder for new people*, *Template for new people*). | app + plugin |
 | 3 ✅ | **Taught record:** *Mark taught* on a sermon or lesson adds `taught: YYYY-MM-DD — Group` (and sets Preached/Taught). The title card lists where it was taught and when the same passage was taught before. A **Teaching record** page shows each group's history (groups in settings; `(inactive)` for one not taught right now) and finished teaching with no group yet. | plugin |
 | 4 ✅ | **Verse previews:** references in reading view show their verses from the vault's chapter notes (settings: translation suffix, passage notes folder, archive). Open in reader, Passage note (open, restore or create), Read the chapter; commands Insert a Bible passage and Open or start a passage note. | plugin + bridge |
-| 4 | **Weekly review** that pulls dashboard numbers into one note alongside Plan week and the family review. | plugin + bridge |
+| 4 ✅ | **Weekly review:** one note a week (setting: weekly reviews folder). The top refreshes from the vault and the docked dashboard (`weekStats`); the reflection below is the person's. | plugin + bridge |
 | 3 ✅ | **Library as home:** quick actions (New note, New sermon, Today's note), a section bar for every shelf plus Inbox and All folders, folder pages with a clickable path, Library pages in the tab's back and forward history, and a setting to fold the left sidebar away. | plugin |
 | 4 | **Auto-filer:** notes file themselves by `type`; each series gets an index page. | plugin |
 

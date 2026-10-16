@@ -103,7 +103,7 @@ const core = (() => {
     return {
       path: file.path, folder: file.folder || '', title, family, type: String(fm.type || ''), date,
       mtime: file.mtime || 0, scripture: plain(fm.scripture || fm.passage), series: plain(fm.series),
-      roles: plain(fm.roles), lastContact: isoDate(fm.last_contact), taught: parseTaught(fm.taught), scriptureKey: scriptureKey(fm.scripture || fm.passage),
+      roles: plain(fm.roles), lastContact: isoDate(fm.last_contact), nextContact: isoDate(fm.next_contact), rawStatus: String(fm.status || '').trim().toLowerCase(), taught: parseTaught(fm.taught), scriptureKey: scriptureKey(fm.scripture || fm.passage),
       projectLink: linkTarget(fm.project), projectPath: null, status: status.key, statusLabel: status.label,
       kind: family ? FAMILIES[family].kind : '', cover: coverText(title, fm.scripture || fm.passage),
       color: PALETTE[hash(title) % PALETTE.length], hub: family === 'series' || String(fm.type || '').toLowerCase() === 'project'
@@ -267,6 +267,43 @@ const core = (() => {
   const passageCallout = (r, verses, translation) => `> [!quote] ${r.label}${translation ? ` (${translation})` : ''}\n${verses.map(([n, t]) => `> **${n}** ${t}`).join('\n')}\n`;
   const passageNoteText = (book, c, today) => `---\ntype: scripture-note\ncreated: ${today}\nscripture: "${book} ${c}"\nbook: ${book}\ntestament: ${BIBLE.indexOf(book) >= 39 ? 'New Testament' : 'Old Testament'}\n---\n\n# ${book} ${c}\n\n## Notes\n\n## Canonical connections\n\n## Related notes\n\n`;
 
+  // --- Weekly review. The top of the note (between the markers) is filled in and refreshed; everything below is yours.
+  const AUTO_START = '<!-- life-dashboard:auto -->', AUTO_END = '<!-- /life-dashboard:auto -->';
+  function weekOf(today) { const [y, m, d] = today.split('-').map(Number), dow = (new Date(y, m - 1, d).getDay() + 6) % 7; return addDays(today, -dow); }
+  const shortDay = (s, today) => { if (!s) return ''; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', ...(String(y) !== today.slice(0, 4) ? { year: 'numeric' } : {}) }); };
+  const wl = t => `[[${t}]]`;
+  // d: { monday, today, stats (from the dashboard, or null), meetings, inboxNotes, inboxMore, teaching, people, projects, updated }
+  function weeklyAuto(d) {
+    const L = [AUTO_START, '## Last week in numbers', ''], st = d.stats;
+    if (st) {
+      const [a, b] = st.weeks, row = (label, x, y) => L.push(`| ${label} | ${x} | ${y} |`);
+      L.push(`| | Last week (${shortDay(a.from, d.today)} – ${shortDay(a.to, d.today)}) | Week before |`, '|---|---|---|');
+      row('Workouts', a.workouts, b.workouts); row('Tasks finished', a.tasksDone, b.tasksDone); row('Bible reading', `${a.readingDays} of 7 days`, `${b.readingDays} of 7 days`); row('Journal entries', a.journal, b.journal);
+      if (a.weight || b.weight) row('Weight trend', a.weight ? `${a.weight}${a.weightChange ? ` (${a.weightChange})` : ''}` : '–', b.weight ? `${b.weight}${b.weightChange ? ` (${b.weightChange})` : ''}` : '–');
+      L.push('', `**Last week’s Big 3:** ${st.big3.length ? st.big3.map(x => `${x.done ? '✓' : '○'} ${x.title}`).join(' · ') : 'none were picked'}`);
+      L.push(`**This week’s Big 3:** ${st.nextBig3.length ? st.nextBig3.join(' · ') : 'not picked yet (Plan week in the dashboard)'}`);
+      L.push(`**Family review this week:** ${st.familyReview ? 'done' : 'not yet'}`, `**Right now:** ${st.overdue} overdue · ${st.dueThisWeek} due this week · ${st.inbox} in the dashboard Inbox`);
+    } else L.push('_The dashboard’s numbers fill in on the Mac with the dashboard docked: run **Refresh the weekly review** there._');
+    L.push('', '## Clear the decks', '');
+    L.push(d.meetings.length ? `**Meetings to process:** ${d.meetings.map(m => `${wl(m.title)}${m.date ? ` (${shortDay(m.date, d.today)})` : ''}`).join(' · ')}` : '**Meetings to process:** none');
+    L.push(d.inboxNotes.length ? `**Notes waiting in the inbox:** ${d.inboxNotes.map(wl).join(' · ')}${d.inboxMore ? ` and ${d.inboxMore} more` : ''}` : '**Notes waiting in the inbox:** none');
+    L.push('', '## Teaching this week', '');
+    if (d.teaching.length) d.teaching.forEach(t => L.push(`- ${wl(t.title)}${t.scripture ? ` · ${t.scripture}` : ''} · ${shortDay(t.date, d.today)}${t.statusLabel ? ` · ${t.statusLabel}` : ''}`)); else L.push('Nothing scheduled.');
+    L.push('', '## People to reach', '');
+    if (d.people.length) d.people.forEach(p => L.push(`- ${wl(p.title)} · ${p.nextContact < d.today ? 'overdue since' : 'due'} ${shortDay(p.nextContact, d.today)}`)); else L.push('Nobody due this week.');
+    L.push('', '## Active projects', '');
+    if (d.projects.length) d.projects.forEach(p => L.push(`- ${wl(p.title)}${p.statusLabel ? ` · ${p.statusLabel}` : ''}${p.count ? ` · ${p.count} notes` : ''}`)); else L.push('None active.');
+    L.push('', `_Filled in by Life Dashboard ${d.updated}. This part refreshes; write below it._`, AUTO_END);
+    return L.join('\n');
+  }
+  const weeklyNote = d => `---\ntype: review\nreview_kind: weekly\nstatus: open\ndate: "${d.monday}"\ncreated: "${d.today}"\n---\n\n# Weekly Review — ${d.monday}\n\n${weeklyAuto(d)}\n\n## Reflection\n\n### What went well?\n\n\n### What should change?\n\n\n### What matters most this week?\nThen pick this week’s Big 3 in the dashboard’s Plan week.\n\n\n## Questions and decisions\n\n`;
+  // Swap in a fresh top section, leaving the rest of the note untouched.
+  function replaceAuto(text, auto) {
+    const a = text.indexOf(AUTO_START), b = text.indexOf(AUTO_END);
+    if (a >= 0 && b > a) return text.slice(0, a) + auto + text.slice(b + AUTO_END.length);
+    const h = text.match(/^# .*$/m); return h ? text.replace(h[0], `${h[0]}\n\n${auto}`) : `${auto}\n\n${text}`;
+  }
+
   // A meeting note's open to-dos: the top-level bullets under a heading about actions, follow-ups, next steps or
   // to-dos. Plain bullets and unticked "- [ ]" both count; ticked items and callouts (> lines) do not. A bullet's
   // indented lines (Granola puts details under a **bold** item) go into the task's notes, in parentheses.
@@ -305,7 +342,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -354,7 +391,7 @@ const render = (() => {
     root.append(head(doc, new Date().toLocaleDateString(undefined, { weekday: 'long' }), 'Library', q, on));
     // Quick actions, then a bar of every section: the Library stands in for the folder sidebar.
     const acts = el(doc, 'div', 'ldl-actions');
-    [['New note', on.newNote, true], ['New sermon', on.newSermon], ['Today’s note', on.today]].forEach(([label, fn, primary]) => {
+    [['New note', on.newNote, true], ['New sermon', on.newSermon], ['Weekly review', on.weekly], ['Today’s note', on.today]].forEach(([label, fn, primary]) => {
       if (!fn) return; const b = el(doc, 'button', 'ldl-btn' + (primary ? ' ldl-btn-primary' : ' ldl-btn-soft'), label); b.type = 'button'; b.addEventListener('click', () => fn()); acts.append(b);
     });
     if (acts.childElementCount) root.append(acts);
@@ -568,6 +605,7 @@ const DEFAULTS = {
   ignoreFolders: [], // reference text (Bible chapters, imported books) kept out of shelves, search and Recent
   shelves: ['sermon', 'study', 'series', 'meeting', 'book', 'classic', 'article', 'person'],
   sermonFolder: '',
+  reviewFolder: '', // weekly reviews go here, in a folder per year
   versePreviews: true, // Bible references in notes show their verses
   bibleSuffix: 'WEB', // chapter notes are named "John 13 (WEB)"
   passageFolder: '', // where passage notes live, one folder per book like the Bible's
@@ -685,6 +723,8 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'open-dashboard', name: 'Open Life Dashboard in the sidebar', callback: () => this.openDashboard() });
     this.addCommand({ id: 'new-sermon', name: 'New sermon', callback: () => this.newSermon() });
     this.addCommand({ id: 'meeting-tasks', name: 'Send this meeting’s action items to Tasks', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickActions(f.path); return true; } });
+    this.addCommand({ id: 'weekly-review', name: 'Open this week’s review', callback: () => this.openWeekly() });
+    this.addCommand({ id: 'weekly-refresh', name: 'Refresh the weekly review', callback: () => this.openWeekly(true) });
     this.addCommand({ id: 'insert-passage', name: 'Insert a Bible passage', editorCallback: editor => this.insertPassage(editor) });
     this.addCommand({ id: 'passage-note', name: 'Open or start a passage note', callback: () => this.askPassageNote() });
     this.registerMarkdownPostProcessor((el, ctx) => this.markRefs(el, ctx.sourcePath));
@@ -775,6 +815,7 @@ class LifeDashboardPlugin extends Plugin {
       markTaught: path => this.markTaught(path),
       taughtBefore: n => core.taughtBefore(n, this.notes().filter(x => !core.inFolder(x.path, this.ignored()))),
       newSermon: () => this.newSermon(),
+      weekly: () => this.openWeekly(),
       // Today's note only when the Daily notes core plugin is on (a person may let the Life Dashboard own the day).
       today: this.app.internalPlugins?.plugins?.['daily-notes']?.enabled ? () => this.runCommand('daily-notes', 'Turn on Daily notes in Settings → Core plugins to use Today’s note.') : undefined,
       search: q => { view.q = q; view.draw(); },
@@ -875,6 +916,34 @@ class LifeDashboardPlugin extends Plugin {
     const view = this.app.workspace.getLeavesOfType(VIEW_DASH)[0]?.view, wv = view?.webview;
     if (!wv || wv.isLoading?.()) return null;
     try { return await wv.executeJavaScript(`window.LD_QUERY ? window.LD_QUERY(${JSON.stringify(q)}) : null`); } catch (e) { return null; }
+  }
+  // --- Weekly review: this week's note, made or opened; its top section filled from the vault and the docked dashboard.
+  async weeklyData() {
+    const today = core.ymd(new Date()), monday = core.weekOf(today), end = core.addDays(monday, 6), lib = this.library();
+    const notes = this.notes().filter(n => !core.inFolder(n.path, this.ignored()));
+    const meetings = notes.filter(n => (n.type === 'meeting-review' && ['unprocessed', ''].includes(n.rawStatus)) || (n.type === 'meeting-source' && ['imported', 'captured', ''].includes(n.rawStatus)))
+      .filter(n => !n.date || n.date >= core.addDays(today, -14)).sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 12);
+    const inbox = this.inboxFolder(), inboxNotes = inbox ? notes.filter(n => n.folder === inbox).map(n => n.title).sort() : [];
+    const teaching = notes.filter(n => core.teachable(n) && n.status !== 'done' && n.date && n.date >= monday && n.date <= end).map(n => lib.byPath.get(n.path) || n).sort((a, b) => a.date.localeCompare(b.date));
+    const people = notes.filter(n => n.family === 'person' && n.nextContact && n.nextContact <= end).sort((a, b) => a.nextContact.localeCompare(b.nextContact)).slice(0, 15);
+    const projects = notes.filter(n => n.hub && ['active', 'in-progress', 'live'].includes(n.rawStatus)).map(n => lib.byPath.get(n.path) || n).sort((a, b) => a.title.localeCompare(b.title));
+    const stats = Platform.isDesktopApp ? await this.queryDashboard({ weekStats: { monday } }) : null;
+    const updated = new Date().toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return { monday, today, stats, meetings, inboxNotes: inboxNotes.slice(0, 10), inboxMore: Math.max(0, inboxNotes.length - 10), teaching, people, projects, updated };
+  }
+  async openWeekly(refresh) {
+    const d = await this.weeklyData(), base = core.safeFolder(this.settings.reviewFolder || '') || '', folder = normalizePath([base, d.monday.slice(0, 4)].filter(Boolean).join('/'));
+    const path = normalizePath(`${folder}/${d.monday} - Weekly Review.md`), existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) {
+      const fm = this.app.metadataCache.getFileCache(existing)?.frontmatter || {};
+      if (refresh || String(fm.status || '').toLowerCase() !== 'complete') await this.app.vault.process(existing, text => core.replaceAuto(text, core.weeklyAuto(d)));
+      if (refresh) new Notice(d.stats ? 'Weekly review refreshed' : 'Refreshed. Dashboard numbers need the docked dashboard on the Mac.');
+      return this.app.workspace.getLeaf(false).openFile(existing);
+    }
+    if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    const f = await this.app.vault.create(path, core.weeklyNote(d));
+    if (!d.stats && Platform.isDesktopApp) new Notice('Open the dashboard in the sidebar, then run Refresh the weekly review to add its numbers.');
+    return this.app.workspace.getLeaf(false).openFile(f);
   }
   // --- Verse previews
   // The chapter note for a reference ("John 13 (WEB)"), found by name wherever the Bible lives.
@@ -1026,6 +1095,8 @@ class LibrarySettings extends PluginSettingTab {
       .addText(t => t.setValue(s.peopleFolder).setPlaceholder('e.g. 04 People').onChange(v => { s.peopleFolder = v.trim(); save(); }));
     new Setting(containerEl).setName('Template for new people').setDesc('A note new profiles start from. {{title}} and {{date}} are filled in.')
       .addText(t => t.setValue(s.personTemplate).setPlaceholder('e.g. Templates/Person').onChange(v => { s.personTemplate = v.trim(); save(); }));
+    new Setting(containerEl).setName('Weekly reviews folder').setDesc('Each week’s review is made here, in a folder per year, named like “2026-10-19 - Weekly Review”.')
+      .addText(t => t.setValue(s.reviewFolder).setPlaceholder('e.g. Reviews/Weekly').onChange(v => { s.reviewFolder = v.trim(); save(); }));
     new Setting(containerEl).setName('Verse previews').setDesc('Bible references in notes show their verses when you point at or tap them.')
       .addToggle(t => t.setValue(s.versePreviews).onChange(v => { s.versePreviews = v; save(); }));
     new Setting(containerEl).setName('Bible translation in chapter names').setDesc('Chapter notes are named like “John 13 (WEB)”; this is the part in brackets.')
