@@ -327,6 +327,28 @@ const core = (() => {
   const passageCallout = (r, verses, translation) => `> [!quote] ${r.label}${translation ? ` (${translation})` : ''}\n${verses.map(([n, t]) => `> **${n}** ${t}`).join('\n')}\n`;
   const passageNoteText = (book, c, today) => `---\ntype: scripture-note\ncreated: ${today}\nscripture: "${book} ${c}"\nbook: ${book}\ntestament: ${BIBLE.indexOf(book) >= 39 ? 'New Testament' : 'Old Testament'}\n---\n\n# ${book} ${c}\n\n## Notes\n\n## Canonical connections\n\n## Related notes\n\n`;
 
+  // --- To-dos still kept in notes. Every unticked "- [ ]" line, with the Tasks plugin's date emoji turned into the
+  // dashboard's "due:" and its other emoji markers dropped.
+  function noteTodos(md) {
+    const out = []; let inFm = false, inCode = false;
+    String(md || '').split('\n').forEach((line, i) => {
+      if (i === 0 && line.trim() === '---') { inFm = true; return; }
+      if (inFm) { if (line.trim() === '---') inFm = false; return; }
+      if (/^\s*```/.test(line)) { inCode = !inCode; return; }
+      const m = !inCode && line.match(/^\s*[-*+]\s+\[ \]\s+(.+)$/); if (!m) return;
+      out.push({ line: i, raw: line, text: todoText(m[1]) });
+    });
+    return out;
+  }
+  function todoText(t) {
+    let s = String(t).replace(/\s+\^[\w-]+$/, '');
+    const due = s.match(/📅\s*(\d{4}-\d{2}-\d{2})/);
+    s = s.replace(/[📅⏳🛫➕✅❌🔁🔺⏫🔼🔽⏬]️?\s*(\d{4}-\d{2}-\d{2}|every [^📅⏳🛫➕✅❌🔁]+)?/gu, ' ').replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/\[\[([^\]]+)\]\]/g, (m, x) => x.split('/').pop()).replace(/\s+/g, ' ').trim();
+    return due ? `${s} due:${due[1]}` : s;
+  }
+  // The line after its to-do has moved: no longer a checkbox, so nothing counts it twice.
+  const movedLine = raw => raw.replace(/\[ \]\s+/, '').replace(/\s*$/, ' _(moved to Tasks)_');
+
   // --- Meeting attendees. Granola links attendees by email handle ("[[Jthigpen]]"); a person's `aliases` say which
   // handles are theirs. Returns the people list with known handles replaced by the person's note, or null if nothing changed.
   function linkAttendees(people, aliasToName, resolves) {
@@ -441,7 +463,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -875,6 +897,7 @@ class LifeDashboardPlugin extends Plugin {
     this.addCommand({ id: 'open-dashboard', name: 'Open Life Dashboard in the sidebar', callback: () => this.openDashboard() });
     this.addCommand({ id: 'new-sermon', name: 'New sermon', callback: () => this.newSermon() });
     this.addCommand({ id: 'meeting-tasks', name: 'Send this meeting’s action items to Tasks', checkCallback: checking => { const f = this.app.workspace.getActiveFile(); if (!f) return false; if (!checking) this.pickActions(f.path); return true; } });
+    this.addCommand({ id: 'move-todos', name: 'Move to-dos from notes to Tasks', callback: () => this.moveTodos() });
     this.addCommand({ id: 'link-attendees', name: 'Link meeting attendees to people', callback: () => this.linkAllAttendees(true) });
     this.addCommand({ id: 'attendee-alias', name: 'Match a Granola attendee to a person', callback: () => this.matchAttendee() });
     // A meeting that arrives (or changes) with attendee handles we know is linked to the right people.
@@ -1122,6 +1145,29 @@ class LifeDashboardPlugin extends Plugin {
       }
       const s = this._subjects.get(path); if (s && !r.querySelector('.ldl-row-meta')) r.querySelector('.ldl-row-text')?.append(Object.assign(r.ownerDocument.createElement('span'), { className: 'ldl-row-meta', textContent: s }));
     }
+  }
+  // --- To-dos in notes: one list across the vault (not templates, archives, reference text or meetings, which have
+  // their own Send action items). Ticked ones go to the dashboard, linked to their note, and stop being checkboxes.
+  async moveTodos() {
+    if (!Platform.isDesktopApp) return new Notice('Move to-dos from Obsidian on the Mac, where the dashboard is docked.');
+    const skip = [...this.ignored(), core.safeFolder(this.settings.archiveFolder || '') || ''].filter(Boolean), items = [];
+    for (const n of this.notes()) {
+      if (core.inFolder(n.path, skip) || n.family === 'meeting') continue;
+      const f = this.app.vault.getAbstractFileByPath(n.path); if (!(f instanceof TFile)) continue;
+      const todos = core.noteTodos(await this.app.vault.cachedRead(f)); if (!todos.length) continue;
+      todos.forEach(t => items.push({ text: t.text, section: n.title, checked: false, note: n, todo: t }));
+    }
+    if (!items.length) return new Notice('No to-dos are left in your notes.');
+    new PickModal(this.app, `To-dos in notes · ${items.length}`, items, async picked => {
+      const byNote = new Map(); picked.forEach(it => (byNote.get(it.note.path) || byNote.set(it.note.path, []).get(it.note.path)).push(it));
+      for (const [path, its] of byNote) {
+        const n = its[0].note, fm = this.app.metadataCache.getFileCache(this.app.vault.getAbstractFileByPath(path))?.frontmatter || {};
+        await this.sendToDashboard({ addTasks: { source: n.title, area: core.plain(fm.areas || fm.area || ''), items: its.map(it => ({ title: it.text, person: n.family === 'person' ? n.title : undefined })) } });
+        const f = this.app.vault.getAbstractFileByPath(path), raws = new Set(its.map(it => it.todo.raw));
+        if (f instanceof TFile) await this.app.vault.process(f, text => text.split('\n').map(l => raws.has(l) ? core.movedLine(l) : l).join('\n'));
+      }
+      new Notice(`Moved ${picked.length} to-do${picked.length === 1 ? '' : 's'} to Tasks`);
+    }, { intro: 'Tick the ones that are real tasks. Leave checklists that belong inside their note unticked.', button: 'Move to Tasks' }).open();
   }
   // --- Meeting attendees
   aliasMap() { const m = new Map(); for (const n of this.notes()) if (n.family === 'person') { m.set(n.title.toLowerCase(), n.title); n.aliases.forEach(a => m.set(a.toLowerCase(), n.title)); } return m; }

@@ -445,3 +445,12 @@ test('Granola attendee handles are linked to the person who owns them', () => {
   const n = core.noteInfo({ path: 'p/Jordan Thigpen.md', basename: 'Jordan Thigpen' }, { type: 'person', aliases: ['Jthigpen'] }, '2026-10-15');
   expect(n.aliases).toEqual(['Jthigpen']);
 });
+
+test('to-dos kept in notes are found, cleaned for the dashboard, and marked once moved', () => {
+  const md = ['---', 'type: project', '---', '# Plan', '- [ ] Define the questions', '- [x] Done already', '  - [ ] Prepare the discussion for 1 Corinthians 7–9. 📅 2026-10-06', '```', '- [ ] in a code block', '```', '* [ ] Call [[Dwayne Conner|Dad]] ⏫ 🔁 every week ^abc'].join('\n');
+  const todos = core.noteTodos(md);
+  expect(todos.map(t => t.text)).toEqual(['Define the questions', 'Prepare the discussion for 1 Corinthians 7–9. due:2026-10-06', 'Call Dad']);
+  expect(todos.map(t => t.line)).toEqual([4, 6, 10]);
+  expect(core.movedLine('- [ ] Define the questions')).toBe('- Define the questions _(moved to Tasks)_');
+  expect(core.movedLine('  - [ ] Nested one')).toBe('  - Nested one _(moved to Tasks)_');
+});
