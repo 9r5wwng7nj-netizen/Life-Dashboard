@@ -190,3 +190,9 @@ details.ldl-part[open] > summary.ldl-part-head::before { transform: rotate(90deg
 .ldl-readnav button:disabled { opacity: .4; cursor: default; }
 .ldl-readnav .ldl-btn-soft { background: var(--background-primary); color: var(--text-normal); border: 1px solid var(--background-modifier-border); }
 .ldl-readnav .ldl-btn-primary { background: var(--interactive-accent); color: var(--text-on-accent); border: 0; }
+
+/* Capture box */
+.ldl-capture-text { width: 100%; min-height: 120px; font-size: 16px; line-height: 1.5; padding: 10px 12px; border-radius: 12px; resize: vertical; }
+.ldl-capture-kinds { display: flex; flex-wrap: wrap; gap: 8px; }
+.ldl-capture-kinds button.ldl-navchip { display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-normal); font-weight: 600; cursor: pointer; }
+.ldl-capture-kinds button.ldl-navchip.is-on { background: var(--interactive-accent); color: var(--text-on-accent); border-color: var(--interactive-accent); }

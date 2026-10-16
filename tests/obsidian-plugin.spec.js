@@ -454,3 +454,14 @@ test('to-dos kept in notes are found, cleaned for the dashboard, and marked once
   expect(core.movedLine('- [ ] Define the questions')).toBe('- Define the questions _(moved to Tasks)_');
   expect(core.movedLine('  - [ ] Nested one')).toBe('  - Nested one _(moved to Tasks)_');
 });
+
+test('a capture becomes an inbox note: typed, titled from its first words, with its passage', () => {
+  const now = new Date(2026, 9, 15, 9, 5);
+  const idea = core.captureNote('The father runs to the son before the son finishes his speech, Luke 15:20', 'sermon-seed', now);
+  expect(idea.name).toBe('The father runs to the son before the');
+  expect(idea.content).toBe('---\ntype: sermon-seed\ncreated: "2026-10-15"\ncaptured: "2026-10-15 09:05"\nscripture: "Luke 15:20"\n---\n\nThe father runs to the son before the son finishes his speech, Luke 15:20\n');
+  expect(core.captureNote('Grace is free\nbut not cheap', 'quote', now).content).toContain('> Grace is free\n> but not cheap');
+  expect(core.captureNote('   ', 'idea', now)).toBeNull();
+  expect(core.captureNote('Odd: kind?', 'nonsense', now).content).toContain('type: idea');
+  expect(core.captureNote('Why? Because: yes', 'idea', now).name).toBe('Why Because yes');
+});
