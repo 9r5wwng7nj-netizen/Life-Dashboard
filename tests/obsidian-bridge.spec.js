@@ -203,3 +203,33 @@ test('the plugin can ask for the week’s numbers for the weekly review', async 
   expect([r.overdue, r.familyReview]).toEqual([1, false]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('items sent from the phone: a task dated from the day it was said, a weight, a prayer, each taken in once', async ({ page }) => {
+  const errors = await open(page, { obsidian: true });
+  const r = await page.evaluate(() => {
+    S.unit = 'lbs';
+    const yesterday = addDays(ymd(), -1), send = m => LD_FROM_OBSIDIAN({ phone: m });
+    const ok = [
+      send({ id: '1 task', what: 'task', text: 'Call the plumber tomorrow at 3', date: yesterday }),
+      send({ id: '1 task', what: 'task', text: 'Call the plumber tomorrow at 3', date: yesterday }), // delivered twice
+      send({ id: '2 weight', what: 'weight', text: '182.4', date: ymd() }),
+      send({ id: '3 weight', what: 'weight', text: '80 kg', date: yesterday }),
+      send({ id: '4 prayer', what: 'prayer', text: 'Sam’s surgery on Friday', date: ymd() }),
+      send({ id: '5 odd', what: 'nonsense', text: 'x', date: ymd() })
+    ];
+    const N = Store.get('nutrition');
+    return { ok, tasks: TK().map(t => [t.title, t.due, t.time]), today: round(toUnit(N[ymd()].weight), 1), yesterdayKg: round(N[yesterday].weight, 1),
+      prayers: Store.get('prayers').map(p => p.title), seen: JSON.parse(localStorage.getItem('ld.phoneSeen')), dateIsReal: new Date().getDate() === new (window.Date)().getDate() };
+  });
+  expect(r.ok).toEqual([true, true, true, true, true, true]);
+  // Said yesterday: "tomorrow" is today, not tomorrow.
+  expect(r.tasks).toEqual([['Call the plumber', await page.evaluate(() => ymd()), '15:00']]);
+  expect([r.today, r.yesterdayKg]).toEqual([182.4, 80]);
+  expect(r.prayers).toEqual(['Sam’s surgery on Friday']);
+  expect(r.seen).toEqual(['1 task', '2 weight', '3 weight', '4 prayer']);
+  expect(await page.evaluate(() => Date.name)).toBe('Date'); // the real clock is back
+
+  // Before saved data has loaded, a phone item is refused so the plugin keeps its note.
+  expect(await page.evaluate(() => { obsInbox.ready = false; const a = LD_FROM_OBSIDIAN({ phone: { id: '6', what: 'task', text: 'Later' } }); obsInbox.ready = true; return a; })).toBe(false);
+  expect(errors, errors.join('\n')).toEqual([]);
+});

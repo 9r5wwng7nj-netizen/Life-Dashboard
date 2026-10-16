@@ -68,6 +68,8 @@ Statuses are read loosely and shown the same way everywhere: Idea (idea, planned
 
 In the Shortcuts app: **Dictate Text** → **URL Encode** (the dictated text) → **Open URLs** with `obsidian://ld-capture?vault=<your vault name>&kind=idea&text=` followed by the encoded text. Name the shortcut “Capture” and say “Hey Siri, Capture”. `kind` can be `idea`, `illustration`, `sermon-seed` or `quote`; add `&open=1` to open the new note.
 
+
+**To the dashboard:** `obsidian://ld-send?vault=<your vault name>&what=task&text=` (or `what=weight`, `what=prayer`) saves the item as a small note in the phone inbox folder (setting). On the Mac, the docked dashboard takes it in (tasks are dated from the day they were said) and the note goes to Obsidian's trash. Suggested Shortcut names: *Dashboard Task*, *Log Weight* (Ask for Input, number), *Prayer Request*.
 ## Saving web pages to the Library
 
 `web-clipper/` holds two templates for the Obsidian Web Clipper browser extension (Settings → Templates → Import). *Library article* saves the page's text into `Library/Articles` with `type: article`, the author, site, dates and link. *Library video* switches on by itself for YouTube and Vimeo pages and saves into `Library/Podcasts and Videos`. Change each template's folder to match the vault. Use the clipper for sources worth keeping and quoting; the dashboard's Add link is the read-later list.
