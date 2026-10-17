@@ -34,7 +34,7 @@ All personal data stays in the browser. **Backward compatibility is the #1 rule.
 **Fitness**: `workouts`, `routines`, `exercises` (library names), `exMeta` (per-exercise type and notes), `programs`, `activeWorkout`
 
 **Nutrition and body**
-- `foods` (saved foods; `basis` is `100g` or `serving`, `base` holds the nutrients)
+- `foods` (saved foods; `basis` is `100g` or `serving`, `base` holds the nutrients; optional `cupG` is what a cup weighs in grams, picked by the person when the food didn't say, which adds cup, tbsp and tsp units)
 - `meals` (saved meals)
 - `nutrition`: a `{ 'YYYY-MM-DD': { weight, entries[] } }` map
 - `nutPlan` (adaptive plan and check-ins), `measurements`, `photoMeta` (progress-photo index), `mfImport`

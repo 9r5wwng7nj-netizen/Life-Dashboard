@@ -190,3 +190,28 @@ test('a birthday ten days away becomes one gift task with the saved ideas', asyn
   expect(r).toEqual([[true, true, 'Gift ideas:\n- Hiking boots (about $120)', 'Sam']]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('in a workout on a phone, times type like a microwave, and the top bar and rest timer stay small', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const errors = await open(page);
+  expect(await page.evaluate(() => ['45', '90', '130', '0130', '1500', '10000', '1:30', '2 min', '90s', '1h', '', '0'].map(parseTimeEntry)))
+    .toEqual([45, 90, 90, 90, 900, 3600, 90, 120, 90, 3600, null, null]);
+  await page.evaluate(() => {
+    A.startEmpty(); const aw = Store.get('activeWorkout');
+    aw.exercises.push({ id: uid(), name: 'Plank', notes: '', sets: [blankSet()] }); Store.save('activeWorkout'); render();
+  });
+  const time = page.locator('#view input[data-f="duration"]').first();
+  await time.fill('130');
+  expect(await page.evaluate(() => Store.get('activeWorkout').exercises[0].sets[0].duration)).toBe(90);
+  await page.evaluate(() => render());
+  await expect(time).toHaveValue('1:30');
+  const bar = page.locator('[data-wctx="active"] > .card').first();
+  expect((await bar.boundingBox()).height).toBeLessThan(120);
+  await expect(bar.locator('[data-action="awDiscard"]:visible')).toHaveCount(1);
+  await page.evaluate(() => Timer.start(90));
+  const timer = page.locator('#timer > div');
+  expect((await timer.boundingBox()).height).toBeLessThan(60);
+  await expect(timer.locator('[data-action="timerStop"]')).toBeVisible();
+  await page.evaluate(() => { Timer.stop(); Timer.visible = false; Timer.draw(); });
+  expect(errors, errors.join('\n')).toEqual([]);
+});

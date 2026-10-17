@@ -39,3 +39,7 @@ npx wrangler@4.139.0 secret put GOOGLE_CLIENT_SECRET   # paste the secret from G
 ```
 
 Without it, `/google/ready` answers `{ "ready": false }` and the app keeps using one-hour sign-ins.
+
+## Food search
+
+`GET /food/search?q=…` searches Open Food Facts' newer search service (`search.openfoodfacts.org`), which doesn't allow browser calls, for the app's food log. It returns `{ products: [{ code, product_name, brands, serving_size, serving_quantity, nutriments }] }` with only the per-100 g nutrients the app reads, and keeps answers for a day. The app falls back to Open Food Facts' old search address if this fails.

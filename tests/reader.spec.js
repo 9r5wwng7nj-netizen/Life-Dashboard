@@ -96,3 +96,25 @@ test('the Worker trades Google codes and refresh tokens, adding the client secre
     expect([pre.status, pre.headers.get('Access-Control-Allow-Methods'), pre.headers.get('Access-Control-Allow-Headers')]).toEqual([204, 'GET, POST', 'Content-Type']);
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('the Worker searches Open Food Facts for the food log, passes back only what the app reads, and keeps answers', async () => {
+  const stored = new Map(), asked = [], realFetch = globalThis.fetch;
+  globalThis.caches = { default: { match: async req => stored.get(req.url)?.clone() || null, put: async (req, res) => { stored.set(req.url, res); } } };
+  globalThis.fetch = async url => { asked.push(String(url)); return new Response(JSON.stringify({ hits: [
+    { code: 5065000137014, product_name: 'Energy balls', brands: ['Nature Bites', 'Co'], serving_size: '1 ball (20 g)', serving_quantity: 20, nutriments: { 'energy-kcal_100g': 347, proteins_100g: 7.6, 'nova-group': 4, sugars_100g: '' }, ingredients_text: 'not passed on' },
+    { code: '1', product_name: '', brands: [] }] }), { status: 200 }); };
+  const later = [], ctx = { waitUntil: p => later.push(p) }, app = 'https://9r5wwng7nj-netizen.github.io';
+  const ask = (q, origin = app) => worker.fetch(new Request(`https://reader.example/food/search?q=${encodeURIComponent(q)}`, { headers: { Origin: origin } }), {}, ctx);
+  try {
+    expect((await ask('energy balls', 'https://evil.example')).status).toBe(403);
+    expect((await ask('   ')).status).toBe(400);
+    const res = await ask('Energy  Balls');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ products: [{ code: '5065000137014', product_name: 'Energy balls', brands: 'Nature Bites, Co', serving_size: '1 ball (20 g)', serving_quantity: 20, nutriments: { 'energy-kcal_100g': 347, proteins_100g: 7.6 } }] });
+    const sent = new URL(asked[0]);
+    expect([sent.origin + sent.pathname, sent.searchParams.get('q'), sent.searchParams.get('langs')]).toEqual(['https://search.openfoodfacts.org/search', 'Energy Balls', 'en']);
+    await Promise.all(later);
+    expect((await ask('energy balls')).headers.get('X-Reader-Cache')).toBe('hit');
+    expect(asked).toHaveLength(1);
+  } finally { globalThis.fetch = realFetch; delete globalThis.caches; }
+});

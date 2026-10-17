@@ -678,13 +678,13 @@ const Timer = {
     if (!this.visible) { el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
     const run = this.running(), rem = this.remaining();
-    el.innerHTML = `<div class="card w-64 p-3 shadow-2xl ${this.flash ? 'timer-flash border-brand-500' : ''}">
-      <div class="flex items-center justify-between"><span class="text-xs font-semibold uppercase tracking-wide muted flex items-center gap-1">${icon('timer', 'w-3.5 h-3.5')} Rest timer</span><button class="btn btn-ghost btn-sm" data-action="hideTimer" aria-label="Hide timer">${icon('x', 'w-3.5 h-3.5')}</button></div>
-      <div id="timer-text" class="text-4xl font-bold tabular-nums text-center my-1 ${this.flash ? 'text-brand-600' : ''}">${run ? fmtClock(rem) : (this.flash ? 'Go!' : '0:00')}</div>
-      <div class="h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden"><div id="timer-bar" class="h-full bg-brand-500 transition-all duration-300" style="width:${run && this.total ? rem / this.total * 100 : 0}%"></div></div>
-      <div class="flex gap-1 mt-3">${run
-        ? `<button class="btn btn-sm flex-1" data-action="timerAdd" data-v="-15">−15s</button><button class="btn btn-sm flex-1" data-action="timerAdd" data-v="15">+15s</button><button class="btn btn-sm btn-primary flex-1" data-action="timerStop">Skip</button>`
-        : [60, 90, 120, 180].map(s => `<button class="btn btn-sm flex-1" data-action="timerStart" data-v="${s}">${fmtClock(s)}</button>`).join('')}</div></div>`;
+    el.innerHTML = `<div class="card relative overflow-hidden p-1.5 pl-3 shadow-2xl flex items-center gap-1.5 ${this.flash ? 'timer-flash border-brand-500' : ''}" role="group" aria-label="Rest timer">
+      <div id="timer-text" class="text-xl font-bold tabular-nums min-w-[3.25rem] ${this.flash ? 'text-brand-600' : ''}">${run ? fmtClock(rem) : (this.flash ? 'Go!' : '0:00')}</div>
+      ${run
+        ? `<button class="btn btn-sm" data-action="timerAdd" data-v="-15" aria-label="15 seconds less">−15</button><button class="btn btn-sm" data-action="timerAdd" data-v="15" aria-label="15 seconds more">+15</button><button class="btn btn-sm btn-primary" data-action="timerStop">Skip</button>`
+        : [60, 90, 120, 180].map(s => `<button class="btn btn-sm" data-action="timerStart" data-v="${s}" aria-label="Rest ${fmtClock(s)}">${fmtClock(s)}</button>`).join('')}
+      <button class="btn btn-ghost btn-sm px-1.5" data-action="hideTimer" aria-label="Hide timer">${icon('x', 'w-3.5 h-3.5')}</button>
+      <div class="absolute inset-x-0 bottom-0 h-1 bg-slate-200 dark:bg-slate-800"><div id="timer-bar" class="h-full bg-brand-500 transition-all duration-300" style="width:${run && this.total ? rem / this.total * 100 : 0}%"></div></div></div>`;
     refreshIcons();
   }
 };
@@ -880,6 +880,18 @@ function parseClock(s) {
   if (!s.includes(':')) return Math.round(+s) || null;
   const p = s.split(':').map(x => +x || 0); return (p.length >= 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]) || null;
 }
+// A time typed into a set. The iPhone number pad has no ":", so plain digits read like a microwave's:
+// 45 is 0:45, 90 is 1:30, 130 is 1:30, 1500 is 15:00 and 10000 is 1:00:00. "1:30", "90s", "2 min" and "1h" work too.
+function parseTimeEntry(v) {
+  const raw = String(v ?? '').trim().toLowerCase(); if (!raw) return null;
+  const u = raw.match(/^(\d+(?:\.\d+)?)\s*(h|hrs?|hours?|m|mins?|minutes?|s|secs?|seconds?)$/);
+  if (u) return Math.round(+u[1] * (u[2][0] === 'h' ? 3600 : u[2][0] === 'm' ? 60 : 1)) || null;
+  if (raw.includes(':')) return parseClock(raw);
+  const d = raw.replace(/\D/g, '').replace(/^0+(?=\d)/, ''); if (!d) return null;
+  if (d.length <= 2) return +d || null;
+  const sec = +d.slice(-2), rest = d.slice(0, -2);
+  return (rest.length <= 2 ? +rest * 60 + sec : +rest.slice(0, -2) * 3600 + +rest.slice(-2) * 60 + sec) || null;
+}
 const fmtPace = kmPerSec => kmPerSec ? `${fmtClock((S.unit === 'lbs' ? 1.609344 : 1) / kmPerSec)} /${distUnit()}` : '–';
 
 const W = () => Store.get('workouts');
@@ -1070,14 +1082,16 @@ function fitActive(aw) {
   const bwNow = bodyweightOn(ymd()); aw.exercises.forEach(e => { const info = exInfo(e.name), t = info.type; e.sets.forEach(s => { if (s.done) { done++; if (s.type !== 'warmup') vol += setVolume(s, t, info.countBW ? bwNow : null, info); } }); });
   const g = supersetGroups(aw.exercises);
   return `<div data-wctx="active">
-  <div class="card mb-4 sticky top-0 z-10"><div class="flex flex-wrap items-center gap-3">
-    <input class="input text-base font-semibold flex-1 min-w-[12rem]" value="${esc(aw.name)}" data-input="awField" data-f="name" aria-label="Workout name">
-    <div class="flex items-center gap-4 text-sm"><div><div class="text-xs muted">Duration</div><div id="elapsed" class="font-semibold tabular-nums">0:00</div></div><div><div class="text-xs muted">Volume</div><div class="font-semibold tabular-nums">${fmtNum(toUnit(vol))} ${S.unit}</div></div><div><div class="text-xs muted">Sets</div><div class="font-semibold">${done}</div></div></div>
-    <div class="flex gap-2 ml-auto"><button class="btn btn-danger" data-action="awDiscard">${icon('trash-2')} Discard</button><button class="btn btn-primary" data-action="awFinish">${icon('check')} Finish</button></div></div></div>
+  <div class="card p-2.5 sm:p-4 mb-4 sticky top-0 z-10"><div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+    <input class="input text-base font-semibold flex-1 min-w-0 sm:min-w-[12rem]" value="${esc(aw.name)}" data-input="awField" data-f="name" aria-label="Workout name">
+    <button class="btn btn-primary sm:order-last" data-action="awFinish">${icon('check')} Finish</button>
+    <div class="w-full sm:w-auto flex items-center gap-x-3 sm:gap-4 text-sm tabular-nums"><span><span class="muted sm:block sm:text-xs">Time </span><span id="elapsed" class="font-semibold">0:00</span></span><span><span class="muted sm:block sm:text-xs">Volume </span><span class="font-semibold">${fmtNum(toUnit(vol))} ${S.unit}</span></span><span><span class="muted sm:block sm:text-xs">Sets </span><span class="font-semibold">${done}</span></span>
+      <button class="btn btn-sm btn-ghost btn-danger ml-auto sm:hidden" data-action="awDiscard" aria-label="Discard workout">${icon('trash-2', 'w-4 h-4')}</button></div>
+    <button class="btn btn-danger hidden sm:inline-flex sm:ml-auto" data-action="awDiscard">${icon('trash-2')} Discard</button></div></div>
   <textarea class="input mb-4" rows="2" placeholder="Workout notes…" data-input="awField" data-f="notes">${esc(aw.notes)}</textarea>
   <div class="space-y-4">${aw.exercises.map((ex, i) => exerciseCard(ex, i, aw, 'active', g[i])).join('')}</div>
   <form data-submit="awAddExercise" class="card mt-4 flex gap-2"><input name="name" list="ex-list" class="input" placeholder="Add exercise (type to search)…" autocomplete="off" required><button class="btn btn-primary">${icon('plus')} Add</button></form>
-  <p class="text-xs muted mt-2">Tip: tap a “Previous” value to copy it; tap ${icon('link', 'w-3 h-3 inline')} to superset an exercise with the next one; tap an exercise name to set its type and muscles.</p>
+  <p class="text-xs muted mt-2">Tip: for a time, type 130 for 1:30 or 45 for 0:45; tap a “Previous” value to copy it; tap ${icon('link', 'w-3 h-3 inline')} to superset an exercise with the next one; tap an exercise name to set its type and muscles.</p>
   ${exDatalist('ex-list')}</div>`;
 }
 function fitEditor(w) {
@@ -1406,7 +1420,7 @@ const A_FIT = {
   },
   awField: el => { wObj(el)[el.dataset.f] = el.value; wSave(el); },
   awExNote: el => { wObj(el).exercises[+el.dataset.i].notes = el.value; wSave(el); },
-  awSet: el => { const s = wObj(el).exercises[+el.dataset.i].sets[+el.dataset.j], f = el.dataset.f; if (f === 'duration') s.duration = parseClock(el.value); else { const v = num(el.value); s[f] = f === 'weight' ? fromUnit(v) : f === 'distance' ? distFrom(v) : v; } wSave(el); },
+  awSet: el => { const s = wObj(el).exercises[+el.dataset.i].sets[+el.dataset.j], f = el.dataset.f; if (f === 'duration') s.duration = parseTimeEntry(el.value); else { const v = num(el.value); s[f] = f === 'weight' ? fromUnit(v) : f === 'distance' ? distFrom(v) : v; } wSave(el); },
   awRest: el => { wObj(el).exercises[+el.dataset.i].rest = +el.value; wSave(el); },
   // history
   histMore: () => { ui.histLimit += 25; render(); },
@@ -1618,6 +1632,24 @@ function autoCheckin() {
 }
 
 /* ---------- Foods (custom + Open Food Facts + USDA) ---------- */
+// Cups and spoons. A cup's weight comes from the food's own measures ("1/2 cup (40 g)"), the person's choice
+// for this food (cupG), or the recipe table's weight for that exact ingredient (ING_DB: oats, flour, rice…).
+const VOL_ML = { cup: 236.6, tbsp: 14.79, tsp: 4.93, floz: 29.57, ml: 1 };
+function volumeMl(label) {
+  const m = String(label || '').toLowerCase().match(/(\d+(?:\.\d+)?(?:\s*\/\s*\d+)?|½|¼|¾|⅓|⅔)\s*(cups?\b|c\b|tbsps?\b|tablespoons?\b|tsps?\b|teaspoons?\b|fl\.?\s*oz\b|ml\b|milliliters?\b)/);
+  if (!m) return null;
+  const n = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3 }[m[1]] ?? (m[1].includes('/') ? m[1].split('/').map(Number).reduce((a, b) => a / b) : +m[1]);
+  const u = m[2], ml = /^c/.test(u) ? VOL_ML.cup : /^(tbsp|tablespoon)/.test(u) ? VOL_ML.tbsp : /^(tsp|teaspoon)/.test(u) ? VOL_ML.tsp : /^fl/.test(u) ? VOL_ML.floz : 1;
+  return n > 0 && isFinite(n) ? n * ml : null;
+}
+function cupGrams(f) {
+  if (num(f.cupG) > 0) return num(f.cupG);
+  for (const [label, g] of [[f.servingLabel, num(f.servingG)], ...(f.extra || []).map(x => [x.label, x.g])]) { const ml = volumeMl(label); if (ml && g > 0) return round(g / ml * VOL_ML.cup, 0); }
+  const n = ingNorm(f.name || ''); if (!n) return null;
+  const hit = ING_IDX.find(([alias]) => alias === n); return hit && hit[1].cup > 0 ? hit[1].cup : null;
+}
+// What a cup of it is like, for a food that doesn't say: rough weights the person can picture.
+const CUP_LIKE = [[240, 'Liquid or creamy: milk, yogurt, soup'], [185, 'Cooked grains or beans: rice, pasta'], [150, 'Chopped fruit or vegetables'], [140, 'Nuts, chips or dried fruit'], [125, 'Flour, powder or shredded cheese'], [80, 'Light and dry: oats, cereal']];
 function unitsOf(f) {
   const g = num(f.servingG), u = [];
   if (f.basis === '100g') {
@@ -1628,6 +1660,12 @@ function unitsOf(f) {
     u.push({ label: f.servingLabel || 'serving', factor: 1 });
     if (g) { (f.extra || []).forEach(x => x.g > 0 && u.push({ label: `${x.label} · ${fmtNum(x.g)} g`, factor: x.g / g })); u.push({ label: 'g', factor: 1 / g }, { label: 'oz', factor: 28.3495 / g }); }
   }
+  // Added last, so the units a saved entry already uses keep their places.
+  const per = f.basis === '100g' ? 100 : g, cg = per ? cupGrams(f) : null;
+  if (cg) [['cup', VOL_ML.cup], ['tbsp', VOL_ML.tbsp], ['tsp', VOL_ML.tsp]].forEach(([l, ml]) => {
+    if (u.some(x => Math.abs((volumeMl(x.label) || 0) - ml) < 0.5)) return; // the food already has exactly this measure
+    const gr = cg * ml / VOL_ML.cup; u.push({ label: `${l} · ${fmtNum(gr, gr < 10 ? 1 : 0)} g`, factor: gr / per });
+  });
   return u;
 }
 const defaultQty = u => u.label === 'g' ? 100 : u.label === 'oz' ? 3 : 1;
@@ -1652,15 +1690,19 @@ function fdcToFood(f) {
   const base = { cal: by['208'] ?? by['957'] ?? by['958'], p: by['203'], c: by['205'], f: by['204'], fiber: by['291'], sugar: by['269'] ?? by['2000'], sodium: by['307'], satfat: by['606'] };
   if (base.cal == null) base.cal = (base.p || 0) * 4 + (base.c || 0) * 4 + (base.f || 0) * 9;
   const extra = (f.foodMeasures || []).filter(m => m.gramWeight > 0).slice(0, 6).map(m => ({ label: String(m.disseminationText || m.measureUnitName || 'portion').replace(/\s+/g, ' ').trim(), g: round(m.gramWeight, 1) }));
-  const desc = String(f.description || 'Food'); return { id: 'fdc:' + f.fdcId, name: desc.charAt(0) + desc.slice(1).toLowerCase(), brand: 'USDA', source: 'usda', basis: '100g', servingLabel: '', servingG: null, extra, base: roundBase(base) };
+  // Branded foods name a serving ("2 balls", 40 g); the nutrients are still per 100 g.
+  const sg = /^(g|grm|ml|mlt)$/i.test(f.servingSizeUnit || '') && +f.servingSize > 0 ? round(+f.servingSize, 1) : null;
+  const desc = String(f.description || 'Food'); return { id: 'fdc:' + f.fdcId, name: desc.charAt(0) + desc.slice(1).toLowerCase(), brand: f.dataType === 'Branded' ? String(f.brandName || f.brandOwner || 'USDA') : 'USDA', source: 'usda', basis: '100g', servingLabel: sg ? String(f.householdServingFullText || '1 serving').trim() : '', servingG: sg, extra, base: roundBase(base) };
 }
 async function searchOFF(q) {
+  // Open Food Facts' newer search answers through the link reader (it doesn't allow browser calls); its old address is the fallback.
+  try { const { response: r, data: j } = await fetchServiceJSON(`${READER.url}/food/search?q=${encodeURIComponent(q)}`); if (r.ok && j && Array.isArray(j.products)) return j.products.map(offToFood).filter(Boolean).slice(0, 15); } catch (e) { }
   const { response: r, data: j } = await fetchServiceJSON(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=20&sort_by=unique_scans_n&fields=code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity`);
   if (!r.ok) throw new Error('Open Food Facts error ' + r.status);
   return (j.products || []).map(offToFood).filter(Boolean).slice(0, 15);
 }
 async function searchUSDA(q) {
-  const { response: r, data: j } = await fetchServiceJSON(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(S.fdcKey || 'DEMO_KEY')}&query=${encodeURIComponent(q)}&dataType=Foundation,SR%20Legacy&pageSize=12`);
+  const { response: r, data: j } = await fetchServiceJSON(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(S.fdcKey || 'DEMO_KEY')}&query=${encodeURIComponent(q)}&dataType=${encodeURIComponent('Foundation,SR Legacy,Survey (FNDDS),Branded')}&pageSize=15`);
   if (r.status === 429) throw new Error('USDA search limit reached for now — add your free USDA key in Settings for higher limits.');
   if (!r.ok) throw new Error('USDA error ' + r.status);
   return (j.foods || []).map(fdcToFood);
@@ -1834,11 +1876,15 @@ function lfResultsHtml() {
   const L = ui.lf, q = L.q.trim().toLowerCase(), foods = Store.get('foods');
   const local = (q ? foods.filter(f => (f.name + ' ' + (f.brand || '')).toLowerCase().includes(q)).sort((a, b) => (b.uses || 0) - (a.uses || 0)) : foods.filter(f => f.lastUsed).sort((a, b) => b.lastUsed.localeCompare(a.lastUsed))).slice(0, 15);
   let h = `<div class="label mt-3">${q ? 'My foods' : 'Recent foods'}</div>` + (local.length ? local.map(f => foodRow(f, 'local')).join('') : `<p class="text-sm muted px-1">${q ? 'No saved foods match — press Enter or “Search online”.' : 'Search above. Foods you log are saved here for instant, offline re-use.'}</p>`);
-  for (const [src, label] of [['usda', 'Whole & generic foods · USDA'], ['off', 'Branded & packaged · Open Food Facts']]) {
+  const recs = q ? Store.get('recipes').filter(r => r.cal && String(r.title || '').toLowerCase().includes(q)).slice(0, 8) : [];
+  if (recs.length) h += `<div class="label mt-4">My recipes</div>` + recs.map(r => `<button type="button" class="w-full text-left flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-100 dark:hover:bg-slate-800" data-action="lfRecipe" data-id="${r.id}"><span class="flex-1 min-w-0"><span class="block text-sm font-medium truncate">${esc(r.title)}</span><span class="block text-xs muted">1 serving · ${fmtNum(r.cal)} kcal · P${fmtNum(r.p || 0)}</span></span>${icon('plus', 'w-4 h-4 muted shrink-0')}</button>`).join('');
+  for (const [src, label] of [['usda', 'USDA FoodData Central'], ['off', 'Open Food Facts']]) {
     const r = L.online[src];
     if (L.loading[src]) h += `<div class="label mt-4">${label}</div><p class="text-sm muted px-1">${icon('loader-circle', 'w-4 h-4 inline animate-spin')} Searching…</p>`;
     else if (r) h += `<div class="label mt-4">${label}</div>` + (r.error ? `<p class="text-sm text-rose-600 px-1">${esc(r.error)}</p>` : r.items.length ? r.items.map((f, i) => foodRow(f, src, i)).join('') : '<p class="text-sm muted px-1">No results.</p>');
   }
+  // Homemade things (energy balls, a family casserole) are rarely in a database: build them from their ingredients once.
+  if (q && (L.online.usda || L.online.off) && !L.loading.usda && !L.loading.off) h += `<div class="mt-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-3 text-sm"><p class="muted">Homemade? Make “${esc(L.q.trim())}” from its ingredients once; the nutrition is worked out for you and it shows up here from then on.</p><button type="button" class="btn btn-sm mt-2" data-action="lfMakeRecipe">${icon('chef-hat', 'w-3.5 h-3.5')} Make it from its ingredients</button></div>`;
   return h;
 }
 const lfDrawResults = () => { const el = $('#lf-results'); if (el) { el.innerHTML = lfResultsHtml(); refreshIcons(); } };
@@ -1853,6 +1899,10 @@ function lfAmountHtml() {
     <div><div class="text-lg font-semibold leading-tight">${esc(f.name)}</div><div class="text-sm muted">${f.brand ? esc(f.brand) + ' · ' : ''}${{ off: 'Open Food Facts', usda: 'USDA', custom: 'My food' }[f.source] || 'My food'}${f.basis === '100g' ? ` · ${fmtNum(f.base.cal)} kcal per 100 g` : ''}</div></div>
     <div class="grid grid-cols-3 gap-2"><div><label class="label">Amount</label><input id="lf-qty" type="number" step="any" min="0" inputmode="decimal" class="input text-lg font-semibold" value="${L.qty}" data-input="lfQty"></div>
       <div class="col-span-2"><label class="label">Unit</label><select class="input text-base" data-change="lfUnit">${us.map((u, i) => `<option value="${i}" ${i === L.unitIdx ? 'selected' : ''}>${esc(u.label)}</option>`).join('')}</select></div></div>
+    ${!us.some(u => /\bcups?\b/i.test(u.label)) && (f.basis === '100g' || num(f.servingG)) ? `<details class="rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-sm"><summary class="cursor-pointer font-medium">Measure in cups instead</summary>
+      <p class="muted text-xs mt-1">This food doesn’t say what a cup weighs. Pick what it’s like and cups, tablespoons and teaspoons appear; it’s an estimate, remembered for this food.</p>
+      <div class="grid gap-1.5 mt-2">${CUP_LIKE.map(([g, l]) => `<button type="button" class="btn btn-sm justify-between text-left h-auto" data-action="lfCupSet" data-g="${g}"><span class="min-w-0 whitespace-normal">${esc(l)}</span><span class="muted shrink-0">${g} g</span></button>`).join('')}</div>
+      <div class="flex items-center gap-2 mt-2"><label class="text-xs muted shrink-0" for="lf-cupg">Or 1 cup weighs</label><input id="lf-cupg" type="number" inputmode="decimal" min="1" class="input py-1" placeholder="grams"><button type="button" class="btn btn-sm" data-action="lfCupSet">Use</button></div></details>` : ''}
     <div><div class="label">Meal</div><div class="flex flex-wrap gap-1.5">${MEALS.map(([k, l]) => `<button type="button" class="chip ${L.meal === k ? 'chip-on' : ''}" data-action="lfMeal" data-v="${k}">${l}</button>`).join('')}</div></div>
     <div id="lf-preview">${lfPreview(n)}</div>
     <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-primary" data-action="lfAdd">${icon(L.editId ? 'save' : 'plus')} ${L.editId ? 'Save changes' : 'Add to ' + mealLabel(L.meal)}</button><button type="button" class="btn" data-action="lfEditFood">${icon('pencil', 'w-3.5 h-3.5')} Edit food</button></div>`;
@@ -2236,6 +2286,16 @@ const A_NUT = {
   lfPick: el => { const L = ui.lf, src = el.dataset.src; const f = src === 'local' ? Store.get('foods').find(x => x.id === el.dataset.id) : (L.online[src] || { items: [] }).items[+el.dataset.i]; if (f) lfSelect(f); },
   lfBack: () => { ui.lf.sel = null; ui.lf.editId = null; lfDraw(); },
   lfQty: el => { const L = ui.lf; L.qty = num(el.value) || 0; const pv = $('#lf-preview'); if (pv) pv.innerHTML = lfPreview(foodNutr(L.sel, L.unitIdx, L.qty)); },
+  lfCupSet: el => {
+    const L = ui.lf, g = num(el.dataset.g) || num($('#lf-cupg')?.value); if (!L || !L.sel || !(g > 0)) return toast('Enter what a cup weighs in grams', 'error');
+    L.sel.cupG = round(g, 0); const saved = Store.get('foods').find(x => x.id === L.sel.id); if (saved) { saved.cupG = L.sel.cupG; Store.save('foods'); }
+    const i = unitsOf(L.sel).findIndex(u => /^cup\b/.test(u.label)); if (i >= 0) { L.unitIdx = i; L.qty = 1; } lfDraw();
+  },
+  lfMakeRecipe: () => {
+    const L = ui.lf, title = (L.q || '').trim(); ui.lfReturn = { date: L.date, meal: L.meal, at: Date.now() };
+    recEditor(null); const t = $('#modal input[name="title"]'); if (t) t.value = title.charAt(0).toUpperCase() + title.slice(1);
+    $('#modal textarea[name="ingredients"]')?.focus();
+  },
   lfUnit: el => { const L = ui.lf, us = unitsOf(L.sel), o = us[L.unitIdx], n = us[+el.value]; L.qty = round(L.qty * o.factor / n.factor, n.label === 'g' ? 0 : 2) || defaultQty(n); L.unitIdx = +el.value; lfDraw(); },
   lfMeal: el => { ui.lf.meal = el.dataset.v; lfDraw(); },
   lfAdd: () => {
@@ -6434,8 +6494,12 @@ const A_RECIPES = {
     if (v.img) r.img = v.img;
     let o = v.id && rs.find(x => x.id === v.id); if (o) Object.assign(o, r); else { o = { id: uid(), created: new Date().toISOString(), ...r }; rs.push(o); }
     if (v.photoDel === '1' && o.photo) { await Photos.del(o.photo); o.photo = null; }
+    // Started from the food log (Make it from its ingredients): work out its nutrition and go back to logging it.
+    const back = !v.id && ui.lfReturn && Date.now() - ui.lfReturn.at < 30 * 60e3 ? ui.lfReturn : null; ui.lfReturn = null;
+    if (back && !o.cal && o.ingredients) { const m = recipeMacros(o); if (m.per && m.per.cal > 0) Object.assign(o, m.per, { macroCalc: ymd() }); }
     if (file && file.size && Photos.ok()) { try { const b = await resizeImage(file, 1200), id = `rp_${uid()}`; await Photos.put(id, b); if (o.photo) await Photos.del(o.photo); o.photo = id; } catch (e) { console.warn(e); toast('Couldn’t read that photo', 'error'); } }
     recSaveNow(o); Modal.close(); toast('Recipe saved'); render();
+    if (back) { lfOpen(back.meal, { date: back.date, q: o.title }); if (!o.cal) toast('Saved. Add its calories in Recipes & Meals to log it.', 'error'); }
   },
   recFav: el => { const r = recFind(el.dataset.id); if (!r) return; r.fav = !r.fav; recSaveNow(r); render(); recViewModal(r); },
   recRate: el => { const r = recFind(el.dataset.id); if (!r) return; const v = +el.dataset.v; r.rating = r.rating === v ? null : v; recSaveNow(r); render(); recViewModal(r); },
@@ -7547,6 +7611,12 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-17', title: 'Fixes from your list: workouts and food', slides: [
+    { title: 'Typing a time', body: '<p>The iPhone number pad has no “:” key, so in a workout, type a time the way a microwave reads it: <strong>130</strong> is 1:30, <strong>45</strong> is 0:45 and <strong>1500</strong> is 15:00. “1:30”, “90s” and “2 min” still work.</p>', go: ['fitness', 'fitTab', 'workout', 'Open Workouts'] },
+    { title: 'More room while you lift', body: '<p>On a phone, the bar at the top of a workout now takes two short lines (name and Finish; time, volume and sets), and the rest timer is a slim strip instead of a big card.</p>' },
+    { title: 'Measure in cups', body: '<p>When logging food, cups, tablespoons and teaspoons now appear whenever we know what a cup of it weighs: from the food’s own serving, from common ingredients (oats, rice, peanut butter…), or from you. For anything else, tap <strong>Measure in cups instead</strong> and pick what it’s like (milk, cooked rice, chopped fruit…); it’s remembered for that food.</p>', go: ['nutrition', 'nutTab', 'today', 'Open Nutrition'] },
+    { title: 'Better food search', body: '<p>Search reaches more: Open Food Facts works again, USDA now includes branded foods and everyday dishes, and your own recipes show up too. For something homemade like energy balls, tap <strong>Make it from its ingredients</strong>: type what goes in, the nutrition is worked out, and it’s ready to log.</p>' }
+  ] },
   { id: '2026-10-16u', title: 'Send to Apple Reminders', slides: [
     { title: 'Alerts that always arrive', body: '<p>A home-screen web app can’t remind you while it’s closed, but Apple Reminders can. In Tasks → Today, <strong>Send to Reminders</strong> hands this week’s tasks that have a time to Reminders, each with an alert. In Recipes &amp; Meals → Grocery list, <strong>Send to Apple Reminders</strong> puts the list in Reminders, so anyone you share that list with sees it at the store.</p><p>Both use a Shortcut you add once on your iPhone.</p>' }
   ] },
