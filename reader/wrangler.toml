@@ -7,3 +7,9 @@ workers_dev = true
 # npx wrangler secret put GOOGLE_CLIENT_SECRET
 [vars]
 GOOGLE_CLIENT_ID = "868900504275-6ujh7b2ckaub1q54l1k0gopndfu4ciot.apps.googleusercontent.com"
+
+# The Claude connector (connector.js) keeps each connection's Google refresh token here, sealed with the
+# Worker secret CONNECTOR_KEY: npx wrangler secret put CONNECTOR_KEY
+[[kv_namespaces]]
+binding = "CONNECTOR_KV"
+id = "d3cd266e23f44036a27c69fecf1f63b9"
