@@ -35,6 +35,29 @@ async function google(request, env, origin, path) {
   return reply({ access_token: d.access_token, expires_in: d.expires_in, refresh_token: d.refresh_token || null }, 200, origin, nostore);
 }
 
+// Food search for the app's food log. Open Food Facts' newer search service answers well but doesn't
+// allow browser calls, and its old one is often down, so the app asks here. Only the fields the app
+// reads go back, and answers are kept for a day.
+const OFF_SEARCH = 'https://search.openfoodfacts.org/search', OFF_FIELDS = 'code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity';
+const OFF_NUTR = ['energy-kcal_100g', 'energy_100g', 'proteins_100g', 'carbohydrates_100g', 'fat_100g', 'fiber_100g', 'sugars_100g', 'sodium_100g', 'salt_100g', 'saturated-fat_100g'];
+async function foodSearch(request, origin, ctx) {
+  const q = (new URL(request.url).searchParams.get('q') || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!q) return reply({ error: 'Search for a food' }, 400, origin);
+  const key = new Request(`https://reader.cache/food?q=${encodeURIComponent(q.toLowerCase())}`), cache = caches.default, hit = await cache.match(key);
+  if (hit) return reply(await hit.json(), 200, origin, { 'X-Reader-Cache': 'hit' });
+  let r;
+  try { r = await fetch(`${OFF_SEARCH}?${new URLSearchParams({ q, page_size: '24', fields: OFF_FIELDS, langs: 'en' })}`, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) }); }
+  catch (e) { return reply({ error: 'Open Food Facts took too long to answer' }, 504, origin); }
+  if (!r.ok) return reply({ error: `Open Food Facts answered ${r.status}` }, 502, origin);
+  const d = await r.json().catch(() => ({}));
+  const products = (d.hits || []).map(h => {
+    const n = h.nutriments || {}, nutriments = {}; OFF_NUTR.forEach(k => { if (n[k] != null && n[k] !== '') nutriments[k] = n[k]; });
+    return { code: String(h.code || ''), product_name: String(h.product_name || h.product_name_en || ''), brands: Array.isArray(h.brands) ? h.brands.join(', ') : String(h.brands || ''), serving_size: String(h.serving_size || ''), serving_quantity: h.serving_quantity ?? null, nutriments };
+  }).filter(p => p.product_name);
+  ctx.waitUntil(cache.put(key, new Response(JSON.stringify({ products }), { headers: { 'Cache-Control': 'max-age=86400' } })));
+  return reply({ products }, 200, origin);
+}
+
 async function fetchText(url, signal) {
   const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'en-US,en;q=0.8' }, redirect: 'follow', signal });
   if (!res.ok) throw Object.assign(new Error(`The site answered ${res.status}`), { status: 502 });
@@ -53,6 +76,7 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400', 'Vary': 'Origin' } });
     const path = new URL(request.url).pathname;
     if (path.startsWith('/google/')) return google(request, env, origin, path);
+    if (path === '/food/search') return request.method === 'GET' ? foodSearch(request, origin, ctx) : reply({ error: 'Use GET' }, 405, origin);
     if (request.method !== 'GET') return reply({ error: 'Use GET' }, 405, origin);
     const target = allowedTarget(new URL(request.url).searchParams.get('url') || '');
     if (!target) return reply({ error: 'That link cannot be read' }, 400, origin);
