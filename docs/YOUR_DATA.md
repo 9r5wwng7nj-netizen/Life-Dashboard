@@ -60,3 +60,12 @@ Sync keeps one copy of your records in a hidden app folder in your Google Drive.
 - If a sync would remove more than 10 records at once, it pauses and asks you first. Choose OK only if you removed them on purpose. (Clearing the grocery list never asks.)
 - Each day, the first sync also keeps a dated copy of your records in the same private folder: one for each of the last 7 days, then one a week for 8 weeks. **Settings & Sync → Restore from a copy** opens one. *Add back what's missing* returns records deleted since that day and changes nothing else; *Replace everything* puts the device back to that day.
 - Keep exporting backups now and then. The daily copies don't include photos (photos are kept in Drive separately and never removed from there), and sync copies mistakes to every device as faithfully as it copies everything else.
+
+### Claude
+
+If you use Claude, you can connect it to your dashboard (Settings & Sync shows the address to add as a custom connector in Claude). You sign in with your Google account, and Claude can only reach the dashboard that account syncs.
+
+- Once connected, each sync also keeps a copy of your records for Claude in the same private Drive folder: tasks and projects, food, weight, workouts, Bible reading, prayer requests, journal, Scripture notes, quotes, media notes, family details, meals, groceries and saved foods. Photos and API keys are not included.
+- Claude can add tasks, food, weigh-ins, prayer requests, journal entries and grocery items, and tick off tasks. These wait in the same folder until the next sync, which adds them like anything you type. Claude can't change or delete anything else.
+- What Claude reads becomes part of your conversation in Claude, so Claude's own privacy settings apply to it.
+- **Settings & Sync → Stop sharing with Claude** removes Claude's copy. Remove the connector in Claude's settings too, or using it shares again. Disconnecting in Claude also removes the copy.

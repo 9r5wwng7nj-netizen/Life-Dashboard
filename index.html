@@ -7614,6 +7614,10 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-17b', title: 'Ask Claude about your dashboard', slides: [
+    { title: 'Your dashboard, in Claude', body: '<p>If you use Claude, you can connect it to your dashboard. Ask “What’s on my plate this week?”, “How has my protein been this month?” or “What have I been praying about?”, or say “Log a turkey sandwich for lunch” or “Add a task to call the plumber tomorrow.”</p><p>Claude reads a copy of your records that the dashboard keeps in your private Google Drive folder. What it adds arrives the next time the dashboard syncs. It can tick off tasks but can’t change or delete anything else.</p>' },
+    { title: 'Connecting', body: '<p>Google Drive sync needs to be on. In <strong>Settings &amp; Sync</strong>, copy the connector address. In Claude, add a custom connector with it, then sign in with the same Google account. <strong>Stop sharing with Claude</strong> in Settings &amp; Sync removes Claude’s copy at any time.</p>' }
+  ] },
   { id: '2026-10-17', title: 'Fixes from your list: workouts and food', slides: [
     { title: 'Typing a time', body: '<p>The iPhone number pad has no “:” key, so in a workout, type a time the way a microwave reads it: <strong>130</strong> is 1:30, <strong>45</strong> is 0:45 and <strong>1500</strong> is 15:00. “1:30”, “90s” and “2 min” still work.</p>', go: ['fitness', 'fitTab', 'workout', 'Open Workouts'] },
     { title: 'More room while you lift', body: '<p>On a phone, the bar at the top of a workout now takes two short lines (name and Finish; time, volume and sets), and the rest timer is a slim strip instead of a big card.</p>' },
@@ -8030,6 +8034,152 @@ async function driveSave(id, snap, name = DRIVE.file) {
     body: `--${mark}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${mark}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${mark}--` })).json();
 }
 
+// --- Claude connector (reader/connector.js). Connecting Claude leaves claude-connected.json in the app folder.
+// From then on each sync also keeps a copy of the records for Claude (claudeCopy: claude-now.json for what is
+// current, and claude-{days,workouts,notes}-YYYY.jsonl with one line per day, workout or record), and takes in
+// what Claude added (claude-inbox-<id>.json), checked like anything typed and then deleted from Drive.
+const CLAUDE_MARK = 'claude-connected.json', CLAUDE_INBOX = 'claude-inbox-', CLAUDE_FILE = /^claude-(now\.json|(days|workouts|notes)-\d{4}\.jsonl)$/;
+const claudeMeta = () => { try { return JSON.parse(localStorage.getItem('ld.claude') || '{}'); } catch (e) { return {}; } };
+const setClaudeMeta = patch => { try { localStorage.setItem('ld.claude', JSON.stringify({ ...claudeMeta(), ...patch })); } catch (e) { } };
+const claudeHash = async s => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].slice(0, 12).map(b => b.toString(16).padStart(2, '0')).join('');
+// The copy Claude reads, as file name → contents. Weights and volumes are in the person's unit.
+function claudeCopy() {
+  const t = ymd(), out = new Map(), un = kg => kg == null ? undefined : round(toUnit(kg), 1);
+  const lean = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length)));
+  const dateOf = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? ymd(d) : ''; }, projName = id => (projFind(id) || {}).name;
+  const wk = weekKeyT(), b3 = new Set((tkit().weeks[wk] || {}).big3 || []), wr = tkit().weeks[wk] || {};
+  const tasks = TK().filter(tOpen).sort(sortT).map(x => lean({ id: x.id, title: x.title, due: x.due, time: x.time, area: areaOf(x), project: x.project && projName(x.project), person: x.person, priority: x.priority !== 'med' ? x.priority : undefined, doing: x.status === 'doing' || undefined, someday: x.someday || undefined, waiting: x.waiting || undefined, since: x.waiting ? x.waitSince : undefined, repeat: x.repeat ? repeatLabel(x.repeat, x.due) : undefined, notes: x.notes ? String(x.notes).slice(0, 600) : undefined, subtasks: (x.subtasks || []).map(s => (s.done ? '✓ ' : '') + s.text), big3: b3.has(x.id) || undefined, inbox: isInbox(x) || undefined }));
+  const done = TK().filter(x => !tOpen(x) && (doneOn(x) || '') >= addDays(t, -30)).sort((a, b) => (doneOn(b) || '').localeCompare(doneOn(a) || '')).map(x => lean({ id: x.id, title: x.title, done: doneOn(x), area: areaOf(x), project: x.project && projName(x.project) }));
+  const projects = Store.get('projects').filter(p => p.status !== 'done').map(p => lean({ id: p.id, name: p.name, area: p.area, due: p.due, status: p.status, open: TK().filter(x => tOpen(x) && x.project === p.id).length, notes: p.notes ? String(p.notes).slice(0, 400) : undefined }));
+  const blocks = {}; for (let i = 0; i < 7; i++) { const d = addDays(t, i), bs = blocksOn(d); if (bs.length) blocks[d] = bs.map(b => ({ start: b.start, mins: +b.mins || 30, title: blockLabel(b) })); }
+  // One line a day: totals, that weekday's targets (recent days only; older ones would show today's plan), weight and items.
+  const recent = addDays(t, -120), days = Object.entries(N()).filter(([d, v]) => /^\d{4}-\d{2}-\d{2}$/.test(d) && v && ((v.entries || []).length || v.weight != null)).sort((a, b) => a[0].localeCompare(b[0])).map(([d, v]) => {
+    const tot = dayTotals(d), T = d >= recent ? targetsFor(d) : null;
+    return lean({ d, cal: round(tot.cal, 0), p: round(tot.p), c: round(tot.c), f: round(tot.f), fib: tot.fiber ? round(tot.fiber) : undefined, tc: T ? T.cal : undefined, tp: T ? T.p : undefined, w: un(v.weight), e: (v.entries || []).map(e => [mealOf(e), String(e.name || 'Quick add'), e.qty != null ? amtLabel(e.qty, e.unit) : '', round(+e.cal || 0, 0), round(+e.p || 0), round(+e.c || 0), round(+e.f || 0)]) });
+  });
+  const tr = trendSeries(), last = tr.length ? tr[tr.length - 1].t : null;
+  const change = n => { const a = trendAt(tr, addDays(t, -n)); if (last == null || a == null) return undefined; const ch = toUnit(last) - toUnit(a); return `${ch > 0 ? '+' : ch < 0 ? '−' : '±'}${fmtNum(Math.abs(ch), 1)} ${S.unit}`; };
+  const workouts = W().filter(w => w && w.start && !isNaN(new Date(w.start))).sort((a, b) => a.start.localeCompare(b.start)).map(w => {
+    const mins = w.end ? Math.round((new Date(w.end) - new Date(w.start)) / 60000) : 0;
+    return lean({ d: wDate(w), id: w.id, name: w.name || 'Workout', min: mins > 0 ? mins : undefined, sets: workoutSets(w), vol: round(toUnit(workoutVolume(w)), 0) || undefined, ex: (w.exercises || []).map(e => { const type = exInfo(e.name).type, ws = workSets(e); return [e.name, ws.map(s => setLabel(s, type)).join(', '), ws.length ? setLabel(bestSet(e, type), type) : '']; }), note: w.notes ? String(w.notes).slice(0, 500) : undefined });
+  });
+  const aw = Store.get('activeWorkout'), folder = routineFolders().find(x => x.name && x.routines.length && programInfo(x.name) && !/complete|Starts/.test(programInfo(x.name))), nextW = folder && nextInFolder(folder);
+  const rp = activePlan(), mem = Store.get('memory'); let reading;
+  if (rp) {
+    const kind = planKind(rp), label = i => planDayText(rp, i) + (rp.done[i] ? ' (done)' : ''), rd = {};
+    if (kind === 'paced') { for (let j = 0; j < 7; j++) { const d = addDays(t, j), i = daysBetween(rp.start, d); if (i >= 0 && i < planLen(rp)) rd[d] = label(i); } } else rd[t] = label(planFocusIdx(rp));
+    reading = lean({ plan: rp.name, kind: kind === 'paced' ? undefined : kind, days: rd, streak: readingStreak(), behind: planBehind(rp) || undefined });
+  }
+  if (mem.length) reading = { ...(reading || {}), memoryDue: memDue().length, memoryTotal: mem.length };
+  const fk = Store.get('fkit') || {}, gifts = Store.get('gifts'), fdates = [], soon = addDays(t, 60);
+  FP().forEach(p => { const d = p.birthday && nextOccur(p.birthday); if (d && d <= soon) fdates.push({ d, what: `${p.name}’s birthday` }); });
+  if (fk.anniversary) { const d = nextOccur(fk.anniversary); if (d && d <= soon) fdates.push({ d, what: 'Anniversary' }); }
+  Store.get('milestones').filter(m => !m.done && m.date && m.date >= t && m.date <= soon).forEach(m => fdates.push({ d: m.date, what: m.title }));
+  const plan = {}; for (let i = -1; i < 14; i++) { const d = addDays(t, i), its = mpItems(d); if (its.length) plan[d] = its.map(it => ({ slot: it.slot, title: planItemLabel(it) })); }
+  const media = Store.get('media'), mediaOut = m => lean({ title: m.title, kind: m.kind, by: m.author }), T = targetsFor(t);
+  out.set('claude-now.json', JSON.stringify({
+    v: 1, made: new Date().toISOString(), today: t, tz: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined, name: S.name || undefined, unit: S.unit, targets: { cal: T.cal, p: T.p, c: T.c, f: T.f },
+    tasks, done, projects, week: { monday: wk, big3: big3(wk).map(x => ({ id: x.id, title: x.title, done: !tOpen(x) })), notes: wr.notes || undefined, planned: wr.planned ? true : undefined }, blocks,
+    food: days.filter(d => d.d >= addDays(t, -14)),
+    weight: tr.length ? lean({ unit: S.unit, trend: un(last), change7: change(7), change30: change(30), last: weightSeries().filter(p => p.d >= recent).map(p => ({ d: p.d, w: un(p.w) })) }) : undefined,
+    workouts: lean({ active: aw ? aw.name || 'Workout' : undefined, next: nextW ? `${nextW.name} (${folder.name}, ${programInfo(folder.name)})` : undefined, recent: workouts.filter(w => w.d >= addDays(t, -14)) }),
+    reading, prayers: Store.get('prayers').filter(p => !p.answered).sort((a, b) => (a.lastPrayed || '').localeCompare(b.lastPrayed || '')).map(p => lean({ id: p.id, title: p.title, details: p.details ? String(p.details).slice(0, 400) : undefined, cat: p.cat, since: dateOf(p.created), lastPrayed: dateOf(p.lastPrayed), count: p.count || undefined })),
+    family: FP().length || fk.anniversary ? lean({ people: FP().map(p => lean({ name: p.name, role: p.role, birthday: p.birthday, loveLanguages: p.loveLang, favorites: p.favorites, sizes: p.sizes, notes: p.notes ? String(p.notes).slice(0, 600) : undefined, prayer: p.prayer, giftIdeas: gifts.filter(g => g.personId === p.id && g.status !== 'given').map(g => g.idea + (g.status === 'bought' ? ' (bought)' : '')) })), anniversary: fk.anniversary, dates: fdates.sort((a, b) => a.d.localeCompare(b.d)) }) : undefined,
+    meals: { plan, grocery: Store.get('grocery').map(g => lean({ name: g.name, qty: g.qty, unit: g.unit, done: g.checked || undefined })), recipes: Store.get('recipes').slice(0, 500).map(r => lean({ id: r.id, title: r.title, servings: r.servings, cal: r.cal, p: r.p, c: r.c, f: r.f, tags: r.tags, fav: r.fav || undefined })) },
+    foods: Store.get('foods').slice().sort((a, b) => (b.lastUsed || '').localeCompare(a.lastUsed || '') || (b.uses || 0) - (a.uses || 0)).slice(0, 200).map(f => lean({ id: f.id, name: f.name, brand: f.brand, per: f.basis === '100g' ? '100 g' : f.servingLabel || '1 serving', cal: f.base && f.base.cal, p: f.base && f.base.p, c: f.base && f.base.c, f: f.base && f.base.f, serving: f.servingG ? `${f.basis === '100g' ? f.servingLabel || '1 serving' : 'it'} = ${f.servingG} g` : undefined, cup: f.cupG ? `1 cup = ${f.cupG} g` : undefined })),
+    media: { active: media.filter(m => m.status === 'active').slice(0, 20).map(mediaOut), queue: media.filter(m => m.status === 'queue').sort((a, b) => (a.qpos ?? 1e9) - (b.qpos ?? 1e9)).slice(0, 10).map(mediaOut) },
+    weeks: [weekNumbers(wk), weekNumbers(addDays(wk, -7))]
+  }));
+  const notes = [], note = r => { if (/^\d{4}-\d{2}-\d{2}$/.test(r.d || '')) notes.push(lean(r)); };
+  Store.get('journal').forEach(j => note({ d: j.date, s: 'journal', id: j.id, t: j.title, x: String(j.body || '').slice(0, 20000), tags: j.tags, type: j.type !== 'journal' ? j.type : undefined }));
+  Store.get('prayers').forEach(p => note({ d: dateOf(p.created), s: 'prayer', id: p.id, t: p.title, x: String(p.details || ''), cat: p.cat, answered: p.answered ? p.answered.date || 'yes' : undefined, answer: p.answered && p.answered.note || undefined, count: p.count || undefined }));
+  Store.get('scripture').forEach(n => note({ d: n.date || dateOf(n.created), s: 'scripture', id: n.id, t: n.title || n.ref || 'Study note', x: String(n.body || '').slice(0, 20000), ref: n.ref, tags: n.tags, series: n.series }));
+  Store.get('quotes').forEach(q => note({ d: q.date || dateOf(q.created), s: 'quote', id: q.id, t: String(q.text || '').slice(0, 90), x: [q.text, q.note].filter(Boolean).join('\n\n'), by: q.author, topic: q.topic, ref: q.ref, kind: q.kind === 'illus' ? 'illustration' : undefined }));
+  media.forEach(m => note({ d: m.date || dateOf(m.created), s: 'media', id: m.id, t: m.title || 'Untitled', x: [m.body, (m.highlights || []).map(h => h.text).join('\n')].filter(Boolean).join('\n\n').slice(0, 20000), kind: m.kind, status: m.status, by: m.author, refs: m.refs }));
+  TK().filter(x => !tOpen(x)).forEach(x => note({ d: doneOn(x), s: 'task', id: x.id, t: x.title, x: String(x.notes || ''), area: areaOf(x), project: x.project && projName(x.project) }));
+  const byYear = (kind, rows) => { const ys = new Map(); rows.forEach(r => { const y = r.d.slice(0, 4); if (!ys.has(y)) ys.set(y, []); ys.get(y).push(JSON.stringify(r)); }); ys.forEach((ls, y) => out.set(`claude-${kind}-${y}.jsonl`, ls.join('\n'))); };
+  byYear('days', days); byYear('workouts', workouts); byYear('notes', notes.sort((a, b) => a.d.localeCompare(b.d)));
+  return out;
+}
+// Write the copy when this device's Drive folder says Claude is connected: changed files only (claude-now.json
+// every time, for its date), a second copy of a name made by two devices at once removed, old years removed.
+async function claudeShare(files) {
+  const mine = new Map(); for (const f of files) if (CLAUDE_FILE.test(f.name || '')) { if (!mine.has(f.name)) mine.set(f.name, []); mine.get(f.name).push(f); }
+  if (!files.some(f => f.name === CLAUDE_MARK)) { if (claudeMeta().on) setClaudeMeta({ on: false, files: {} }); return; }
+  const want = claudeCopy(), hashes = { ...(claudeMeta().files || {}) }, del = id => driveFetch(`/drive/v3/files/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  for (const [name, body] of want) {
+    const have = (mine.get(name) || []).sort((a, b) => (b.createdTime || '').localeCompare(a.createdTime || '')), h = await claudeHash(body);
+    for (const extra of have.slice(1)) await del(extra.id);
+    if (have[0] && hashes[name] === h) continue;
+    if (have[0]) await driveFetch(`/upload/drive/v3/files/${encodeURIComponent(have[0].id)}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
+    else await driveUploadBlob(name, new Blob([body], { type: 'application/json' }));
+    hashes[name] = h;
+  }
+  for (const [name, list] of mine) if (!want.has(name)) { for (const f of list) await del(f.id); delete hashes[name]; }
+  setClaudeMeta({ on: true, at: new Date().toISOString(), files: hashes, error: '' });
+}
+// One addition from Claude, checked like anything typed. Its record id comes from the inbox id, so a second
+// device taking the same file in adds nothing. Returns what was added, or null.
+function claudeApply(x, rid) {
+  const str = (v, n) => typeof v === 'string' ? v.trim().slice(0, n) : '', when = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
+  if (!x || typeof x !== 'object') return null;
+  if (x.what === 'task') {
+    const title = str(x.title, 300); if (!title || tFind(rid)) return null;
+    const t = addParsedTask({ title, notes: str(x.notes, 4000), tags: [], pri: ['high', 'med', 'low'].includes(x.priority) ? x.priority : undefined, due: when(x.due), time: /^\d{2}:\d{2}$/.test(x.time || '') ? x.time : undefined, person: str(x.person, 80) || undefined, project: str(x.project, 120) || undefined, someday: x.someday === true }, { area: AREAS.some(a => a[0] === x.area) ? x.area : undefined });
+    if (!t) return null; t.id = rid; if (x.waiting === true) { t.waiting = true; t.waitSince = ymd(); } Store.save('tasks'); return 'task';
+  }
+  if (x.what === 'done') { const t = tFind(str(x.task, 200)); if (!t || !tOpen(t)) return null; setTaskStatus(t, 'done'); Store.save('tasks'); return 'done'; }
+  if (x.what === 'food') {
+    const dd = ensureDay(when(x.date) || ymd()), meal = MEALS.some(m => m[0] === x.meal) ? x.meal : defaultMeal(); let n = 0;
+    if (dd.entries.some(e => String(e.id).startsWith(rid + '-'))) return null;
+    (Array.isArray(x.items) ? x.items.slice(0, 20) : []).forEach((it, i) => {
+      const name = str(it && it.name, 200); if (!name) return;
+      const e = { id: `${rid}-${i}`, name, meal, time: nowTime() }, food = it.food && Store.get('foods').find(f => f.id === it.food), r = it.recipe && recFind(it.recipe), g = +it.grams, k = +it.servings, gi = food ? unitsOf(food).findIndex(u => u.label === 'g') : -1;
+      if (food && g > 0 && gi >= 0) Object.assign(e, foodNutr(food, gi, g), { name: food.name, foodId: food.id, qty: g, unit: 'g' }); // the dashboard's own numbers for a saved food
+      else if (r && k > 0 && r.cal) Object.assign(e, { name: r.title, qty: k, unit: k === 1 ? 'serving' : 'servings', cal: round((+r.cal || 0) * k, 0), p: round((+r.p || 0) * k, 1), c: round((+r.c || 0) * k, 1), f: round((+r.f || 0) * k, 1) });
+      else {
+        NUTR.forEach(key => { const v = +it[key]; e[key] = Number.isFinite(v) && v >= 0 && v <= 50000 ? round(v, key === 'cal' || key === 'sodium' ? 0 : 1) : (['cal', 'p', 'c', 'f'].includes(key) ? 0 : null); });
+        const amt = str(it.amount, 80); if (amt) { if (/^[\d½¼¾⅓⅔]/.test(amt)) Object.assign(e, { qty: 1, unit: amt }); else e.name = `${name} (${amt})`; }
+      }
+      dd.entries.push(e); n++;
+    });
+    if (!n) return null; Store.save('nutrition'); return 'food';
+  }
+  if (x.what === 'weight') { const kg = +x.kg; if (!(kg >= 20 && kg <= 350)) return null; ensureDay(when(x.date) || ymd()).weight = round(kg, 2); Store.save('nutrition'); return 'weight'; }
+  if (x.what === 'prayer') {
+    const title = str(x.request, 300); if (!title || Store.get('prayers').some(p => p.id === rid)) return null;
+    Store.get('prayers').push({ id: rid, title, details: str(x.details, 4000), cat: PRAY_CATS.includes(x.cat) ? x.cat : 'Personal', created: new Date().toISOString(), lastPrayed: null, count: 0, answered: null }); Store.save('prayers'); return 'prayer';
+  }
+  if (x.what === 'journal') {
+    const body = str(x.body, 20000); if (!body || Store.get('journal').some(j => j.id === rid)) return null;
+    Store.get('journal').push({ id: rid, date: when(x.date) || ymd(), created: new Date().toISOString(), type: 'journal', title: str(x.title, 200), body, tags: [], mood: null, energy: null, photos: [], prayers: [] }); Store.save('journal'); return 'journal';
+  }
+  if (x.what === 'grocery') { const lines = (Array.isArray(x.items) ? x.items : []).map(s => str(s, 120)).filter(Boolean).slice(0, 50); return lines.length && mergeGrocery(lines, 1, 'claude') ? 'grocery' : null; }
+  return null;
+}
+const CLAUDE_KINDS = { task: ['task', 'tasks'], done: ['task ticked off', 'tasks ticked off'], food: ['meal logged', 'meals logged'], weight: ['weigh-in', 'weigh-ins'], prayer: ['prayer request', 'prayer requests'], journal: ['journal entry', 'journal entries'], grocery: ['grocery list addition', 'grocery list additions'] };
+// Take in Claude's additions, oldest first, with new tasks before ticks (so a task added and ticked off arrives done).
+// Returns the inbox files read and what was added. A file that can't be read is left for the next sync.
+async function claudeTake(files) {
+  const box = files.filter(f => (f.name || '').startsWith(CLAUDE_INBOX)).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 60);
+  if (!box.length) return null;
+  const seen = new Set(claudeMeta().seen || []), items = [], took = [], counts = {};
+  for (const f of box) {
+    let x;
+    try { x = await (await driveFetch(`/drive/v3/files/${encodeURIComponent(f.id)}?alt=media`)).json(); }
+    catch (e) { if (/sign in/i.test(e.message)) throw e; if (!(e instanceof SyntaxError)) continue; x = null; } // gone or unreachable: next time; unreadable: removed
+    items.push({ f, x });
+  }
+  items.sort((a, b) => ((a.x && a.x.what) === 'done') - ((b.x && b.x.what) === 'done'));
+  for (const { f, x } of items) {
+    const id = String((x && x.id) || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 40);
+    if (id && !seen.has(id)) { const kind = claudeApply(x, 'c-' + id); if (kind) counts[kind] = (counts[kind] || 0) + 1; seen.add(id); }
+    took.push(f);
+  }
+  setClaudeMeta({ seen: [...seen].slice(-300) });
+  return { took, counts };
+}
+
 const Sync = {
   busy: false, timer: null, first: '', allowLoss: false,
   connected() { return !!syncMeta().on; },
@@ -8062,13 +8212,18 @@ const Sync = {
     if (!this.signedIn() && !(await gauthRenew(syncMeta(), setSyncMeta))) { if (signIn) syncSignIn(); else this.draw(); return; }
     if (navigator.onLine === false) { if (announce) toast('You are offline. Sync will run when you reconnect.', 'error'); return; }
     this.busy = true; this.draw();
-    let paused = '', photosChanged = false;
+    let paused = '', photosChanged = false, claudeChanged = false;
     try {
       const changed = await this.exchange();
       setSyncMeta({ last: new Date().toISOString(), error: '' });
       try { await this.keepCopy(); } catch (e) { setSyncMeta({ copyError: e.message }); } // a missed copy never stops the sync
-      try { if (await this.photos()) photosChanged = true; } catch (e) { setSyncMeta({ photoError: e.message }); }
-      if (changed || photosChanged) { ensureSeeds(); sortWorkouts(); render(); }
+      let files = null; try { files = await driveList(); } catch (e) { setSyncMeta({ photoError: e.message }); }
+      if (files) {
+        try { claudeChanged = await this.claude(files); } catch (e) { setClaudeMeta({ error: e.message }); }
+        try { if (await this.photos(files)) photosChanged = true; } catch (e) { setSyncMeta({ photoError: e.message }); }
+        try { await claudeShare(files); } catch (e) { setClaudeMeta({ error: e.message }); }
+      }
+      if (changed || photosChanged || claudeChanged) { ensureSeeds(); sortWorkouts(); render(); }
       if (announce) toast(changed ? 'Synced. This device was updated.' : 'Synced');
     } catch (e) {
       if (e.losses) {
@@ -8127,10 +8282,20 @@ const Sync = {
     setSyncMeta({ copied: today, copyError: '' });
     return true;
   },
+  // What Claude added: taken in, sent on to Drive straight away, then removed from the inbox. Returns true when
+  // this device's records changed.
+  async claude(files) {
+    const r = await claudeTake(files); if (!r) return false;
+    const kinds = Object.keys(r.counts);
+    if (kinds.length) await this.exchange();
+    for (const f of r.took) await driveFetch(`/drive/v3/files/${encodeURIComponent(f.id)}`, { method: 'DELETE' }).catch(() => { });
+    if (kinds.length) toast('From Claude: ' + kinds.map(k => `${r.counts[k]} ${CLAUDE_KINDS[k][r.counts[k] === 1 ? 0 : 1]}`).join(', '));
+    return kinds.length > 0;
+  },
   // Photos the records use, both ways, a batch at a time. Returns true when photos arrived on this device.
-  async photos() {
+  async photos(list = null) {
     if (!Photos.ok()) return false;
-    const want = photoRefs(Store.data), have = new Set(await photoKeys()), files = await driveList(), inDrive = new Map();
+    const want = photoRefs(Store.data), have = new Set(await photoKeys()), files = list || await driveList(), inDrive = new Map();
     for (const f of files) if (f.name && f.name.startsWith(PHOTO_FILE)) inDrive.set(f.name.slice(PHOTO_FILE.length), f.id);
     const up = want.filter(id => have.has(id) && !inDrive.has(id)), down = want.filter(id => !have.has(id) && inDrive.has(id));
     let sent = 0, got = 0;
@@ -8174,7 +8339,19 @@ function syncBox() {
     <p class="text-xs muted">Records, photos and basic settings sync. API keys and downloaded libraries stay on each device.${m.photosLeft ? ` ${m.photosLeft} photo${m.photosLeft === 1 ? '' : 's'} still to sync; they follow over the next few syncs.` : ''}${m.photoError ? ` Photos stopped: ${esc(m.photoError)}` : ''}</p>
     ${m.refresh ? '<p class="text-xs muted">This device stays signed in to Google; Stop syncing signs it out.</p>' : ''}
     <p class="text-xs muted">${m.copied ? `A dated copy of your records is kept in Drive each day (latest: ${fmtDate(m.copied)}).` : 'Each day, the first sync also keeps a dated copy of your records in Drive.'} Copies cover the last 7 days, then one a week for 8 weeks.${m.copyError ? ` The last copy could not be made: ${esc(m.copyError)}` : ''}</p>
-    <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="syncNow" ${Sync.busy ? 'disabled' : ''}>${icon('refresh-cw', 'w-3.5 h-3.5')} Sync now</button><button type="button" class="btn btn-sm" data-action="syncCopies">${icon('history', 'w-3.5 h-3.5')} Restore from a copy…</button><button type="button" class="btn btn-sm" data-action="syncDisconnect">${icon('cloud-off', 'w-3.5 h-3.5')} Stop syncing this device</button></div>`;
+    <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="syncNow" ${Sync.busy ? 'disabled' : ''}>${icon('refresh-cw', 'w-3.5 h-3.5')} Sync now</button><button type="button" class="btn btn-sm" data-action="syncCopies">${icon('history', 'w-3.5 h-3.5')} Restore from a copy…</button><button type="button" class="btn btn-sm" data-action="syncDisconnect">${icon('cloud-off', 'w-3.5 h-3.5')} Stop syncing this device</button></div>
+    <div class="border-t border-slate-200 dark:border-slate-800 pt-3 space-y-2">${claudeBox()}</div>`;
+}
+// Claude, through the connector on the reader Worker. The address is the same for everyone; each person signs in
+// with their own Google account and Claude only ever reaches that account's dashboard.
+function claudeBox() {
+  const c = claudeMeta();
+  if (c.on) return `<p class="text-sm">${icon('sparkles', 'w-4 h-4 inline')} Claude is connected</p>
+    <p class="text-xs muted">Claude reads a copy of your records kept in the same private Drive folder${c.at ? `, last refreshed ${esc(fmtDateTime(c.at))}` : ''}. What it adds arrives with each sync; it can tick off tasks but can’t change or delete anything else.${c.error ? ` The last update stopped: ${esc(c.error)}` : ''}</p>
+    <button type="button" class="btn btn-sm" data-action="claudeStop">${icon('circle-stop', 'w-3.5 h-3.5')} Stop sharing with Claude</button>`;
+  return `<p class="text-sm">${icon('sparkles', 'w-4 h-4 inline')} Ask Claude about your dashboard</p>
+    <p class="text-xs muted">If you use Claude, it can answer questions about your records and add tasks, food, weight, prayer requests, journal entries and groceries. In Claude, add a custom connector with this address, then sign in with the Google account you sync with.</p>
+    <div class="flex gap-2"><input class="input text-sm" readonly value="${esc(READER.url)}/mcp" aria-label="Claude connector address"><button type="button" class="btn btn-sm shrink-0" data-action="claudeCopyUrl">${icon('copy', 'w-3.5 h-3.5')} Copy</button></div>`;
 }
 // The first sync on a device that finds an existing Drive copy has no shared base, so ask.
 function syncAskFirst() {
@@ -8183,6 +8360,14 @@ function syncAskFirst() {
     `<button type="button" class="btn" data-action="closeModal">Not now</button><button type="button" class="btn" data-action="syncFirst" data-mode="theirs">Use the Drive copy</button><button type="button" class="btn btn-primary" data-action="syncFirst" data-mode="merge">Combine</button>`));
 }
 const A_SYNC = {
+  claudeCopyUrl: () => copyText(READER.url + '/mcp', 'Connector address copied'),
+  // Removes the copy Claude reads (and the mark that keeps it fresh). Using the connector again shares again.
+  claudeStop: async () => {
+    if (!confirm('Stop sharing with Claude? This removes the copy Claude reads from your Drive folder. Remove the connector in Claude’s settings too, or using it will share again.')) return;
+    try { for (const f of await driveList()) if (f.name === CLAUDE_MARK || CLAUDE_FILE.test(f.name || '')) await driveFetch(`/drive/v3/files/${encodeURIComponent(f.id)}`, { method: 'DELETE' }); setClaudeMeta({ on: false, files: {}, error: '' }); toast('Claude no longer has a copy to read'); }
+    catch (e) { toast(e.message, 'error'); }
+    Sync.draw();
+  },
   syncConnect: () => { setSyncMeta({ on: true }); Sync.run({ signIn: true, announce: true }); },
   syncNow: () => Sync.run({ signIn: true, announce: true }),
   syncFirst: el => {

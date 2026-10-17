@@ -46,6 +46,8 @@ function fakeDrive() {
       if (meta.name !== 'life-dashboard-sync.json') { const c = drive.copy(meta.name, body); return json(route, { id: c.id, version: '1' }); }
       return save(body);
     }
+    const updated = drive.copies.find(c => url.pathname === '/upload/drive/v3/files/' + c.id);
+    if (updated && method === 'PATCH') { updated.body = req.postData(); updated.updates = (updated.updates || 0) + 1; return json(route, { id: updated.id }); }
     const copy = drive.copies.find(c => url.pathname === '/drive/v3/files/' + c.id);
     if (copy && method === 'DELETE') { drive.copies = drive.copies.filter(c => c !== copy); return route.fulfill({ status: 204, headers: cors }); }
     if (copy) return route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': copy.name.startsWith('photo-') ? 'image/png' : 'application/json' }, body: copy.body });
@@ -392,4 +394,54 @@ test('photo references are found wherever records keep them', async ({ page }) =
     nested: { deep: [{ photo: 'x_f' }] }, odd: [{ photos: ['bad id with spaces', 7] }]
   }).sort());
   expect(ids).toEqual(['fm_c', 'fm_d', 'jp_a', 'jp_b', 'plain1', 'rp_e', 'x_f']);
+});
+
+test('with Claude connected, each sync keeps Claude’s copy fresh and takes in what Claude added, once', async ({ browser }) => {
+  const drive = fakeDrive(), laptop = await device(browser, drive), phone = await device(browser, drive), { page } = laptop;
+  const claudeFiles = () => drive.copies.map(c => c.name).filter(n => n.startsWith('claude-')).sort(), body = name => drive.copies.find(c => c.name === name)?.body;
+  const year = String(new Date().getFullYear()), notes = `claude-notes-${year}.jsonl`;
+  await page.evaluate(() => { Store.set('tasks', [{ id: 't1', title: 'Call the plumber', notes: '', status: 'todo', priority: 'med', due: ymd(), tags: [], created: new Date().toISOString(), completedAt: null }]); });
+  expect((await sync(page)).error).toBe('');
+  expect(claudeFiles()).toEqual([]); // nothing is kept for Claude until it is connected
+  expect(await page.evaluate(() => claudeBox())).toContain('https://life-dashboard-reader.lifedashboard-9r5w.workers.dev/mcp');
+
+  drive.copy('claude-connected.json', '{"v":1}');
+  expect((await sync(page)).error).toBe('');
+  expect(claudeFiles()).toEqual(['claude-connected.json', 'claude-now.json']);
+  expect(JSON.parse(body('claude-now.json')).tasks.map(t => [t.id, t.title])).toEqual([['t1', 'Call the plumber']]);
+  expect(await page.evaluate(() => claudeBox())).toContain('Claude is connected');
+
+  // Claude adds a task and ticks off the plumber; one inbox file can't be read.
+  const at = new Date().toISOString(), tomorrow = await page.evaluate(() => addDays(ymd(), 1));
+  const added = JSON.stringify({ v: 1, id: 'k1aa', at, what: 'task', title: 'Email the elders', due: tomorrow });
+  drive.copy('claude-inbox-k1aa.json', added); drive.copy('claude-inbox-k2bb.json', JSON.stringify({ v: 1, id: 'k2bb', at, what: 'done', task: 't1' })); drive.copy('claude-inbox-k3cc.json', 'not json');
+  expect((await sync(page)).error).toBe('');
+  await expect(page.locator('#toasts')).toContainText('From Claude: 1 task, 1 task ticked off');
+  expect(await page.evaluate(() => Store.get('tasks').map(t => [t.id, t.title, t.status]).sort())).toEqual([['c-k1aa', 'Email the elders', 'todo'], ['t1', 'Call the plumber', 'done']]);
+  expect(claudeFiles()).toEqual(['claude-connected.json', `claude-notes-${year}.jsonl`, 'claude-now.json']); // the inbox is empty again
+  expect(JSON.parse(drive.file.body).data.tasks.map(t => t.id).sort()).toEqual(['c-k1aa', 't1']); // sent on to Drive in the same sync
+  expect(JSON.parse(body('claude-now.json')).tasks.map(t => t.id)).toEqual(['c-k1aa']);
+  expect(body(notes)).toContain('"id":"t1"');
+
+  // A sync with nothing new refreshes claude-now.json only.
+  const before = drive.copies.find(c => c.name === notes).updates || 0, nowBefore = drive.copies.find(c => c.name === 'claude-now.json').updates || 0;
+  expect((await sync(page)).error).toBe('');
+  expect([drive.copies.find(c => c.name === notes).updates || 0, (drive.copies.find(c => c.name === 'claude-now.json').updates || 0) - nowBefore]).toEqual([before, 1]);
+
+  // The phone takes the same addition in again (as if the first delete had failed): still one task.
+  drive.copy('claude-inbox-k1aa.json', added);
+  await phone.page.waitForFunction(() => !Sync.busy);
+  await phone.page.evaluate(() => { Sync.first = 'theirs'; });
+  expect((await sync(phone.page)).error).toBe('');
+  expect(await titles(phone.page)).toEqual(['Call the plumber', 'Email the elders']);
+  expect(claudeFiles().some(n => n.startsWith('claude-inbox-'))).toBe(false);
+
+  // Stop sharing removes Claude's copy and the mark, and syncing doesn't bring it back.
+  await page.evaluate(() => A.claudeStop());
+  expect(claudeFiles()).toEqual([]);
+  expect((await sync(page)).error).toBe('');
+  expect(claudeFiles()).toEqual([]);
+  expect(await page.evaluate(() => claudeBox())).toContain('Ask Claude about your dashboard');
+  expect([...laptop.errors, ...phone.errors]).toEqual([]);
+  await laptop.context.close(); await phone.context.close();
 });
