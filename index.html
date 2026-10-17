@@ -1692,7 +1692,7 @@ function fdcToFood(f) {
   const extra = (f.foodMeasures || []).filter(m => m.gramWeight > 0).slice(0, 6).map(m => ({ label: String(m.disseminationText || m.measureUnitName || 'portion').replace(/\s+/g, ' ').trim(), g: round(m.gramWeight, 1) }));
   // Branded foods name a serving ("2 balls", 40 g); the nutrients are still per 100 g.
   const sg = /^(g|grm|ml|mlt)$/i.test(f.servingSizeUnit || '') && +f.servingSize > 0 ? round(+f.servingSize, 1) : null;
-  const desc = String(f.description || 'Food'); return { id: 'fdc:' + f.fdcId, name: desc.charAt(0) + desc.slice(1).toLowerCase(), brand: f.dataType === 'Branded' ? String(f.brandName || f.brandOwner || 'USDA') : 'USDA', source: 'usda', basis: '100g', servingLabel: sg ? String(f.householdServingFullText || '1 serving').trim() : '', servingG: sg, extra, base: roundBase(base) };
+  const desc = String(f.description || 'Food'); return { id: 'fdc:' + f.fdcId, name: desc.charAt(0) + desc.slice(1).toLowerCase(), brand: f.dataType === 'Branded' ? String(f.brandName || f.brandOwner || 'USDA') : 'USDA', source: 'usda', basis: '100g', servingLabel: sg ? String(f.householdServingFullText || '1 serving').trim().toLowerCase().replace(/\bgrm\b/g, 'g').replace(/\bmlt\b/g, 'ml') : '', servingG: sg, extra, base: roundBase(base) };
 }
 async function searchOFF(q) {
   // Open Food Facts' newer search answers through the link reader (it doesn't allow browser calls); its old address is the fallback.
@@ -1702,9 +1702,12 @@ async function searchOFF(q) {
   return (j.products || []).map(offToFood).filter(Boolean).slice(0, 15);
 }
 async function searchUSDA(q) {
-  const { response: r, data: j } = await fetchServiceJSON(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(S.fdcKey || 'DEMO_KEY')}&query=${encodeURIComponent(q)}&dataType=${encodeURIComponent('Foundation,SR Legacy,Survey (FNDDS),Branded')}&pageSize=15`);
+  // A POST: USDA's gateway turns down about half of GET searches that filter by type (a bare 400). All words must match, so "energy balls" isn't every ball and energy drink.
+  let res; try { res = await fetchServiceJSON(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(S.fdcKey || 'DEMO_KEY')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, dataType: ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'], requireAllWords: true, pageSize: 15 }) }); }
+  catch (e) { throw S.fdcKey || !/could not be reached/.test(e.message) ? e : new Error('Couldn’t reach USDA. If this keeps happening, the shared demo key may have hit its hourly limit; a free USDA key in Settings avoids that.'); }
+  const { response: r, data: j } = res;
   if (r.status === 429) throw new Error('USDA search limit reached for now — add your free USDA key in Settings for higher limits.');
-  if (!r.ok) throw new Error('USDA error ' + r.status);
+  if (!r.ok) throw new Error(`USDA didn’t answer this time (error ${r.status}). Search again in a moment.`);
   return (j.foods || []).map(fdcToFood);
 }
 async function lookupBarcodeOnline(code) {
@@ -7615,7 +7618,7 @@ const RELEASES = [
     { title: 'Typing a time', body: '<p>The iPhone number pad has no “:” key, so in a workout, type a time the way a microwave reads it: <strong>130</strong> is 1:30, <strong>45</strong> is 0:45 and <strong>1500</strong> is 15:00. “1:30”, “90s” and “2 min” still work.</p>', go: ['fitness', 'fitTab', 'workout', 'Open Workouts'] },
     { title: 'More room while you lift', body: '<p>On a phone, the bar at the top of a workout now takes two short lines (name and Finish; time, volume and sets), and the rest timer is a slim strip instead of a big card.</p>' },
     { title: 'Measure in cups', body: '<p>When logging food, cups, tablespoons and teaspoons now appear whenever we know what a cup of it weighs: from the food’s own serving, from common ingredients (oats, rice, peanut butter…), or from you. For anything else, tap <strong>Measure in cups instead</strong> and pick what it’s like (milk, cooked rice, chopped fruit…); it’s remembered for that food.</p>', go: ['nutrition', 'nutTab', 'today', 'Open Nutrition'] },
-    { title: 'Better food search', body: '<p>Search reaches more: Open Food Facts works again, USDA now includes branded foods and everyday dishes, and your own recipes show up too. For something homemade like energy balls, tap <strong>Make it from its ingredients</strong>: type what goes in, the nutrition is worked out, and it’s ready to log.</p>' }
+    { title: 'Better food search', body: '<p>Search reaches more: Open Food Facts works again, USDA now includes branded foods and everyday dishes that match every word you type, and your own recipes show up too. For something homemade like energy balls, tap <strong>Make it from its ingredients</strong>: type what goes in, the nutrition is worked out, and it’s ready to log.</p>' }
   ] },
   { id: '2026-10-16u', title: 'Send to Apple Reminders', slides: [
     { title: 'Alerts that always arrive', body: '<p>A home-screen web app can’t remind you while it’s closed, but Apple Reminders can. In Tasks → Today, <strong>Send to Reminders</strong> hands this week’s tasks that have a time to Reminders, each with an alert. In Recipes &amp; Meals → Grocery list, <strong>Send to Apple Reminders</strong> puts the list in Reminders, so anyone you share that list with sees it at the store.</p><p>Both use a Shortcut you add once on your iPhone.</p>' }

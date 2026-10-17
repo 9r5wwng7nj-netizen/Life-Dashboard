@@ -18,6 +18,10 @@ The deterministic populated probe simulates these failures in CI; it does not ca
 
 The providers' current documentation confirms that [Open Food Facts keyword search uses the legacy endpoint](https://openfoodfacts.github.io/openfoodfacts-server/api/ref-cheatsheet/) and [USDA's demo key has lower limits than a personal key](https://fdc.nal.usda.gov/api-guide/). The observed 503/timeout is not proof of a permanent outage or a reason to replace providers without further investigation.
 
+## USDA search — 2026-10-17
+
+From a Mac with `DEMO_KEY`: GET `/fdc/v1/foods/search` with a `dataType` filter returned a bare nginx 400 in 4 of 6 runs, however the list was written (commas plain or `%2C`, parentheses plain or `%28`). Without `dataType`, both runs passed but matched any one word ("energy balls" listed cheese balls and energy drinks). A POST with a JSON body (`dataType` as an array, `requireAllWords: true`) passed and listed branded energy balls, so the app now searches that way. Another app reported the same gateway behaviour ([SparkyFitness #2675](https://github.com/CodeWithCJ/SparkyFitness/issues/2675)). The demo key allowed 10 requests an hour per address (`x-ratelimit-limit`), and the preflight before a POST counted as one, though browsers reuse a preflight for a while.
+
 ## Still requiring a human or additional verification
 
 - VoiceOver/TalkBack reading order and speech: docs/MANUAL_VERIFICATION.md.

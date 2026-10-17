@@ -64,8 +64,9 @@ test('search finds Open Food Facts through the link reader, USDA’s branded foo
   });
   let usda;
   await page.route('https://api.nal.usda.gov/**', route => {
-    usda = new URL(route.request().url()).searchParams;
-    return route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': 'application/json' }, body: JSON.stringify({ foods: [{ fdcId: 1, description: 'ENERGY BITES', dataType: 'Branded', brandName: 'TRAIL CO', servingSize: 30, servingSizeUnit: 'g', householdServingFullText: '2 bites', foodNutrients: [{ nutrientNumber: '208', value: 420 }, { nutrientNumber: '203', value: 9 }] }] }) });
+    const rq = route.request(); if (rq.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    usda = { method: rq.method(), url: rq.url(), body: rq.postDataJSON() };
+    return route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': 'application/json' }, body: JSON.stringify({ foods: [{ fdcId: 1, description: 'ENERGY BITES', dataType: 'Branded', brandName: 'TRAIL CO', servingSize: 30, servingSizeUnit: 'GRM', householdServingFullText: '2 BITES', foodNutrients: [{ nutrientNumber: '208', value: 420 }, { nutrientNumber: '203', value: 9 }] }] }) });
   });
   await page.route('https://world.openfoodfacts.org/**', route => route.abort());
   await page.evaluate(() => {
@@ -81,10 +82,32 @@ test('search finds Open Food Facts through the link reader, USDA’s branded foo
   await expect(results).toContainText('Energy bites'); // USDA branded
   await expect(results.locator('[data-action="lfMakeRecipe"]')).toBeVisible();
   expect(asked).toEqual(['/food/search?q=energy%20balls']);
-  expect(usda.get('dataType')).toBe('Foundation,SR Legacy,Survey (FNDDS),Branded');
-  // A branded USDA food keeps its serving.
+  // The filters travel in a POST body (USDA's gateway refuses about half of filtered GET searches), and every word must match.
+  expect(usda.method).toBe('POST');
+  expect(usda.url).toBe('https://api.nal.usda.gov/fdc/v1/foods/search?api_key=DEMO_KEY');
+  expect(usda.body).toEqual({ query: 'energy balls', dataType: ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'], requireAllWords: true, pageSize: 15 });
+  // A branded USDA food keeps its serving, in lower case.
   await results.locator('[data-src="usda"]').first().click();
   await expect(page.locator('#modal select[data-change="lfUnit"] option').first()).toHaveText('2 bites · 30 g');
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('when USDA refuses or can’t be reached, its section says so plainly and Open Food Facts still shows', async ({ page }) => {
+  const errors = await open(page);
+  let usda = 'refuse';
+  await page.route('https://life-dashboard-reader.lifedashboard-9r5w.workers.dev/**', route => route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': 'application/json' }, body: JSON.stringify({ products: [{ code: '1', product_name: 'Energy balls', nutriments: { 'energy-kcal_100g': 347 } }] }) }));
+  await page.route('https://api.nal.usda.gov/**', route => route.request().method() === 'OPTIONS' ? route.fulfill({ status: 204, headers: cors })
+    : usda === 'refuse' ? route.fulfill({ status: 400, headers: { ...cors, 'Content-Type': 'text/html' }, body: '<html><title>400 Bad Request</title></html>' }) : route.abort());
+  await page.route('https://world.openfoodfacts.org/**', route => route.abort());
+  await page.evaluate(() => { go('nutrition'); lfOpen('snacks'); });
+  await page.fill('#lf-q', 'energy balls');
+  await page.press('#lf-q', 'Enter');
+  const results = page.locator('#lf-results');
+  await expect(results).toContainText('USDA didn’t answer this time (error 400). Search again in a moment.');
+  await expect(results.locator('[data-src="off"]')).toHaveCount(1);
+  usda = 'unreachable'; // a refused preflight (for example the demo key's hourly limit) looks like this too
+  await page.press('#lf-q', 'Enter');
+  await expect(results).toContainText('the shared demo key may have hit its hourly limit');
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
