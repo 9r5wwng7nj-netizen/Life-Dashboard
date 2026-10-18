@@ -56,7 +56,8 @@
 
 .ldl-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 26px; padding: 0 10px !important; border-radius: 13px !important; border: 1px solid var(--background-modifier-border) !important; font-size: 12px; font-weight: 700; background: var(--background-secondary) !important; color: var(--text-muted) !important; }
 .ldl-st-week { background: rgba(20, 184, 166, .16) !important; color: var(--text-accent) !important; }
-.ldl-st-draft { background: rgba(245, 158, 11, .18) !important; color: var(--text-normal) !important; }
+.ldl-st-active { background: rgba(245, 158, 11, .18) !important; color: var(--text-normal) !important; }
+.ldl-st-waiting { background: transparent !important; border-style: dashed !important; }
 .ldl-st-ready { background: rgba(59, 130, 246, .16) !important; color: var(--text-normal) !important; }
 
 .ldl-hubpage { padding-top: 0; }
