@@ -20,7 +20,8 @@ const NOW = {
     { id: 't2', title: 'Finish lesson outline', due: plus(-2), area: 'ministry', project: 'Fall study' },
     { id: 't3', title: 'Repaint the shed', due: plus(-5), someday: true },
     { id: 't4', title: 'Book dentist', due: plus(3), area: 'personal', person: 'Pat' },
-    { id: 't5', title: 'Sort photos', inbox: true }
+    { id: 't5', title: 'Sort photos', inbox: true },
+    { id: 't6', title: 'Learn the guitar', someday: true }
   ],
   done: [{ id: 'd1', title: 'Pay the water bill', done: plus(-1), area: 'home' }],
   projects: [{ id: 'p1', name: 'Fall study', area: 'ministry', status: 'active', open: 1 }],
@@ -125,7 +126,8 @@ test('Claude signs in through the connector: discovery, registration, consent, G
     const c = await connect(s);
     expect(c.consent.status).toBe(200);
     expect(c.html).toContain('Claude (claude.ai)');
-    expect(c.html).toContain('It can’t change or delete anything else');
+    expect(c.html).toContain('move a task to Someday or to a new date');
+    expect(c.html).toContain('It can’t delete anything or change anything else');
     expect(c.consent.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
     expect(Object.fromEntries(c.googleUrl.searchParams)).toMatchObject({ client_id: 'cid', redirect_uri: ORIGIN + '/oauth/google', scope: SCOPE, access_type: 'offline', response_type: 'code', code_challenge_method: 'S256' });
     expect([c.to.origin + c.to.pathname, c.to.searchParams.get('state')]).toEqual([CLAUDE, 'st1']);
@@ -154,7 +156,7 @@ test('Claude signs in through the connector: discovery, registration, consent, G
     const note = await s.call('/mcp', { method: 'POST', headers: { Authorization: 'Bearer ' + c.tok.access_token, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) });
     expect(note.status).toBe(202);
     const tools = (await (await rpc(s, c.tok.access_token, 'tools/list')).json()).result.tools;
-    expect(tools.map(t => t.name)).toEqual(['dashboard_today', 'list_tasks', 'get_food_log', 'get_workouts', 'search_records', 'get_record', 'get_section', 'search_foods', 'add_task', 'complete_task', 'log_food', 'log_weight', 'add_prayer_request', 'add_journal_entry', 'add_grocery_items']);
+    expect(tools.map(t => t.name)).toEqual(['dashboard_today', 'list_tasks', 'get_food_log', 'get_workouts', 'search_records', 'get_record', 'get_section', 'search_foods', 'add_task', 'complete_task', 'park_task', 'reschedule_task', 'log_food', 'log_weight', 'add_prayer_request', 'add_journal_entry', 'add_grocery_items']);
     expect(tools.every(t => t.inputSchema && t.description && !('run' in t))).toBe(true);
     expect(tools.find(t => t.name === 'dashboard_today').annotations.readOnlyHint).toBe(true);
     expect((await (await rpc(s, c.tok.access_token, 'resources/list')).json()).error.code).toBe(-32601);
@@ -239,8 +241,24 @@ test('additions go into the drop box, checked first, and show as waiting until t
     const added = await tool(s, at, 'add_task', { title: '  Email  the elders ', due: plus(1), time: '9:30', area: 'ministry', project: 'Fall study', notes: 'Line one\nLine two' });
     expect(added.text).toMatch(/^Added “Email the elders”, due .+ at 09:30 \(id c-[A-Za-z0-9]+\)\. It will appear in the dashboard/);
     expect((await tool(s, at, 'add_task', { title: 'x', area: 'work' })).error).toBe(true);
+    expect((await tool(s, at, 'add_task', { title: 'x', due: '2026-02-31' })).error).toBe(true); // not a day on the calendar
     expect((await tool(s, at, 'complete_task', { task_id: 'missing' })).error).toBe(true);
     await tool(s, at, 'complete_task', { task_id: 't1' });
+    // The two task edits: found by id among open tasks, validated, and sent as plain requests. Nothing is edited here.
+    expect((await tool(s, at, 'park_task', { task_id: 'missing' })).error).toBe(true);
+    expect((await tool(s, at, 'park_task', { task_id: 'd1' })).error).toBe(true); // finished tasks aren't open
+    expect((await tool(s, at, 'park_task', { task_id: 't6' })).text).toBe('“Learn the guitar” is already in Someday.'); // no date left to keep, nothing sent
+    expect((await tool(s, at, 'park_task', { task_id: 't3' })).text).toContain('keeping “Was due ' + plus(-5) + '” in its notes'); // in Someday but still carrying a date
+    const parked = await tool(s, at, 'park_task', { task_id: 't4' });
+    expect(parked.text).toMatch(/^Moved “Book dentist” to Someday, keeping “Was due .+” in its notes\. It will appear in the dashboard/);
+    expect((await tool(s, at, 'reschedule_task', { task_id: 'missing', due: plus(4) })).error).toBe(true);
+    expect((await tool(s, at, 'reschedule_task', { task_id: 't2' })).error).toBe(true); // a date is needed
+    expect((await tool(s, at, 'reschedule_task', { task_id: 't2', due: '2026-02-31' })).error).toBe(true);
+    expect((await tool(s, at, 'reschedule_task', { task_id: 't2', due: 'next week' })).error).toBe(true);
+    expect((await tool(s, at, 'reschedule_task', { task_id: 't2', due: plus(4), time: '25:00' })).error).toBe(true);
+    expect((await tool(s, at, 'reschedule_task', { task_id: 't2', due: plus(4), time: 'noon' })).error).toBe(true);
+    expect((await tool(s, at, 'reschedule_task', { task_id: 't2', due: plus(4), time: '9:05' })).text).toMatch(new RegExp(`^Moved “Finish lesson outline” to ${plus(4)} at 09:05\\. It will appear`));
+    await tool(s, at, 'reschedule_task', { task_id: 't6', due: plus(6) }); // a Someday task comes back; no time given
     expect((await tool(s, at, 'log_food', { meal: 'brunch', items: [{ name: 'x', calories: 1 }] })).error).toBe(true);
     expect((await tool(s, at, 'log_food', { meal: 'lunch', items: [{ name: 'Soup', calories: 99999 }] })).text).toContain('calories should be a number');
     await tool(s, at, 'log_food', { meal: 'lunch', items: [{ name: 'Chili', amount: '1 bowl', calories: 420, protein: 30, carbs: 35, fat: 15, recipe_id: 'r1', servings: 1 }, { name: 'Protein shake', calories: 120, food_id: 'f1', grams: 32 }] });
@@ -250,18 +268,24 @@ test('additions go into the drop box, checked first, and show as waiting until t
     await tool(s, at, 'add_journal_entry', { body: 'Grateful today.', title: 'Evening' });
     await tool(s, at, 'add_grocery_items', { items: ['2 lb chicken breast', '', 'Eggs'] });
     const box = s.inbox();
-    expect(box.map(x => x.what)).toEqual(['task', 'done', 'food', 'weight', 'prayer', 'journal', 'grocery']);
+    expect(box.map(x => x.what)).toEqual(['task', 'done', 'someday', 'someday', 'reschedule', 'reschedule', 'food', 'weight', 'prayer', 'journal', 'grocery']);
+    const sent = (what, rest) => ({ v: 1, id: expect.any(String), at: expect.any(String), what, ...rest }); // exactly these fields, nothing else
+    expect(box[2]).toEqual(sent('someday', { task: 't3' }));
+    expect(box[3]).toEqual(sent('someday', { task: 't4' }));
+    expect(box[4]).toEqual(sent('reschedule', { task: 't2', due: plus(4), time: '09:05' }));
+    expect(box[5]).toEqual(sent('reschedule', { task: 't6', due: plus(6) }));
     expect(box[0]).toMatchObject({ v: 1, title: 'Email the elders', due: plus(1), time: '09:30', area: 'ministry', project: 'Fall study', notes: 'Line one\nLine two' });
     expect(box[1]).toMatchObject({ task: 't1' });
-    expect(box[2]).toMatchObject({ date: TODAY, meal: 'lunch', items: [{ name: 'Chili', amount: '1 bowl', cal: 420, p: 30, c: 35, f: 15, recipe: 'r1', servings: 1 }, { name: 'Protein shake', cal: 120, food: 'f1', grams: 32 }] });
-    expect(box[3]).toMatchObject({ date: TODAY, kg: 81.65 });
-    expect(box[4]).toMatchObject({ request: 'Safe travel', cat: 'Family' });
-    expect(box[5]).toMatchObject({ date: TODAY, title: 'Evening', body: 'Grateful today.' });
-    expect(box[6].items).toEqual(['2 lb chicken breast', 'Eggs']);
+    expect(box[6]).toMatchObject({ date: TODAY, meal: 'lunch', items: [{ name: 'Chili', amount: '1 bowl', cal: 420, p: 30, c: 35, f: 15, recipe: 'r1', servings: 1 }, { name: 'Protein shake', cal: 120, food: 'f1', grams: 32 }] });
+    expect(box[7]).toMatchObject({ date: TODAY, kg: 81.65 });
+    expect(box[8]).toMatchObject({ request: 'Safe travel', cat: 'Family' });
+    expect(box[9]).toMatchObject({ date: TODAY, title: 'Evening', body: 'Grateful today.' });
+    expect(box[10].items).toEqual(['2 lb chicken breast', 'Eggs']);
     expect(box.every(x => x.id && x.at)).toBe(true);
     const waiting = (await tool(s, at, 'dashboard_today')).data.waiting_to_sync;
-    expect(waiting.map(x => x.what)).toEqual(['task', 'done', 'food', 'weight', 'prayer', 'journal', 'grocery']);
+    expect(waiting.map(x => x.what)).toEqual(['task', 'done', 'someday', 'someday', 'reschedule', 'reschedule', 'food', 'weight', 'prayer', 'journal', 'grocery']);
     expect(waiting[0]).toMatchObject({ title: 'Email the elders', id: 'c-' + box[0].id });
+    expect(waiting[4]).toMatchObject({ task: 't2', due: plus(4) });
     expect((await tool(s, at, 'list_tasks')).data.waiting_to_sync.map(x => x.title)).toEqual(['Email the elders']);
   } finally { s.restore(); }
 });
@@ -307,7 +331,9 @@ test('end to end: the app’s own copy answers Claude, and Claude’s additions 
     Store.set('tasks', [
       { id: 't1', title: 'Call the plumber', notes: '', status: 'todo', priority: 'high', due: t, time: '15:00', tags: ['home'], created: at(t, 8), completedAt: null },
       { id: 't2', title: 'Finish lesson outline', notes: 'Chapter 3', status: 'todo', priority: 'med', due: addDays(t, -2), tags: [], project: 'p1', created: at(t, 8), completedAt: null },
-      { id: 't3', title: 'Pay the water bill', notes: '', status: 'done', priority: 'med', due: addDays(t, -1), tags: ['home'], created: at(t, 8), completedAt: at(addDays(t, -1), 10) }
+      { id: 't3', title: 'Pay the water bill', notes: '', status: 'done', priority: 'med', due: addDays(t, -1), tags: ['home'], created: at(t, 8), completedAt: at(addDays(t, -1), 10) },
+      { id: 't4', title: 'Prep the slides', notes: 'Draft one', status: 'todo', priority: 'med', due: addDays(t, 3), time: '10:30', repeat: { freq: 'week', n: 1 }, tags: [], created: at(t, 8), completedAt: null },
+      { id: 't5', title: 'Tidy the garage', notes: '', status: 'todo', priority: 'med', due: null, someday: true, tags: [], created: at(t, 8), completedAt: null }
     ]);
     Store.set('foods', [{ id: 'f1', name: 'Protein shake', brand: 'Acme', basis: '100g', base: { cal: 375, p: 75, c: 9.4, f: 4.7, fiber: null, sugar: null, sodium: null, satfat: null }, servingLabel: '1 scoop', servingG: 32, extra: [], uses: 3, lastUsed: at(t, 7) }]);
     Store.set('recipes', [{ id: 'r1', title: 'Chili', servings: 6, cal: 420, p: 30, c: 35, f: 15, ingredients: 'beans' }]);
@@ -348,19 +374,28 @@ test('end to end: the app’s own copy answers Claude, and Claude’s additions 
     await tool(s, at, 'add_prayer_request', { request: 'Safe travel', category: 'Family' });
     await tool(s, at, 'add_journal_entry', { body: 'Grateful today.' });
     await tool(s, at, 'add_grocery_items', { items: ['2 lb chicken breast'] });
+    await tool(s, at, 'park_task', { task_id: 't4' });
+    await tool(s, at, 'reschedule_task', { task_id: 't2', due: plus(5), time: '9:15' });
+    expect((await tool(s, at, 'park_task', { task_id: 't5' })).text).toContain('already in Someday');
+    expect((await tool(s, at, 'list_tasks', { view: 'someday' })).data.tasks.map(x => x.id)).toEqual(['t5']);
     const items = s.inbox();
     const r = await page.evaluate(items => {
       const kinds = items.map(x => claudeApply(x, 'c-' + x.id)), again = items.map(x => claudeApply(x, 'c-' + x.id)), t = ymd(), d = Store.get('nutrition')[t];
       const task = Store.get('tasks').find(x => x.title === 'Email the elders');
       return { kinds, again, task: task && { id: task.id, area: task.area, project: (projFind(task.project) || {}).name, waiting: task.waiting, due: task.due }, projects: Store.get('projects').length,
         t1: Store.get('tasks').find(x => x.id === 't1').status, lunch: d.entries.filter(e => e.meal === 'lunch').map(e => [e.name, e.cal, e.foodId || null, e.qty ?? null, e.unit || null]), weight: d.weight,
+        slides: Store.get('tasks').find(x => x.id === 't4'), lesson: Store.get('tasks').find(x => x.id === 't2'), garage: Store.get('tasks').find(x => x.id === 't5'),
         prayer: Store.get('prayers').find(p => p.title === 'Safe travel'), journal: Store.get('journal').find(j => j.body === 'Grateful today.'), grocery: Store.get('grocery').map(g => [g.name, g.qty, g.unit]) };
     }, items);
-    expect(r.kinds).toEqual(['task', 'done', 'food', 'weight', 'prayer', 'journal', 'grocery']);
-    expect(r.again).toEqual([null, null, null, 'weight', null, null, 'grocery']); // records already there aren't added twice (weight and groceries rely on the inbox file being removed)
+    expect(r.kinds).toEqual(['task', 'done', 'food', 'weight', 'prayer', 'journal', 'grocery', 'someday', 'reschedule']);
+    expect(r.again).toEqual([null, null, null, 'weight', null, null, 'grocery', null, null]); // records already there aren't added twice (weight and groceries rely on the inbox file being removed)
     expect(r.task).toEqual({ id: 'c-' + items[0].id, area: 'ministry', project: 'Fall study', waiting: true, due: plus(1) });
     expect(r.projects).toBe(1); // the existing project, not a new one
     expect(r.t1).toBe('done');
+    expect(r.slides).toMatchObject({ title: 'Prep the slides', someday: true, due: null, time: '10:30', repeat: { freq: 'week', n: 1 }, status: 'todo', notes: `Draft one\nWas due ${plus(3)} at 10:30` }); // the date is kept, the repeat is not touched, and a second go added nothing
+    expect(r.lesson).toMatchObject({ due: plus(5), time: '09:15', project: 'p1', notes: 'Chapter 3', status: 'todo' });
+    expect(r.lesson.someday).toBeFalsy();
+    expect(r.garage).toMatchObject({ someday: true, due: null, notes: '' }); // already parked: left exactly as it was
     expect(r.lunch).toEqual([['Chili', 420, null, 1, 'serving'], ['Protein shake', 120, 'f1', 32, 'g'], ['Apple', 95, null, 1, '1 medium'], ['Almonds (a handful)', 160, null, null, null]]);
     expect(r.weight).toBe(81.65);
     expect(r.prayer).toMatchObject({ id: 'c-' + items[4].id, cat: 'Family', answered: null });
@@ -368,4 +403,84 @@ test('end to end: the app’s own copy answers Claude, and Claude’s additions 
     expect(r.grocery[0]).toEqual(['chicken breast', 4, 'lb']); // added twice above, merged into one line
     expect(errors).toEqual([]);
   } finally { s.restore(); }
+});
+
+// The dashboard checks every request again, whatever the Worker said: only open tasks change, the old date is kept
+// when a task is parked, and the same request twice changes nothing more.
+test('Claude’s task edits only touch open tasks, keep the old date when parking, and do nothing twice', async ({ page }) => {
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto(pathToFileURL(path.resolve('index.html')).href);
+  await page.waitForFunction(() => typeof Store !== 'undefined' && Store.data && Array.isArray(Store.data.tasks));
+  const r = await page.evaluate(() => {
+    A.helpDismiss({ dataset: { what: 'tour' } });
+    const t = ymd(), mk = (id, extra) => ({ id, title: id, notes: '', status: 'todo', priority: 'med', due: null, tags: [], created: new Date().toISOString(), completedAt: null, ...extra });
+    Store.set('tasks', [
+      mk('timed', { due: addDays(t, 2), time: '15:30', notes: 'Bring the keys  \n\n', repeat: { freq: 'week', n: 1 }, waiting: true, pushed: 1 }),
+      mk('plain', { due: addDays(t, 4) }),
+      mk('both', { due: addDays(t, -3), someday: true }),
+      mk('undated'),
+      mk('parked', { someday: true, notes: 'x' }),
+      mk('finished', { status: 'done', due: addDays(t, 1), completedAt: new Date().toISOString() }),
+      mk('doing', { status: 'doing', due: addDays(t, 5) })
+    ]);
+    const get = id => Store.get('tasks').find(x => x.id === id), snap = id => JSON.stringify(get(id)), copy = id => JSON.parse(snap(id)); // copies, since the records change again below
+    const apply = x => claudeApply({ v: 1, id: 'z', ...x }, 'c-z');
+    const out = {};
+    // Parking
+    const before = { finished: snap('finished'), parked: snap('parked'), undated: snap('undated') };
+    out.park1 = ['timed', 'plain', 'both', 'undated', 'parked', 'finished', 'missing', 'doing'].map(id => apply({ what: 'someday', task: id }));
+    out.park2 = ['timed', 'plain', 'both', 'undated', 'parked', 'finished', 'missing', 'doing'].map(id => apply({ what: 'someday', task: id }));
+    out.timed = copy('timed'); out.plain = copy('plain'); out.both = copy('both'); out.doing = copy('doing');
+    out.untouched = { finished: snap('finished') === before.finished, parked: snap('parked') === before.parked, undated: snap('undated') === before.undated };
+    out.undated = copy('undated');
+    out.badTask = [apply({ what: 'someday' }), apply({ what: 'someday', task: 5 }), apply({ what: 'someday', task: { id: 'plain' } })];
+    // A parked task given its date again and parked again keeps one line, not two
+    apply({ what: 'reschedule', task: 'plain', due: addDays(t, 4) });
+    const again = apply({ what: 'someday', task: 'plain' });
+    out.replay = [again, get('plain').notes];
+    // Rescheduling
+    const dueBefore = snap('finished');
+    out.re = {
+      bad: ['2026-02-31', '2026-13-01', 'tomorrow', '', null, 20261201, '2026-1-5'].map(d => apply({ what: 'reschedule', task: 'timed', due: d })),
+      missing: [apply({ what: 'reschedule', task: 'timed' }), apply({ what: 'reschedule', due: addDays(t, 9) })],
+      finished: apply({ what: 'reschedule', task: 'finished', due: addDays(t, 9) }),
+      unknown: apply({ what: 'reschedule', task: 'missing', due: addDays(t, 9) }),
+      timedStillParked: [get('timed').someday, get('timed').due],
+      back: apply({ what: 'reschedule', task: 'timed', due: addDays(t, 6) }),
+      backAgain: apply({ what: 'reschedule', task: 'timed', due: addDays(t, 6) }),
+      timeKept: get('timed').time,
+      badTime: apply({ what: 'reschedule', task: 'timed', due: addDays(t, 6), time: '25:00' }),
+      newTime: apply({ what: 'reschedule', task: 'timed', due: addDays(t, 6), time: '08:05' }),
+      newTimeAgain: apply({ what: 'reschedule', task: 'timed', due: addDays(t, 6), time: '08:05' }),
+      from: apply({ what: 'reschedule', task: 'both', due: addDays(t, 1) }),
+      doingDay: apply({ what: 'reschedule', task: 'doing', due: addDays(t, 8) })
+    };
+    out.afterRe = { timed: copy('timed'), both: copy('both'), doing: copy('doing'), finishedSame: snap('finished') === dueBefore };
+    out.t = t;
+    return out;
+  });
+  const day = n => { const d = new Date(r.t + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  // Parking: every open task is parked once; a task already in Someday with no date, a finished one and an unknown id are left alone
+  expect(r.park1).toEqual(['someday', 'someday', 'someday', 'someday', null, null, null, 'someday']);
+  expect(r.park2).toEqual([null, null, null, null, null, null, null, null]);
+  expect(r.timed).toMatchObject({ someday: true, due: null, time: '15:30', waiting: true, pushed: 1, repeat: { freq: 'week', n: 1 }, status: 'todo', notes: `Bring the keys\nWas due ${day(2)} at 15:30` });
+  expect(r.plain).toMatchObject({ someday: true, due: null, notes: `Was due ${day(4)}` });
+  expect(r.both).toMatchObject({ someday: true, due: null, notes: `Was due ${day(-3)}` });
+  expect(r.doing).toMatchObject({ someday: true, due: null, status: 'doing', notes: `Was due ${day(5)}` });
+  expect(r.undated).toMatchObject({ someday: true, due: null, notes: '' }); // nothing to remember
+  expect(r.untouched).toEqual({ finished: true, parked: true, undated: false });
+  expect(r.badTask).toEqual([null, null, null]);
+  expect(r.replay).toEqual(['someday', `Was due ${day(4)}`]); // back to Someday after being given its date again: the same line isn't added twice
+  // Rescheduling: a real date is needed, only open tasks move, Someday is left, the time stays unless one is given
+  expect(r.re.bad).toEqual([null, null, null, null, null, null, null]);
+  expect(r.re.missing).toEqual([null, null]);
+  expect([r.re.finished, r.re.unknown, r.re.timedStillParked]).toEqual([null, null, [true, null]]);
+  expect([r.re.back, r.re.backAgain, r.re.timeKept]).toEqual(['reschedule', null, '15:30']);
+  expect([r.re.badTime, r.re.newTime, r.re.newTimeAgain]).toEqual([null, 'reschedule', null]); // an unreadable time is ignored; with the date unchanged nothing is left to do
+  expect(r.afterRe.timed).toMatchObject({ due: day(6), time: '08:05', repeat: { freq: 'week', n: 1 }, waiting: true });
+  expect(r.afterRe.timed.someday).toBeFalsy();
+  expect([r.re.from, r.afterRe.both.due, !!r.afterRe.both.someday, r.afterRe.both.notes]).toEqual(['reschedule', day(1), false, `Was due ${day(-3)}`]);
+  expect([r.re.doingDay, r.afterRe.doing.due, r.afterRe.doing.status]).toEqual(['reschedule', day(8), 'doing']);
+  expect(r.afterRe.finishedSame).toBe(true);
+  expect(errors).toEqual([]);
 });
