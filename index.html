@@ -1918,8 +1918,8 @@ function lfBarcodeHtml() {
     <form class="flex gap-2" data-submit="lfBarcode"><input name="code" class="input" inputmode="numeric" placeholder="Barcode number (UPC / EAN)" value="${esc(L.code)}" autocomplete="off"><button class="btn shrink-0">${icon('search')} Look up</button></form><div id="lf-bc-msg">${L.bcMsg}</div>`;
 }
 const lfQuickHtml = () => `<form class="space-y-3" data-submit="lfQuickAdd"><div><label class="label">Name (optional)</label><input name="name" class="input" placeholder="e.g. Restaurant burrito" autofocus></div>
-  <div class="grid grid-cols-4 gap-2">${[['cal', 'kcal'], ['p', 'Protein g'], ['c', 'Carbs g'], ['f', 'Fat g']].map(([k, l]) => `<div><label class="label">${l}</label><input name="${k}" type="number" step="any" inputmode="decimal" class="input"></div>`).join('')}</div>
-  <p class="text-xs muted">Leave kcal blank to calculate it from the macros.</p><button class="btn btn-primary">${icon('plus')} Add to ${mealLabel(ui.lf.meal)}</button></form>`;
+  <div class="grid grid-cols-4 gap-2">${[['cal', 'kcal'], ['p', 'Protein g'], ['c', 'Carbs g'], ['f', 'Fat g']].map(([k, l]) => `<div><label class="label">${l}</label><input name="${k}" type="number" step="any" inputmode="decimal" class="input" ${kcalAttrs(k)}></div>`).join('')}</div>
+  <p class="text-xs muted">kcal fills in from the macros as you type: 4 per gram of protein and carbs, 9 per gram of fat. Type your own number to keep it.</p><button class="btn btn-primary">${icon('plus')} Add to ${mealLabel(ui.lf.meal)}</button></form>`;
 function lfMealsHtml() {
   const ms = Store.get('meals');
   return ms.length ? `<div class="flex items-center gap-2 text-sm"><span class="muted">Servings</span><input id="lf-mult" type="number" step="0.25" min="0.25" value="1" class="input w-20 py-1"></div><div class="space-y-1.5">${ms.map(m => { const t = mealTotals(m); return `<button type="button" class="w-full text-left rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 hover:border-brand-400" data-action="lfMealTpl" data-id="${m.id}"><div class="text-sm font-medium">${esc(m.name)}</div><div class="text-xs muted">${m.items ? m.items.map(x => esc(x.name)).join(', ') + ' · ' : ''}${fmtNum(t.cal)} kcal · P${fmtNum(t.p)} C${fmtNum(t.c)} F${fmtNum(t.f)}</div></button>`; }).join('')}</div>` : '<p class="text-sm muted">No saved meals yet. On the daily log, tap the bookmark on any meal to save it for one-tap logging.</p>';
@@ -1982,8 +1982,8 @@ function foodEditor(f, opts = {}) {
     <div class="grid sm:grid-cols-2 gap-3"><div><label class="label">Name</label><input name="name" class="input" value="${esc(x.name)}" required autofocus></div><div><label class="label">Brand (optional)</label><input name="brand" class="input" value="${esc(x.brand || '')}"></div></div>
     <div class="grid sm:grid-cols-3 gap-3"><div><label class="label">Nutrition facts are per</label><select name="basis" class="input"><option value="serving" ${x.basis !== '100g' ? 'selected' : ''}>1 serving</option><option value="100g" ${x.basis === '100g' ? 'selected' : ''}>100 g / 100 ml</option></select></div>
       <div><label class="label">Serving description</label><input name="servingLabel" class="input" value="${esc(x.servingLabel || '')}" placeholder="e.g. 1 bar, 2 slices"></div><div><label class="label">Serving weight (g)</label><input name="servingG" type="number" step="any" class="input" value="${x.servingG ?? ''}" placeholder="optional"></div></div>
-    <div class="grid grid-cols-4 gap-2">${[['cal', 'kcal'], ['p', 'Protein g'], ['c', 'Carbs g'], ['f', 'Fat g'], ['fiber', 'Fiber g'], ['sugar', 'Sugar g'], ['satfat', 'Sat. fat g'], ['sodium', 'Sodium mg']].map(([k, l]) => `<div><label class="label">${l}</label><input name="${k}" type="number" step="any" class="input" value="${nv(k)}" ${k === 'cal' ? '' : ''}></div>`).join('')}</div>
-    <div><label class="label">Extra units (optional) — one per line, “name = grams”</label><textarea name="extra" class="input font-mono text-[13px]" rows="3" placeholder="1 cup = 245&#10;1 scoop = 31">${esc((x.extra || []).map(e => `${e.label} = ${e.g}`).join('\n'))}</textarea><p class="text-xs muted mt-1">Weights let you log in grams, ounces or any unit you add. Leave kcal blank to calculate it from macros.</p></div>
+    <div class="grid grid-cols-4 gap-2">${[['cal', 'kcal'], ['p', 'Protein g'], ['c', 'Carbs g'], ['f', 'Fat g'], ['fiber', 'Fiber g'], ['sugar', 'Sugar g'], ['satfat', 'Sat. fat g'], ['sodium', 'Sodium mg']].map(([k, l]) => `<div><label class="label">${l}</label><input name="${k}" type="number" step="any" class="input" value="${nv(k)}" ${kcalAttrs(k, b)}></div>`).join('')}</div>
+    <div><label class="label">Extra units (optional) — one per line, “name = grams”</label><textarea name="extra" class="input font-mono text-[13px]" rows="3" placeholder="1 cup = 245&#10;1 scoop = 31">${esc((x.extra || []).map(e => `${e.label} = ${e.g}`).join('\n'))}</textarea><p class="text-xs muted mt-1">Weights let you log in grams, ounces or any unit you add. kcal fills in from the macros as you type; type your own number (from a label, say) to keep it.</p></div>
     <div><label class="label">Barcode (optional)</label><input name="barcode" class="input" inputmode="numeric" value="${esc(x.barcode || '')}"></div>`,
     `${f ? `<button type="button" class="btn btn-danger mr-auto" data-action="foodDelete" data-id="${esc(x.id)}">${icon('trash-2')} Delete</button>` : ''}<button type="button" class="btn" data-action="${ui.lf ? 'foodBackToLog' : 'closeModal'}">Cancel</button><button class="btn btn-primary">${icon('save')} Save food</button>`, 'foodSave'),
     { wide: true, onClose: ui.lf ? () => { stopScan(); ui.lf = null; render(); } : () => render() });
@@ -2114,7 +2114,7 @@ function nutFoods() {
       <div class="card">${cardHead('bookmark', 'Saved meals')}
         <div class="space-y-2">${meals.map(m => { const t = mealTotals(m); return `<div class="rounded-lg border border-slate-200 dark:border-slate-800 p-3"><div class="flex items-start gap-2"><div class="flex-1 min-w-0"><div class="font-medium">${esc(m.name)}</div><div class="text-xs muted">${m.items ? m.items.map(x => esc(x.name)).join(', ') : 'Quick macros'}</div><div class="text-xs tabular-nums mt-0.5">${fmtNum(t.cal)} kcal · P${fmtNum(t.p)} · C${fmtNum(t.c)} · F${fmtNum(t.f)}</div></div><button class="btn btn-sm btn-primary" data-action="addMeal" data-id="${m.id}" title="Log">${icon('plus', 'w-3.5 h-3.5')}</button><button class="btn btn-sm" data-action="mealEdit" data-id="${m.id}" title="Rename">${icon('pencil', 'w-3.5 h-3.5')}</button><button class="btn btn-sm btn-danger" data-action="mealDel" data-id="${m.id}" title="Delete">${icon('trash-2', 'w-3.5 h-3.5')}</button></div></div>`; }).join('') || '<p class="text-sm muted">On the daily log, tap the bookmark icon on any meal to save it here.</p>'}</div></div>
       <form class="card" data-submit="mealAdd">${cardHead('plus', 'Quick saved meal (macros only)')}
-        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2"><input name="name" class="input col-span-2 sm:col-span-5" placeholder="Name" required><input name="cal" type="number" step="any" class="input" placeholder="kcal"><input name="p" type="number" step="any" class="input" placeholder="P (g)"><input name="c" type="number" step="any" class="input" placeholder="C (g)"><input name="f" type="number" step="any" class="input" placeholder="F (g)"><button class="btn col-span-2 sm:col-span-1">${icon('save')} Save</button></div></form>
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2"><input name="name" class="input col-span-2 sm:col-span-5" placeholder="Name" required><input name="cal" type="number" step="any" class="input" placeholder="kcal (auto)" data-input="kcalTyped"><input name="p" type="number" step="any" class="input" placeholder="P (g)" data-input="kcalAuto"><input name="c" type="number" step="any" class="input" placeholder="C (g)" data-input="kcalAuto"><input name="f" type="number" step="any" class="input" placeholder="F (g)" data-input="kcalAuto"><button class="btn col-span-2 sm:col-span-1">${icon('save')} Save</button></div></form>
     </div></div>`;
 }
 function nutHistory() {
@@ -2142,7 +2142,8 @@ function nutHistory() {
 function macroModal(title, o, action, id, withMeal = false) {
   Modal.open(modalShell(title, `<input type="hidden" name="id" value="${esc(id)}">
     <div><label class="label">Name</label><input name="name" class="input" value="${esc(o.name)}" autofocus></div>
-    <div class="grid grid-cols-4 gap-2">${[['cal', 'kcal'], ['p', 'Protein'], ['c', 'Carbs'], ['f', 'Fat']].map(([k, l]) => `<div><label class="label">${l}</label><input name="${k}" type="number" step="any" class="input" value="${o[k] ?? ''}"></div>`).join('')}</div>
+    <div class="grid grid-cols-4 gap-2">${[['cal', 'kcal'], ['p', 'Protein'], ['c', 'Carbs'], ['f', 'Fat']].map(([k, l]) => `<div><label class="label">${l}</label><input name="${k}" type="number" step="any" class="input" value="${o[k] ?? ''}" ${kcalAttrs(k, o)}></div>`).join('')}</div>
+    <p class="text-xs muted">kcal fills in from protein, carbs and fat as you type. Type your own number to keep it.</p>
     ${withMeal ? `<div><label class="label">Meal</label><select name="meal" class="input w-auto">${MEALS.map(([k, l]) => `<option value="${k}" ${mealOf(o) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}`,
     `<button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn btn-primary">Save</button>`, action));
 }
@@ -2150,6 +2151,15 @@ function readMacros(v) {
   const p = num(v.p) || 0, c = num(v.c) || 0, f = num(v.f) || 0;
   let cal = num(v.cal); if (cal == null) cal = Math.round(p * 4 + c * 4 + f * 9);
   return { name: (v.name || '').trim(), cal, p, c, f };
+}
+// Live kcal in the macro forms: protein, carbs and fat fill in kcal as they're typed (4/4/9, kcalAuto). A kcal typed by
+// hand, or one already saved that's more than 5 off the macros (a label's own number), is kept (data-typed) until cleared.
+const kcalOf = (p, c, f) => Math.round((p || 0) * 4 + (c || 0) * 4 + (f || 0) * 9);
+function kcalAttrs(k, o = {}) {
+  if (k === 'p' || k === 'c' || k === 'f') return 'data-input="kcalAuto"';
+  if (k !== 'cal') return '';
+  const cal = num(o.cal);
+  return `data-input="kcalTyped"${cal != null && Math.abs(cal - kcalOf(num(o.p), num(o.c), num(o.f))) > 5 ? ' data-typed="1"' : ''}`;
 }
 
 /* ---------- MacroFactor import (.xlsx export: Quick Export + Food Log sheets) ---------- */
@@ -2312,6 +2322,8 @@ const A_NUT = {
   lfEditFood: () => { const f = ui.lf.sel; ui.lf.returnFood = true; foodEditor(Store.get('foods').find(x => x.id === f.id) || f); },
   lfBarcode: f => lookupBarcode(fd(f).code),
   scanStart: () => startScan(), scanStop: () => stopScan(),
+  kcalAuto: el => { const fm = el.form, k = fm && fm.elements.cal; if (!k || k.dataset.typed) return; const g = n => num(fm.elements[n]?.value), p = g('p'), c = g('c'), f = g('f'); k.value = p == null && c == null && f == null ? '' : kcalOf(p, c, f); },
+  kcalTyped: el => { if (el.value.trim()) el.dataset.typed = '1'; else delete el.dataset.typed; },
   lfQuickAdd: f => { const v = fd(f), m = readMacros(v); if (!num(v.cal) && !num(v.p) && !num(v.c) && !num(v.f)) return toast('Enter calories or macros', 'error'); ensureDay(ui.lf.date).entries.push({ id: uid(), ...m, name: m.name || 'Quick add', meal: ui.lf.meal, time: nowTime() }); Store.save('nutrition'); toast(`Added to ${mealLabel(ui.lf.meal)}`); lfDraw(); },
   lfMealTpl: el => { const m = Store.get('meals').find(x => x.id === el.dataset.id); if (!m) return; const k = num($('#lf-mult')?.value) || 1; addEntries(ui.lf.date, ui.lf.meal, mealItems(m), k); toast(`Added ${m.name}`); lfDraw(); },
   lfRecipe: el => { const r = Store.get('recipes').find(x => x.id === el.dataset.id); if (!r) return; const k = num($('#lf-rserv')?.value) || 1; ensureDay(ui.lf.date).entries.push({ id: uid(), name: r.title, qty: k, unit: k === 1 ? 'serving' : 'servings', cal: round((+r.cal || 0) * k, 0), p: round((+r.p || 0) * k, 1), c: round((+r.c || 0) * k, 1), f: round((+r.f || 0) * k, 1), meal: ui.lf.meal, time: nowTime() }); Store.save('nutrition'); toast(`Added ${r.title}`); lfDraw(); },
@@ -7614,8 +7626,11 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
-  { id: '2026-10-18', title: 'Claude can tidy your task list', slides: [
+  { id: '2026-10-18b', title: 'Claude can tidy your task list', slides: [
     { title: 'Park or reschedule tasks from Claude', body: '<p>If Claude is connected to your dashboard, you can ask it to tidy your tasks: “Park the prep tasks that aren’t tied to an event” or “Move the dentist task to next Tuesday at 3.” Claude can now move a task to <strong>Someday</strong> or give it a new date and time.</p><p>When it parks a task, the old date is kept in the task’s notes (“Was due 2026-10-24”), so nothing is lost. It still can’t delete anything, and changes arrive the next time the dashboard syncs.</p>' }
+  ] },
+  { id: '2026-10-18', title: 'Calories fill themselves in', slides: [
+    { title: 'Calories from your macros', body: '<p>When you type protein, carbs and fat (in Quick add, a custom food, or when editing an entry or a saved meal), the calories fill in for you: 4 per gram of protein and carbs, 9 per gram of fat.</p><p>Got a label with its own calorie number? Type it in and it’s kept. Clear the calories box to go back to automatic.</p>', go: ['nutrition', 'nutTab', 'today', 'Open Nutrition'] }
   ] },
   { id: '2026-10-17b', title: 'Ask Claude about your dashboard', slides: [
     { title: 'Your dashboard, in Claude', body: '<p>If you use Claude, you can connect it to your dashboard. Ask “What’s on my plate this week?”, “How has my protein been this month?” or “What have I been praying about?”, or say “Log a turkey sandwich for lunch” or “Add a task to call the plumber tomorrow.”</p><p>Claude reads a copy of your records that the dashboard keeps in your private Google Drive folder. What it adds arrives the next time the dashboard syncs. It can tick off tasks but can’t change or delete anything else.</p>' },
