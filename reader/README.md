@@ -52,7 +52,7 @@ Without it, `/google/ready` answers `{ "ready": false }` and the app keeps using
 - `POST /oauth/register`: Claude registers itself. Only Claude's return address (`https://claude.ai/api/mcp/auth_callback`) and Claude Code's loopback addresses are accepted.
 - `GET /oauth/authorize`: a short page saying what Claude will be able to do, then Google's sign-in (`drive.appdata` only, at `/oauth/google`).
 - `POST /oauth/token`: codes (PKCE S256) and refresh tokens, which rotate. `POST /oauth/revoke` ends a connection and removes Claude's copy from Drive.
-- `POST /mcp`: the tools. They read the copy the dashboard keeps in the person's Drive app folder (`claude-now.json`, `claude-{days,workouts,notes}-YYYY.jsonl`) and leave additions as `claude-inbox-<id>.json` files, which the dashboard takes in on its next sync. The Worker never edits records.
+- `POST /mcp`: the tools. They read the copy the dashboard keeps in the person's Drive app folder (`claude-now.json`, `claude-{days,workouts,notes}-YYYY.jsonl`) and leave additions and two narrow task edits (`park_task`, `reschedule_task`) as `claude-inbox-<id>.json` files, which the dashboard takes in on its next sync. The Worker never edits records, and there is no delete.
 
 It needs `GOOGLE_CLIENT_SECRET` (above), a secret for sealing codes and tokens, and a KV namespace for each connection's Google refresh token:
 

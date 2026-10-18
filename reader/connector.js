@@ -35,7 +35,7 @@ const oauthError = (error, description, status = 400) => json({ error, ...(descr
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const low = s => String(s || '').toLowerCase();
 const sum = a => a.reduce((x, y) => x + (+y || 0), 0);
-const isDate = v => typeof v === 'string' && /^(19|20)\d\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v) && !isNaN(Date.parse(v + 'T00:00:00Z'));
+const isDate = v => typeof v === 'string' && /^(19|20)\d\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v) && (d => !isNaN(d) && d.toISOString().slice(0, 10) === v)(new Date(v + 'T00:00:00Z')); // a real day: 2026-02-31 doesn’t count
 const addDays = (d, n) => { const t = new Date(d + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 const daysBetween = (a, b) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 864e5);
 const mondayOf = d => addDays(d, -((new Date(d + 'T12:00:00Z').getUTCDay() + 6) % 7));
@@ -127,8 +127,8 @@ async function authorize(url, env) {
   const who = new URL(redirect).hostname === 'claude.ai' ? 'Claude (claude.ai)' : 'Claude Code on this computer';
   return page('Connect Claude to your Life Dashboard', `<p><strong>${esc(who)}</strong> is asking to use your Life Dashboard. It will be able to:</p>
 <ul><li>read your records: tasks, food, workouts, weight, Bible reading, prayer, journal, family and meals;</li>
-<li>add tasks, food, weight, prayer requests, journal entries and grocery items, and tick off tasks.</li></ul>
-<p>It can’t change or delete anything else. Sign in with the Google account your dashboard syncs with. Google will ask to let Life Dashboard see its own app data in your Drive; that is the only access it gets.</p>
+<li>add tasks, food, weight, prayer requests, journal entries and grocery items, tick off tasks, and move a task to Someday or to a new date.</li></ul>
+<p>It can’t delete anything or change anything else. Sign in with the Google account your dashboard syncs with. Google will ask to let Life Dashboard see its own app data in your Drive; that is the only access it gets.</p>
 <p class="muted">You can disconnect at any time in Claude’s settings.</p>`, 200, { google, cancel: returnUrl(redirect, { error: 'access_denied', state: p.state }) });
 }
 
@@ -248,7 +248,7 @@ class Box {
   async pending(what) {
     const names = [...(await this.list()).keys()].filter(k => k.startsWith('claude-inbox-')).sort().slice(0, 20), out = [];
     for (const name of names) {
-      try { const x = JSON.parse(await this.text(name)); if (!what || x.what === what) out.push(clean({ what: x.what, id: 'c-' + x.id, title: x.title || x.request, task: x.task, date: x.date, meal: x.meal, items: Array.isArray(x.items) ? x.items.map(i => (i && i.name) || i).slice(0, 20) : undefined, weight_kg: x.kg, added: x.at })); } catch (e) { }
+      try { const x = JSON.parse(await this.text(name)); if (!what || x.what === what) out.push(clean({ what: x.what, id: 'c-' + x.id, title: x.title || x.request, task: x.task, due: x.what === 'reschedule' ? x.due : undefined, date: x.date, meal: x.meal, items: Array.isArray(x.items) ? x.items.map(i => (i && i.name) || i).slice(0, 20) : undefined, weight_kg: x.kg, added: x.at })); } catch (e) { }
     }
     return out;
   }
@@ -426,6 +426,28 @@ async function completeTask(a, box) {
   await box.drop({ what: 'done', task: id });
   return `Marked “${t ? t.title : id}” done. ${LANDS}`;
 }
+// The two task edits. Like complete_task they only drop a request; the dashboard changes the task on its next sync
+// (claudeApply), and only if the task is still open then.
+async function openTask(a, box) {
+  const id = line(a.task_id, 200); if (!id) throw new Error('Give the task’s id from list_tasks.');
+  const n = await copyOrNull(box), t = n && (n.tasks || []).find(x => x.id === id);
+  if (n && !t && !id.startsWith('c-')) throw new Error('No open task with that id. Use list_tasks to find it.');
+  return { id, t };
+}
+async function parkTask(a, box) {
+  const { id, t } = await openTask(a, box);
+  if (t && t.someday && !t.due) return `“${t.title}” is already in Someday.`;
+  await box.drop({ what: 'someday', task: id });
+  return `Moved “${t ? t.title : id}” to Someday${t && t.due ? `, keeping “Was due ${t.due}${t.time ? ' at ' + t.time : ''}” in its notes` : ''}. ${LANDS}`;
+}
+async function rescheduleTask(a, box) {
+  const { id, t } = await openTask(a, box), due = dateArg(a.due, 'due');
+  if (!due) throw new Error('Give the new due date, like 2026-10-24.');
+  if (a.time != null && a.time !== '' && !(typeof a.time === 'string' && /^([01]?\d|2[0-3]):[0-5]\d$/.test(a.time.trim()))) throw new Error('time should be like 15:30 (24-hour).');
+  const time = a.time ? a.time.trim().padStart(5, '0') : undefined;
+  await box.drop(clean({ what: 'reschedule', task: id, due, time }));
+  return `Moved “${t ? t.title : id}” to ${due}${time ? ' at ' + time : ''}. ${LANDS}`;
+}
 async function logFood(a, box) {
   if (!MEALS.includes(a.meal)) throw new Error('meal should be one of ' + MEALS.join(', ') + '.');
   const t = await whenToday(box), date = dateArg(a.date, 'date') || t;
@@ -465,10 +487,10 @@ async function addGrocery(a, box) {
   return `Added ${items.length} item${items.length === 1 ? '' : 's'} to the grocery list. ${LANDS}`;
 }
 
-const INSTRUCTIONS = 'Life Dashboard is this person’s own planner and tracker: tasks and projects, food and weight, workouts, Bible reading and prayer, journal, family, meals and groceries. Start with dashboard_today. What you read is the copy the dashboard saved at its last sync (as_of); say so when it is old. Dates are the person’s local dates (YYYY-MM-DD) and weights use their unit. What you add waits in a drop box and appears in the dashboard the next time it syncs, usually when it is next opened. Before logging food, use the person’s saved foods or search_foods for real numbers when you can.';
+const INSTRUCTIONS = 'Life Dashboard is this person’s own planner and tracker: tasks and projects, food and weight, workouts, Bible reading and prayer, journal, family, meals and groceries. Start with dashboard_today. What you read is the copy the dashboard saved at its last sync (as_of); say so when it is old. Dates are the person’s local dates (YYYY-MM-DD) and weights use their unit. What you add or change waits in a drop box and appears in the dashboard the next time it syncs, usually when it is next opened. Before logging food, use the person’s saved foods or search_foods for real numbers when you can.';
 const obj = (properties, required = []) => ({ type: 'object', properties, ...(required.length ? { required } : {}) });
 const str = description => ({ type: 'string', description }), date = description => ({ type: 'string', format: 'date', description });
-const READ = { readOnlyHint: true, openWorldHint: false }, ADD = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+const READ = { readOnlyHint: true, openWorldHint: false }, ADD = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, EDIT = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const TOOLS = [
   { name: 'dashboard_today', title: 'Today at a glance', description: 'Today and this week: the Big 3, tasks due today and overdue, time blocks, food so far against targets, weight trend, the workout, today’s Bible reading, meals, upcoming family dates, the prayer list, this week’s numbers and anything added that hasn’t synced yet. Start here.', inputSchema: obj({}), annotations: READ, run: today },
   { name: 'list_tasks', title: 'List tasks', description: 'Tasks by view: open (default), today, overdue, upcoming (next 14 days), waiting, someday, inbox (no date or home yet) or done (finished in the last 30 days; older ones are in search_records). Filter by area, project, person or words. Each task has an id for complete_task.', inputSchema: obj({ view: { type: 'string', enum: ['open', 'today', 'overdue', 'upcoming', 'waiting', 'someday', 'inbox', 'done'] }, area: { type: 'string', enum: AREAS }, project: str('Part of a project name'), person: str('Part of a person’s name'), query: str('Words in the title or notes'), limit: { type: 'integer', minimum: 1, maximum: 200 } }), annotations: READ, run: listTasks },
@@ -480,6 +502,8 @@ const TOOLS = [
   { name: 'search_foods', title: 'Look up a food', description: 'Nutrition for a food: the person’s saved foods that match, and packaged foods from Open Food Facts (per 100 g and per serving). For everyday foods with no match, typical values are fine.', inputSchema: obj({ query: str('The food, with a brand if there is one') }, ['query']), annotations: { readOnlyHint: true, openWorldHint: true }, run: foods },
   { name: 'add_task', title: 'Add a task', description: 'Add a task to the dashboard.', inputSchema: obj({ title: str('What to do, as a short title'), due: date('Due date'), time: str('Time of day, HH:MM (24-hour)'), area: { type: 'string', enum: AREAS }, project: str('Project name (made if new)'), person: str('Person it involves'), notes: str('Details'), priority: { type: 'string', enum: ['high', 'med', 'low'] }, someday: { type: 'boolean', description: 'Park it for someday' }, waiting: { type: 'boolean', description: 'Waiting on someone else' } }, ['title']), annotations: ADD, run: addTask },
   { name: 'complete_task', title: 'Tick off a task', description: 'Mark an open task done, by its id from list_tasks or dashboard_today.', inputSchema: obj({ task_id: str('The task’s id') }, ['task_id']), annotations: ADD, run: completeTask },
+  { name: 'park_task', title: 'Move a task to Someday', description: 'Move an open task to Someday, by its id from list_tasks. Someday tasks have no due date, so the dashboard first writes “Was due YYYY-MM-DD” (and the time, if it had one) in the task’s notes. Repeats and everything else are kept. Nothing is deleted; reschedule_task brings the task back.', inputSchema: obj({ task_id: str('The task’s id') }, ['task_id']), annotations: EDIT, run: parkTask },
+  { name: 'reschedule_task', title: 'Reschedule a task', description: 'Give an open task a new due date, by its id from list_tasks. A task in Someday comes out of it. Add a time to set the time of day; leave it out to keep the task’s current time.', inputSchema: obj({ task_id: str('The task’s id'), due: date('New due date'), time: str('Time of day, HH:MM (24-hour)') }, ['task_id', 'due']), annotations: EDIT, run: rescheduleTask },
   { name: 'log_food', title: 'Log food', description: 'Log what the person ate at one meal. Each item needs calories, and protein, carbs and fat in grams when known. For a saved food give food_id and grams, or for a recipe recipe_id and servings, and the dashboard works the numbers out itself.', inputSchema: obj({ meal: { type: 'string', enum: MEALS }, date: date('Day eaten (default today)'), items: { type: 'array', minItems: 1, maxItems: 20, items: obj({ name: str('Food'), amount: str('How much, as said (“2 slices”, “1 cup”)'), calories: { type: 'number' }, protein: { type: 'number' }, carbs: { type: 'number' }, fat: { type: 'number' }, fiber: { type: 'number' }, sugar: { type: 'number' }, sodium_mg: { type: 'number' }, saturated_fat: { type: 'number' }, food_id: str('A saved food’s id (get_section foods or search_foods)'), grams: { type: 'number', description: 'Grams eaten of the saved food' }, recipe_id: str('A recipe’s id (get_section recipes)'), servings: { type: 'number', description: 'Servings of the recipe' } }, ['name', 'calories']) } }, ['meal', 'items']), annotations: ADD, run: logFood },
   { name: 'log_weight', title: 'Log weight', description: 'Record a weigh-in. The unit defaults to the person’s own.', inputSchema: obj({ weight: { type: 'number' }, unit: { type: 'string', enum: ['lb', 'kg'] }, date: date('Day (default today)') }, ['weight']), annotations: ADD, run: logWeight },
   { name: 'add_prayer_request', title: 'Add a prayer request', description: 'Add a request to the prayer list.', inputSchema: obj({ request: str('What to pray for'), details: str('More detail'), category: { type: 'string', enum: PRAY_CATS } }, ['request']), annotations: ADD, run: addPrayer },

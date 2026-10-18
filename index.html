@@ -7626,6 +7626,9 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-18b', title: 'Claude can tidy your task list', slides: [
+    { title: 'Park or reschedule tasks from Claude', body: '<p>If Claude is connected to your dashboard, you can ask it to tidy your tasks: “Park the prep tasks that aren’t tied to an event” or “Move the dentist task to next Tuesday at 3.” Claude can now move a task to <strong>Someday</strong> or give it a new date and time.</p><p>When it parks a task, the old date is kept in the task’s notes (“Was due 2026-10-24”), so nothing is lost. It still can’t delete anything, and changes arrive the next time the dashboard syncs.</p>' }
+  ] },
   { id: '2026-10-18', title: 'Calories fill themselves in', slides: [
     { title: 'Calories from your macros', body: '<p>When you type protein, carbs and fat (in Quick add, a custom food, or when editing an entry or a saved meal), the calories fill in for you: 4 per gram of protein and carbs, 9 per gram of fat.</p><p>Got a label with its own calorie number? Type it in and it’s kept. Clear the calories box to go back to automatic.</p>', go: ['nutrition', 'nutTab', 'today', 'Open Nutrition'] }
   ] },
@@ -8144,6 +8147,16 @@ function claudeApply(x, rid) {
     if (!t) return null; t.id = rid; if (x.waiting === true) { t.waiting = true; t.waitSince = ymd(); } Store.save('tasks'); return 'task';
   }
   if (x.what === 'done') { const t = tFind(str(x.task, 200)); if (!t || !tOpen(t)) return null; setTaskStatus(t, 'done'); Store.save('tasks'); return 'done'; }
+  if (x.what === 'someday') { // the app's own Someday clears the date, so the date is first kept in the notes
+    const t = tFind(str(x.task, 200)); if (!t || !tOpen(t) || (t.someday && !t.due)) return null;
+    if (t.due) { const was = `Was due ${t.due}${t.time ? ' at ' + t.time : ''}`; if (!String(t.notes || '').split('\n').some(l => l.trim() === was)) t.notes = (t.notes ? String(t.notes).replace(/\s+$/, '') + '\n' : '') + was; }
+    t.someday = true; t.due = null; Store.save('tasks'); return 'someday';
+  }
+  if (x.what === 'reschedule') {
+    const t = tFind(str(x.task, 200)), due = when(x.due), time = /^([01]\d|2[0-3]):[0-5]\d$/.test(x.time || '') ? x.time : undefined;
+    if (!t || !tOpen(t) || !due || ymd(parseYmd(due)) !== due || (t.due === due && !t.someday && (!time || t.time === time))) return null;
+    t.someday = false; setDue(t, due); if (time) t.time = time; Store.save('tasks'); return 'reschedule';
+  }
   if (x.what === 'food') {
     const dd = ensureDay(when(x.date) || ymd()), meal = MEALS.some(m => m[0] === x.meal) ? x.meal : defaultMeal(); let n = 0;
     if (dd.entries.some(e => String(e.id).startsWith(rid + '-'))) return null;
@@ -8172,7 +8185,7 @@ function claudeApply(x, rid) {
   if (x.what === 'grocery') { const lines = (Array.isArray(x.items) ? x.items : []).map(s => str(s, 120)).filter(Boolean).slice(0, 50); return lines.length && mergeGrocery(lines, 1, 'claude') ? 'grocery' : null; }
   return null;
 }
-const CLAUDE_KINDS = { task: ['task', 'tasks'], done: ['task ticked off', 'tasks ticked off'], food: ['meal logged', 'meals logged'], weight: ['weigh-in', 'weigh-ins'], prayer: ['prayer request', 'prayer requests'], journal: ['journal entry', 'journal entries'], grocery: ['grocery list addition', 'grocery list additions'] };
+const CLAUDE_KINDS = { task: ['task', 'tasks'], done: ['task ticked off', 'tasks ticked off'], someday: ['task moved to Someday', 'tasks moved to Someday'], reschedule: ['task rescheduled', 'tasks rescheduled'], food: ['meal logged', 'meals logged'], weight: ['weigh-in', 'weigh-ins'], prayer: ['prayer request', 'prayer requests'], journal: ['journal entry', 'journal entries'], grocery: ['grocery list addition', 'grocery list additions'] };
 // Take in Claude's additions, oldest first, with new tasks before ticks (so a task added and ticked off arrives done).
 // Returns the inbox files read and what was added. A file that can't be read is left for the next sync.
 async function claudeTake(files) {
@@ -8362,7 +8375,7 @@ function syncBox() {
 function claudeBox() {
   const c = claudeMeta();
   if (c.on) return `<p class="text-sm">${icon('sparkles', 'w-4 h-4 inline')} Claude is connected</p>
-    <p class="text-xs muted">Claude reads a copy of your records kept in the same private Drive folder${c.at ? `, last refreshed ${esc(fmtDateTime(c.at))}` : ''}. What it adds arrives with each sync; it can tick off tasks but can’t change or delete anything else.${c.error ? ` The last update stopped: ${esc(c.error)}` : ''}</p>
+    <p class="text-xs muted">Claude reads a copy of your records kept in the same private Drive folder${c.at ? `, last refreshed ${esc(fmtDateTime(c.at))}` : ''}. What it adds arrives with each sync; it can tick off tasks and move them to Someday or a new date, but can’t delete anything or change anything else.${c.error ? ` The last update stopped: ${esc(c.error)}` : ''}</p>
     <button type="button" class="btn btn-sm" data-action="claudeStop">${icon('circle-stop', 'w-3.5 h-3.5')} Stop sharing with Claude</button>`;
   return `<p class="text-sm">${icon('sparkles', 'w-4 h-4 inline')} Ask Claude about your dashboard</p>
     <p class="text-xs muted">If you use Claude, it can answer questions about your records and add tasks, food, weight, prayer requests, journal entries and groceries. In Claude, add a custom connector with this address, then sign in with the Google account you sync with.</p>
