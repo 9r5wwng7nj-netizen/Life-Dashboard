@@ -127,3 +127,39 @@ test('Make it from its ingredients: the recipe’s nutrition is worked out and i
   expect(await page.evaluate(() => (Store.get('nutrition')[ymd()]?.entries || []).map(e => e.name))).toEqual(['Energy balls']);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('calories fill in from protein, carbs and fat as you type, unless you type your own', async ({ page }) => {
+  const errors = await open(page);
+  const kcal = () => page.locator('#modal input[name="cal"]');
+  // Quick add in Log food: 4 per gram of protein and carbs, 9 per gram of fat.
+  await page.evaluate(() => { go('nutrition'); lfOpen('lunch'); });
+  await page.click('#modal [data-action="lfTab"][data-v="quick"]');
+  await page.fill('#modal input[name="p"]', '30');
+  await expect(kcal()).toHaveValue('120');
+  await page.fill('#modal input[name="c"]', '40');
+  await page.fill('#modal input[name="f"]', '10');
+  await expect(kcal()).toHaveValue('370');
+  // A number typed by hand is kept while the macros change; clearing it brings the automatic total back.
+  await page.fill('#modal input[name="cal"]', '400');
+  await page.fill('#modal input[name="p"]', '35');
+  await expect(kcal()).toHaveValue('400');
+  await page.fill('#modal input[name="cal"]', '');
+  await page.fill('#modal input[name="c"]', '41');
+  await expect(kcal()).toHaveValue('394');
+  await page.click('#modal button:has-text("Add to Lunch")');
+  expect(await page.evaluate(() => Store.get('nutrition')[ymd()].entries.map(e => [e.name, e.cal, e.p, e.c, e.f]))).toEqual([['Quick add', 394, 35, 41, 10]]);
+  // Creating a food works the same way.
+  await page.evaluate(() => { Modal.close(); foodEditor(null); });
+  await page.fill('#modal input[name="p"]', '10');
+  await page.fill('#modal input[name="c"]', '20');
+  await page.fill('#modal input[name="f"]', '5');
+  await expect(kcal()).toHaveValue('165');
+  // Editing an entry: a label's own calories (more than 5 off the macros) are kept; a total that matches keeps updating.
+  await page.evaluate(() => { Modal.close(); ensureDay(ymd()).entries.push({ id: 'lab', name: 'Protein bar', cal: 250, p: 10, c: 20, f: 5, meal: 'snacks' }, { id: 'calc', name: 'Yogurt', cal: 165, p: 10, c: 20, f: 5, meal: 'snacks' }); macroModal('Edit entry', findEntry('lab'), 'entrySave', 'lab', true); });
+  await page.fill('#modal input[name="p"]', '12');
+  await expect(kcal()).toHaveValue('250');
+  await page.evaluate(() => { Modal.close(); macroModal('Edit entry', findEntry('calc'), 'entrySave', 'calc', true); });
+  await page.fill('#modal input[name="p"]', '20');
+  await expect(kcal()).toHaveValue('205');
+  expect(errors, errors.join('\n')).toEqual([]);
+});
