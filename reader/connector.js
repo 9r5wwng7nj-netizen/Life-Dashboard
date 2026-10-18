@@ -8,6 +8,9 @@
 // Sign-in is OAuth 2.1 for Claude (dynamic client registration, PKCE S256, rotating refresh tokens) in front
 // of Google's sign-in with drive.appdata only. Codes and tokens are AES-GCM sealed with the Worker secret
 // CONNECTOR_KEY; each connection's Google refresh token is kept, sealed, in the CONNECTOR_KV namespace.
+//
+// The same module serves the Morning brief (see "Morning brief" below): a private link an iPhone Shortcut opens to
+// get today's brief as plain text, read from one small file the dashboard keeps in the same Drive folder.
 import { offSearch } from './food.js';
 
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -22,7 +25,7 @@ const NOTE_SECTIONS = ['journal', 'prayer', 'scripture', 'quote', 'media', 'task
 const LANDS = 'It will appear in the dashboard the next time it syncs, usually when it is next opened.';
 const NO_COPY = 'The dashboard hasn’t shared its copy with Claude yet. Open Life Dashboard on a device where Google Drive sync is on (Settings & Sync); it shares a copy when it next syncs. Then ask again.';
 
-export const isConnectorPath = p => p === '/mcp' || p.startsWith('/oauth/') || p.startsWith('/.well-known/oauth-');
+export const isConnectorPath = p => p === '/mcp' || p.startsWith('/oauth/') || p.startsWith('/.well-known/oauth-') || p.startsWith('/brief/');
 
 // --- Small helpers
 const now = () => Math.floor(Date.now() / 1000);
@@ -83,13 +86,17 @@ export async function connector(request, env, ctx) {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (path.startsWith('/.well-known/oauth-protected-resource')) return json({ resource: origin + '/mcp', authorization_servers: [origin], scopes_supported: ['dashboard'], bearer_methods_supported: ['header'], resource_name: 'Life Dashboard' }, 200, CORS);
   if (path.startsWith('/.well-known/oauth-authorization-server')) return json({ issuer: origin, authorization_endpoint: origin + '/oauth/authorize', token_endpoint: origin + '/oauth/token', registration_endpoint: origin + '/oauth/register', revocation_endpoint: origin + '/oauth/revoke', response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], code_challenge_methods_supported: ['S256'], token_endpoint_auth_methods_supported: ['none'], revocation_endpoint_auth_methods_supported: ['none'], scopes_supported: ['dashboard'] }, 200, CORS);
-  if (!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.CONNECTOR_KEY && env.CONNECTOR_KV)) return path === '/oauth/authorize' ? page('Not set up yet', '<p>The Claude connector isn’t set up on this server yet.</p>', 503) : oauthError('temporarily_unavailable', 'The Claude connector isn’t set up on this server yet.', 503);
+  const ready = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.CONNECTOR_KEY && env.CONNECTOR_KV);
+  if (path.startsWith('/brief/') && !ready) return path === '/brief/setup' ? page('Not set up yet', '<p>The Morning brief isn’t set up on this server yet.</p>', 503) : textReply('The Morning brief isn’t set up on this server yet.', 503);
+  if (!ready) return path === '/oauth/authorize' ? page('Not set up yet', '<p>The Claude connector isn’t set up on this server yet.</p>', 503) : oauthError('temporarily_unavailable', 'The Claude connector isn’t set up on this server yet.', 503);
   if (path === '/oauth/register' && request.method === 'POST') return register(request, env);
   if (path === '/oauth/authorize' && request.method === 'GET') return authorize(url, env);
   if (path === '/oauth/google' && request.method === 'GET') return fromGoogle(url, env);
   if (path === '/oauth/token' && request.method === 'POST') return token(request, env);
   if (path === '/oauth/revoke' && request.method === 'POST') return revoke(request, env);
   if (path === '/mcp') return mcp(request, env, ctx, origin);
+  if (path === '/brief/setup' && request.method === 'GET') return briefSetup(url, env);
+  if (path.startsWith('/brief/') && request.method === 'GET') return BRIEF_KEY.test(path.slice(7)) ? briefRead(path.slice(7), env) : textReply(BRIEF_GONE, 404);
   return json({ error: 'not_found' }, 404, CORS);
 }
 
@@ -140,7 +147,8 @@ const googleExpiry = t => now() + Math.max(60, (+t.expires_in || 3600) - 120);
 
 async function fromGoogle(url, env) {
   const p = Object.fromEntries(url.searchParams), s = await unseal(env, 'state', p.state);
-  if (!s) return page('That took too long', '<p>Go back to Claude and connect again.</p>', 400);
+  if (!s) return page('That took too long', '<p>Go back to where you started (Claude, or Life Dashboard’s Morning brief) and try again.</p>', 400);
+  if (s.bf) return briefFromGoogle(url, env, p, s);
   if (p.error || !p.code) return returnTo(s.ru, { error: 'access_denied', error_description: 'Google sign-in was not completed.', state: s.st });
   const { ok, t } = await googleToken(env, { code: p.code, code_verifier: s.gv, grant_type: 'authorization_code', redirect_uri: url.origin + '/oauth/google' });
   if (!ok || !t.access_token || !t.refresh_token) return returnTo(s.ru, { error: 'access_denied', error_description: 'Google sign-in failed.', state: s.st });
@@ -226,6 +234,12 @@ class Box {
     } while (page && ++n < 10);
     return (this.files = found);
   }
+  // One file by exact name (the newest, should a name ever be there twice), and a file's text by id.
+  async find(name) {
+    const q = new URLSearchParams({ spaces: 'appDataFolder', q: `name='${name}' and trashed=false`, fields: 'files(id,name,modifiedTime)', pageSize: '10' });
+    return ((await (await this.call('/drive/v3/files?' + q)).json()).files || []).sort((a, b) => (b.modifiedTime || '').localeCompare(a.modifiedTime || ''))[0] || null;
+  }
+  async fileText(id) { return (await this.call(`/drive/v3/files/${encodeURIComponent(id)}?alt=media`)).text(); }
   async text(name) {
     if (this.texts.has(name)) return this.texts.get(name);
     const f = (await this.list()).get(name), t = f ? await (await this.call(`/drive/v3/files/${encodeURIComponent(f.id)}?alt=media`)).text() : null;
@@ -263,6 +277,109 @@ class Box {
     return out;
   }
   async noteYears() { return [...(await this.list()).keys()].map(k => (k.match(/^claude-notes-(\d{4})\.jsonl$/) || [])[1]).filter(Boolean).sort().reverse(); }
+}
+
+// --- Morning brief. A private link returns today's brief as plain text, for an iPhone Shortcut to show or read aloud.
+// It reads one small file the dashboard keeps in the Drive app folder (morning-brief.json: the Big 3, what is due,
+// today's reading, the workout and dinner, and nothing else), so it works with every device turned off. A person
+// makes a link on /brief/setup by signing in with Google. The link is a long random key; only its hash is kept here,
+// beside that sign-in's Google refresh token, sealed, in KV. The file carries an id (mid) that every link must match:
+// turning the brief off in the dashboard deletes the file, which ends every link, and setting it up again starts a new id.
+const BRIEF_FILE = 'morning-brief.json', BRIEF_KEY = /^[A-Za-z0-9_-]{43}$/;
+const BRIEF_GONE = 'This Morning brief link isn’t valid any more. Make a new one in Life Dashboard: Settings & Sync, Morning brief.';
+const SHORTCUT_URL = 'https://9r5wwng7nj-netizen.github.io/Life-Dashboard/assets/shortcuts/Morning-brief.shortcut';
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const textReply = (body, status = 200) => new Response(body, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' } });
+const dayIn = (tz, ms) => { try { const d = new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms)); if (isDate(d)) return d; } catch (e) { } return new Date(ms).toISOString().slice(0, 10); };
+const hourIn = (tz, ms) => { try { const h = +new Intl.DateTimeFormat('en-US', { timeZone: tz || 'UTC', hour: 'numeric', hourCycle: 'h23' }).format(new Date(ms)); if (h >= 0 && h < 24) return h; } catch (e) { } return new Date(ms).getUTCHours(); };
+const longDate = d => `${weekday(d)}, ${MONTHS[+d.slice(5, 7) - 1]} ${+d.slice(8, 10)}`;
+const clock = hm => { const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(hm || '')); if (!m) return ''; const h = +m[1]; return `${h % 12 || 12}${m[2] === '00' ? '' : ':' + m[2]} ${h >= 12 ? 'PM' : 'AM'}`; };
+const spoken = (s, max = 120) => String(s ?? '').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+
+// What the Shortcut reads: short sentences, so it sounds right read aloud. Only the fields below are ever used, whatever
+// else the file holds.
+export function composeBrief(d, nowMs = Date.now()) {
+  const t = dayIn(d.tz, nowMs), out = [], arr = v => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : []);
+  const hour = hourIn(d.tz, nowMs), name = spoken(d.name, 40), age = nowMs - Date.parse(d.made);
+  if (Number.isFinite(age) && age > 36 * 36e5) out.push(`Heads up: your dashboard last synced ${longDate(dayIn(d.tz, Date.parse(d.made)))}, so this may be out of date.`);
+  out.push(`${hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}${name ? ', ' + name : ''}. It’s ${longDate(t)}.`);
+  const big3 = d.big3 && d.big3.monday === mondayOf(t) ? arr(d.big3.items) : [], left = big3.filter(x => !x.done);
+  out.push(!big3.length ? 'You haven’t picked your Big 3 for this week yet.' : left.length ? `Your Big 3 this week: ${left.map(x => spoken(x.title, 90)).join('. ')}.` : 'Your Big 3 are all done this week.');
+  const tasks = arr(d.tasks).filter(x => typeof x.title === 'string' && isDate(x.due));
+  const due = tasks.filter(x => x.due === t).sort((a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || String(a.time || '').localeCompare(String(b.time || '')) || (b.priority === 'high') - (a.priority === 'high'));
+  const late = tasks.filter(x => x.due < t).sort((a, b) => a.due.localeCompare(b.due)), named = x => (x.time && clock(x.time) ? `${spoken(x.title, 90)} at ${clock(x.time)}` : spoken(x.title, 90));
+  out.push(due.length ? `Due today, ${due.length}: ${due.slice(0, 6).map(named).join('. ')}.${due.length > 6 ? ` And ${due.length - 6} more.` : ''}` : 'Nothing is due today.');
+  if (late.length) out.push(late.length <= 3 ? `${late.length} overdue: ${late.map(x => spoken(x.title, 90)).join('. ')}.` : `${late.length} overdue.`);
+  const blocks = arr(d.blocks && d.blocks[t]).sort((a, b) => String(a.start).localeCompare(String(b.start))).slice(0, 4);
+  if (blocks.length) out.push(`On your schedule: ${blocks.map(b => `${clock(b.start)} ${spoken(b.title, 60)}`.trim()).join('. ')}.`);
+  const r = d.reading && typeof d.reading === 'object' ? d.reading : {}, rd = r.days && typeof r.days[t] === 'string' ? spoken(r.days[t], 100) : '';
+  if (rd) {
+    const done = / \(done\)$/.test(rd);
+    out.push(done ? `Today’s reading is done: ${rd.replace(/ \(done\)$/, '')}.` : `Today’s reading: ${rd}.${+r.behind > 0 ? ` You’re ${+r.behind} day${+r.behind === 1 ? '' : 's'} behind.` : +r.streak >= 3 ? ` You’re on a ${+r.streak} day streak.` : ''}`);
+  }
+  if (+r.memoryDue > 0) out.push(`${+r.memoryDue} memory verse${+r.memoryDue === 1 ? ' is' : 's are'} due.`);
+  if (typeof d.workout === 'string' && d.workout.trim()) out.push(`Next workout: ${spoken(d.workout.replace(/\s*\(.*$/, ''), 60)}.`);
+  const dinner = d.dinner && typeof d.dinner[t] === 'string' ? spoken(d.dinner[t], 80) : '';
+  if (dinner) out.push(`Dinner: ${dinner}.`);
+  return out.join('\n').slice(0, 2500);
+}
+
+async function briefSetup(url, env) {
+  const verifier = randomId(32), state = await seal(env, 'state', 900, { bf: 1, gv: verifier });
+  const google = GOOGLE_AUTH + '?' + new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, redirect_uri: url.origin + '/oauth/google', response_type: 'code', scope: DRIVE_SCOPE, access_type: 'offline', prompt: 'select_account consent', state, code_challenge: await sha256(verifier), code_challenge_method: 'S256' });
+  return page('Set up your Morning brief', `<p>Each morning your iPhone can read you a short brief: your Big 3 for the week, what’s due today, today’s Bible reading, your workout and dinner. It works even when your Mac is off.</p>
+<p>Sign in with the Google account your dashboard syncs with. Google will ask to let Life Dashboard see its own app data in your Drive; that is the only access it gets. You’ll then get a private link for a Shortcut on your iPhone.</p>
+<p><strong>Anyone who has the link can read that brief, and nothing else,</strong> so keep it to yourself. You can turn it off at any time in Life Dashboard under Settings &amp; Sync.</p>`, 200, { google });
+}
+
+async function briefFromGoogle(url, env, p, s) {
+  const again = '<p>Nothing was set up. Open Life Dashboard, go to Settings &amp; Sync, and tap Set up Morning brief to try again.</p>';
+  if (p.error || !p.code) return page('Sign-in wasn’t finished', again, 400);
+  const { ok, t } = await googleToken(env, { code: p.code, code_verifier: s.gv, grant_type: 'authorization_code', redirect_uri: url.origin + '/oauth/google' });
+  if (!ok || !t.access_token || !t.refresh_token) return page('Google sign-in failed', again, 400);
+  if (!String(t.scope || DRIVE_SCOPE).split(' ').includes(DRIVE_SCOPE)) return page('Life Dashboard needs its Drive folder', '<p>Google’s screen has a box for Life Dashboard’s own app data in your Drive. Without it the brief can’t be read. Start again and leave that box ticked.</p>', 400);
+  const box = new Box(t.access_token); let mid;
+  try {
+    const have = await box.find(BRIEF_FILE);
+    if (have) { try { mid = JSON.parse(await box.fileText(have.id)).mid; } catch (e) { } } // a second link keeps the same id
+    if (!mid || typeof mid !== 'string') {
+      mid = randomId(9);
+      if (have) await box.call(`/drive/v3/files/${encodeURIComponent(have.id)}`, { method: 'DELETE' });
+      await box.write(BRIEF_FILE, { v: 1, mid, created: new Date().toISOString() });
+    }
+  } catch (e) { return page('Couldn’t reach your Drive folder', '<p>Google Drive didn’t answer. Try again in a minute.</p>', 502); }
+  const key = randomId(32);
+  await env.CONNECTOR_KV.put('b:' + await sha256(key), await seal(env, 'brief', GRANT_TTL, { rt: t.refresh_token, mid, t: now() }), { expirationTtl: GRANT_TTL });
+  return briefReady(url.origin + '/brief/' + key);
+}
+
+function briefReady(link) {
+  const shortcut = 'shortcuts://import-shortcut?' + new URLSearchParams({ url: SHORTCUT_URL, name: 'Morning brief' });
+  const script = "document.getElementById('copy').addEventListener('click',function(){var b=this,i=document.getElementById('link');i.select();var ok=function(){b.textContent='Copied'};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(i.value).then(ok,function(){document.execCommand&&document.execCommand('copy');ok()})}else{document.execCommand&&document.execCommand('copy');ok()}});";
+  return page('Your Morning brief link', `<p>Here is your private link. It is shown only once, so copy it now.</p>
+<p><input id="link" class="link" readonly value="${esc(link)}" aria-label="Your Morning brief link"></p>
+<ol><li>Copy the link.<br><button id="copy" type="button" class="go">Copy link</button></li><li>Add the Shortcut, and paste the link when it asks.<br><a class="go" href="${esc(shortcut)}">Add the Shortcut</a></li><li>Open Life Dashboard once, so it can send its first update.</li><li>In the Shortcuts app, make an Automation (Time of Day) that runs <strong>Morning brief</strong>. Life Dashboard’s Settings &amp; Sync has the steps.</li></ol>
+<p class="muted">Anyone with this link can read your Big 3, what’s due, today’s reading, workout and dinner, and nothing else. Turn it off in Life Dashboard under Settings &amp; Sync.</p>`, 200, null, script);
+}
+
+async function briefRead(key, env) {
+  const h = await sha256(key), raw = await env.CONNECTOR_KV.get('b:' + h), rec = raw && await unseal(env, 'brief', raw);
+  if (!rec) return textReply(BRIEF_GONE, 404);
+  const gone = async why => { await env.CONNECTOR_KV.delete('b:' + h); return textReply(why, 410); };
+  const { ok, t } = await googleToken(env, { grant_type: 'refresh_token', refresh_token: rec.rt });
+  if (!ok || !t.access_token) return t.error === 'invalid_grant' ? gone('Google access for this link was removed. Make a new one in Life Dashboard: Settings & Sync, Morning brief.') : textReply('Google didn’t answer. Try again in a minute.', 503);
+  let d;
+  try {
+    const box = new Box(t.access_token), f = await box.find(BRIEF_FILE);
+    if (!f) return gone('The Morning brief is turned off. Turn it on again in Life Dashboard: Settings & Sync, Morning brief.');
+    d = JSON.parse(await box.fileText(f.id));
+  } catch (e) { return textReply('Couldn’t read the dashboard’s brief just now. Open Life Dashboard once, then try again.', 502); }
+  if (!d || typeof d !== 'object' || d.mid !== rec.mid) return gone('This Morning brief link was turned off. Make a new one in Life Dashboard: Settings & Sync, Morning brief.');
+  // Keep an unused link alive, and keep Google's newest refresh token if it sent one.
+  const next = t.refresh_token && t.refresh_token !== rec.rt ? { ...rec, rt: t.refresh_token, t: now() } : now() - (rec.t || 0) > DAY ? { ...rec, t: now() } : null;
+  if (next) await env.CONNECTOR_KV.put('b:' + h, await seal(env, 'brief', GRANT_TTL, next), { expirationTtl: GRANT_TTL });
+  if (!d.made) return textReply('Almost ready. Open Life Dashboard once so it can send its first update, then run this again.');
+  try { return textReply(composeBrief(d)); } catch (e) { return textReply('Couldn’t read the dashboard’s brief just now. Open Life Dashboard once, then try again.', 502); }
 }
 
 // --- MCP over plain JSON POSTs (no streams, no sessions).
@@ -512,13 +629,14 @@ const TOOLS = [
 ];
 
 // --- A small page for the sign-in steps that happen in the browser.
-function page(title, html, status = 200, links = null) {
-  const buttons = links ? `<p class="row"><a class="go" href="${esc(links.google)}">Continue with Google</a><a class="no" href="${esc(links.cancel)}">Cancel</a></p>` : '';
+function page(title, html, status = 200, links = null, script = '') {
+  const buttons = links ? `<p class="row"><a class="go" href="${esc(links.google)}">Continue with Google</a>${links.cancel ? `<a class="no" href="${esc(links.cancel)}">Cancel</a>` : ''}</p>` : '', nonce = script ? randomId(12) : '';
   return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>
 :root{color-scheme:light dark;--bg:#f1f5f9;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--brand:#0f766e}
 @media (prefers-color-scheme:dark){:root{--bg:#020617;--card:#0f172a;--ink:#e2e8f0;--muted:#94a3b8;--line:#1e293b;--brand:#2dd4bf}}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:32rem;margin:2rem auto;padding:1.5rem;background:var(--card);border:1px solid var(--line);border-radius:1rem}
 @media (max-width:540px){main{margin:1rem;padding:1.25rem}}h1{font-size:1.3rem;line-height:1.3;margin:0 0 .75rem}ul{padding-left:1.2rem}.muted{color:var(--muted);font-size:.9rem}
 .row{display:flex;gap:.75rem;flex-wrap:wrap;margin-top:1.25rem}a{display:inline-block;padding:.65rem 1.1rem;border-radius:.75rem;text-decoration:none;font-weight:600}.go{background:var(--brand);color:#fff}.no{color:var(--ink);border:1px solid var(--line)}
-@media (prefers-color-scheme:dark){.go{color:#042f2e}}</style></head><body><main><h1>${esc(title)}</h1>${html}${buttons}</main></body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY' } });
+button.go{border:0;font:inherit;font-weight:600;cursor:pointer;padding:.65rem 1.1rem;border-radius:.75rem}input.link{width:100%;box-sizing:border-box;font:13px ui-monospace,Menlo,monospace;padding:.6rem;border:1px solid var(--line);border-radius:.5rem;background:var(--bg);color:var(--ink)}ol{padding-left:1.2rem}ol li{margin-bottom:.75rem}ol .go{margin-top:.4rem}
+@media (prefers-color-scheme:dark){.go{color:#042f2e}}</style></head><body><main><h1>${esc(title)}</h1>${html}${buttons}</main>${script ? `<script nonce="${nonce}">${script}</script>` : ''}</body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; ${nonce ? `script-src 'nonce-${nonce}'; ` : ''}base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY' } });
 }

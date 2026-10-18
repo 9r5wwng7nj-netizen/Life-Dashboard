@@ -7626,6 +7626,10 @@ const A_SHARE = {
 // would notice; each device shows the newest one once, as a card on the dashboard. A slide can show
 // a picture from assets/whatsnew/ (give it alt text) and a `go` shortcut: [view, ui key, tab, label].
 const RELEASES = [
+  { id: '2026-10-18c', title: 'A morning brief on your iPhone', slides: [
+    { title: 'Hear your day', body: '<p>Your iPhone can read you a short brief each morning: your Big 3 for the week, what’s due today, today’s Bible reading, your workout and dinner. It works even when your Mac is off.</p><p>It leaves out your notes, prayers, journal, food and weight.</p>' },
+    { title: 'Setting it up', body: '<p>In <strong>Settings &amp; Sync</strong>, tap <strong>Set up Morning brief</strong>, sign in with Google and copy your private link. Then tap <strong>Add the shortcut</strong>, paste the link when it asks, and in the Shortcuts app add a daily <strong>Time of Day</strong> automation that runs it.</p><p>Anyone with your link can hear that brief, so keep it private. <strong>Turn off</strong> ends every link at once.</p>' }
+  ] },
   { id: '2026-10-18b', title: 'Claude can tidy your task list', slides: [
     { title: 'Park or reschedule tasks from Claude', body: '<p>If Claude is connected to your dashboard, you can ask it to tidy your tasks: “Park the prep tasks that aren’t tied to an event” or “Move the dentist task to next Tuesday at 3.” Claude can now move a task to <strong>Someday</strong> or give it a new date and time.</p><p>When it parks a task, the old date is kept in the task’s notes (“Was due 2026-10-24”), so nothing is lost. It still can’t delete anything, and changes arrive the next time the dashboard syncs.</p>' }
   ] },
@@ -8059,8 +8063,31 @@ async function driveSave(id, snap, name = DRIVE.file) {
 const CLAUDE_MARK = 'claude-connected.json', CLAUDE_INBOX = 'claude-inbox-', CLAUDE_FILE = /^claude-(now\.json|(days|workouts|notes)-\d{4}\.jsonl)$/;
 const claudeMeta = () => { try { return JSON.parse(localStorage.getItem('ld.claude') || '{}'); } catch (e) { return {}; } };
 const setClaudeMeta = patch => { try { localStorage.setItem('ld.claude', JSON.stringify({ ...claudeMeta(), ...patch })); } catch (e) { } };
+// --- Morning brief (reader/connector.js). The Worker serves a private link an iPhone Shortcut reads. It creates morning-brief.json
+// in the Drive folder when the person sets a link up; from then on each sync keeps it filled in with only what the brief reads
+// (briefCopy). Deleting the file (Turn off) ends every link.
+const BRIEF_FILE = 'morning-brief.json', BRIEF_SHORTCUT = 'https://9r5wwng7nj-netizen.github.io/Life-Dashboard/assets/shortcuts/Morning-brief.shortcut';
+const briefMeta = () => { try { return JSON.parse(localStorage.getItem('ld.brief') || '{}'); } catch (e) { return {}; } };
+const setBriefMeta = patch => { try { localStorage.setItem('ld.brief', JSON.stringify({ ...briefMeta(), ...patch })); } catch (e) { } };
 const claudeHash = async s => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].slice(0, 12).map(b => b.toString(16).padStart(2, '0')).join('');
 // The copy Claude reads, as file name → contents. Weights and volumes are in the person's unit.
+// The next workout in the active program, and today's Bible reading (with the days ahead on a paced plan) and memory verses due:
+// as the copies for Claude and for the Morning brief keep them.
+const copyLean = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length)));
+function nextWorkoutLabel() {
+  const folder = routineFolders().find(x => x.name && x.routines.length && programInfo(x.name) && !/complete|Starts/.test(programInfo(x.name))), nextW = folder && nextInFolder(folder);
+  return nextW ? `${nextW.name} (${folder.name}, ${programInfo(folder.name)})` : undefined;
+}
+function copyReading(t) {
+  const rp = activePlan(), mem = Store.get('memory'); let reading;
+  if (rp) {
+    const kind = planKind(rp), label = i => planDayText(rp, i) + (rp.done[i] ? ' (done)' : ''), rd = {};
+    if (kind === 'paced') { for (let j = 0; j < 7; j++) { const d = addDays(t, j), i = daysBetween(rp.start, d); if (i >= 0 && i < planLen(rp)) rd[d] = label(i); } } else rd[t] = label(planFocusIdx(rp));
+    reading = copyLean({ plan: rp.name, kind: kind === 'paced' ? undefined : kind, days: rd, streak: readingStreak(), behind: planBehind(rp) || undefined });
+  }
+  if (mem.length) reading = { ...(reading || {}), memoryDue: memDue().length, memoryTotal: mem.length };
+  return reading;
+}
 function claudeCopy() {
   const t = ymd(), out = new Map(), un = kg => kg == null ? undefined : round(toUnit(kg), 1);
   const lean = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length)));
@@ -8081,14 +8108,7 @@ function claudeCopy() {
     const mins = w.end ? Math.round((new Date(w.end) - new Date(w.start)) / 60000) : 0;
     return lean({ d: wDate(w), id: w.id, name: w.name || 'Workout', min: mins > 0 ? mins : undefined, sets: workoutSets(w), vol: round(toUnit(workoutVolume(w)), 0) || undefined, ex: (w.exercises || []).map(e => { const type = exInfo(e.name).type, ws = workSets(e); return [e.name, ws.map(s => setLabel(s, type)).join(', '), ws.length ? setLabel(bestSet(e, type), type) : '']; }), note: w.notes ? String(w.notes).slice(0, 500) : undefined });
   });
-  const aw = Store.get('activeWorkout'), folder = routineFolders().find(x => x.name && x.routines.length && programInfo(x.name) && !/complete|Starts/.test(programInfo(x.name))), nextW = folder && nextInFolder(folder);
-  const rp = activePlan(), mem = Store.get('memory'); let reading;
-  if (rp) {
-    const kind = planKind(rp), label = i => planDayText(rp, i) + (rp.done[i] ? ' (done)' : ''), rd = {};
-    if (kind === 'paced') { for (let j = 0; j < 7; j++) { const d = addDays(t, j), i = daysBetween(rp.start, d); if (i >= 0 && i < planLen(rp)) rd[d] = label(i); } } else rd[t] = label(planFocusIdx(rp));
-    reading = lean({ plan: rp.name, kind: kind === 'paced' ? undefined : kind, days: rd, streak: readingStreak(), behind: planBehind(rp) || undefined });
-  }
-  if (mem.length) reading = { ...(reading || {}), memoryDue: memDue().length, memoryTotal: mem.length };
+  const aw = Store.get('activeWorkout'), nextW = nextWorkoutLabel(), reading = copyReading(t);
   const fk = Store.get('fkit') || {}, gifts = Store.get('gifts'), fdates = [], soon = addDays(t, 60);
   FP().forEach(p => { const d = p.birthday && nextOccur(p.birthday); if (d && d <= soon) fdates.push({ d, what: `${p.name}’s birthday` }); });
   if (fk.anniversary) { const d = nextOccur(fk.anniversary); if (d && d <= soon) fdates.push({ d, what: 'Anniversary' }); }
@@ -8100,7 +8120,7 @@ function claudeCopy() {
     tasks, done, projects, week: { monday: wk, big3: big3(wk).map(x => ({ id: x.id, title: x.title, done: !tOpen(x) })), notes: wr.notes || undefined, planned: wr.planned ? true : undefined }, blocks,
     food: days.filter(d => d.d >= addDays(t, -14)),
     weight: tr.length ? lean({ unit: S.unit, trend: un(last), change7: change(7), change30: change(30), last: weightSeries().filter(p => p.d >= recent).map(p => ({ d: p.d, w: un(p.w) })) }) : undefined,
-    workouts: lean({ active: aw ? aw.name || 'Workout' : undefined, next: nextW ? `${nextW.name} (${folder.name}, ${programInfo(folder.name)})` : undefined, recent: workouts.filter(w => w.d >= addDays(t, -14)) }),
+    workouts: lean({ active: aw ? aw.name || 'Workout' : undefined, next: nextW, recent: workouts.filter(w => w.d >= addDays(t, -14)) }),
     reading, prayers: Store.get('prayers').filter(p => !p.answered).sort((a, b) => (a.lastPrayed || '').localeCompare(b.lastPrayed || '')).map(p => lean({ id: p.id, title: p.title, details: p.details ? String(p.details).slice(0, 400) : undefined, cat: p.cat, since: dateOf(p.created), lastPrayed: dateOf(p.lastPrayed), count: p.count || undefined })),
     family: FP().length || fk.anniversary ? lean({ people: FP().map(p => lean({ name: p.name, role: p.role, birthday: p.birthday, loveLanguages: p.loveLang, favorites: p.favorites, sizes: p.sizes, notes: p.notes ? String(p.notes).slice(0, 600) : undefined, prayer: p.prayer, giftIdeas: gifts.filter(g => g.personId === p.id && g.status !== 'given').map(g => g.idea + (g.status === 'bought' ? ' (bought)' : '')) })), anniversary: fk.anniversary, dates: fdates.sort((a, b) => a.d.localeCompare(b.d)) }) : undefined,
     meals: { plan, grocery: Store.get('grocery').map(g => lean({ name: g.name, qty: g.qty, unit: g.unit, done: g.checked || undefined })), recipes: Store.get('recipes').slice(0, 500).map(r => lean({ id: r.id, title: r.title, servings: r.servings, cal: r.cal, p: r.p, c: r.c, f: r.f, tags: r.tags, fav: r.fav || undefined })) },
@@ -8135,6 +8155,40 @@ async function claudeShare(files) {
   }
   for (const [name, list] of mine) if (!want.has(name)) { for (const f of list) await del(f.id); delete hashes[name]; }
   setClaudeMeta({ on: true, at: new Date().toISOString(), files: hashes, error: '' });
+}
+// What the Morning brief reads (composeBrief in reader/connector.js): the Big 3, what is due, today's reading, the workout and
+// dinner, and nothing else. A task's notes, people, prayers, journal, food and weight never go in it.
+function briefCopy() {
+  const t = ymd(), wk = weekKeyT(), blocks = {}, dinner = {};
+  const tasks = TK().filter(x => tOpen(x) && !x.someday && !x.waiting && x.due && x.due >= addDays(t, -60) && x.due <= addDays(t, 7)).sort(sortT).slice(0, 120)
+    .map(x => copyLean({ title: String(x.title || '').slice(0, 120), due: x.due, time: x.time, priority: x.priority === 'high' ? 'high' : undefined }));
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(t, i), bs = blocksOn(d), dn = mpItems(d).find(it => it.slot === 'dinner');
+    if (bs.length) blocks[d] = bs.map(b => ({ start: b.start, mins: +b.mins || 30, title: String(blockLabel(b)).slice(0, 80) }));
+    if (dn) dinner[d] = String(planItemLabel(dn)).slice(0, 80);
+  }
+  const r = copyReading(t) || {}, days = { ...(r.days || {}) };
+  if (r.kind && days[t] && !days[addDays(t, 1)]) days[addDays(t, 1)] = days[t]; // a plan with no dates reads the same tomorrow morning
+  return copyLean({ tz: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined, name: S.name || undefined, big3: { monday: wk, items: big3(wk).map(x => ({ title: String(x.title || '').slice(0, 120), done: !tOpen(x) })) },
+    tasks, blocks, dinner, workout: nextWorkoutLabel(), reading: copyLean({ plan: r.plan, days, streak: r.streak, behind: r.behind, memoryDue: r.memoryDue }) });
+}
+// Keeps morning-brief.json up to date while it exists in Drive (the Worker makes it when a link is set up, with an id that
+// every link has to match; this takes that id and writes it back with each update). Without the file there is no brief.
+async function briefShare(files) {
+  const mine = files.filter(f => f.name === BRIEF_FILE).sort((a, b) => (b.createdTime || '').localeCompare(a.createdTime || ''));
+  if (!mine.length) { if (briefMeta().on) setBriefMeta({ on: false, mid: '', fileId: '', hash: '', at: '' }); return; }
+  const f = mine[0]; let m = briefMeta();
+  if (m.fileId !== f.id || !m.mid) {
+    let j = {}; try { j = JSON.parse(await (await driveFetch(`/drive/v3/files/${encodeURIComponent(f.id)}?alt=media`)).text()); } catch (e) { }
+    if (!j.mid) throw new Error('The Morning brief file has no id yet. Set the link up again.');
+    m = { fileId: f.id, mid: j.mid, hash: '', at: '' };
+  }
+  const data = briefCopy(), hash = await claudeHash(JSON.stringify(data));
+  if (hash !== m.hash || Date.now() - Date.parse(m.at || 0) > 3600e3) { // unchanged copies are still refreshed hourly, so its "made" time stays true
+    await driveFetch(`/upload/drive/v3/files/${encodeURIComponent(f.id)}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ v: 1, mid: m.mid, made: new Date().toISOString(), ...data }) });
+    m = { ...m, hash, at: new Date().toISOString() };
+  }
+  setBriefMeta({ ...m, on: true, error: '' });
 }
 // One addition from Claude, checked like anything typed. Its record id comes from the inbox id, so a second
 // device taking the same file in adds nothing. Returns what was added, or null.
@@ -8250,6 +8304,7 @@ const Sync = {
         try { claudeChanged = await this.claude(files); } catch (e) { setClaudeMeta({ error: e.message }); }
         try { if (await this.photos(files)) photosChanged = true; } catch (e) { setSyncMeta({ photoError: e.message }); }
         try { await claudeShare(files); } catch (e) { setClaudeMeta({ error: e.message }); }
+        try { await briefShare(files); } catch (e) { setBriefMeta({ error: e.message }); }
       }
       if (changed || photosChanged || claudeChanged) { ensureSeeds(); sortWorkouts(); render(); }
       if (announce) toast(changed ? 'Synced. This device was updated.' : 'Synced');
@@ -8368,7 +8423,8 @@ function syncBox() {
     ${m.refresh ? '<p class="text-xs muted">This device stays signed in to Google; Stop syncing signs it out.</p>' : ''}
     <p class="text-xs muted">${m.copied ? `A dated copy of your records is kept in Drive each day (latest: ${fmtDate(m.copied)}).` : 'Each day, the first sync also keeps a dated copy of your records in Drive.'} Copies cover the last 7 days, then one a week for 8 weeks.${m.copyError ? ` The last copy could not be made: ${esc(m.copyError)}` : ''}</p>
     <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-sm" data-action="syncNow" ${Sync.busy ? 'disabled' : ''}>${icon('refresh-cw', 'w-3.5 h-3.5')} Sync now</button><button type="button" class="btn btn-sm" data-action="syncCopies">${icon('history', 'w-3.5 h-3.5')} Restore from a copy…</button><button type="button" class="btn btn-sm" data-action="syncDisconnect">${icon('cloud-off', 'w-3.5 h-3.5')} Stop syncing this device</button></div>
-    <div class="border-t border-slate-200 dark:border-slate-800 pt-3 space-y-2">${claudeBox()}</div>`;
+    <div class="border-t border-slate-200 dark:border-slate-800 pt-3 space-y-2">${claudeBox()}</div>
+    <div class="border-t border-slate-200 dark:border-slate-800 pt-3 space-y-2">${briefBox()}</div>`;
 }
 // Claude, through the connector on the reader Worker. The address is the same for everyone; each person signs in
 // with their own Google account and Claude only ever reaches that account's dashboard.
@@ -8380,6 +8436,16 @@ function claudeBox() {
   return `<p class="text-sm">${icon('sparkles', 'w-4 h-4 inline')} Ask Claude about your dashboard</p>
     <p class="text-xs muted">If you use Claude, it can answer questions about your records and add tasks, food, weight, prayer requests, journal entries and groceries. In Claude, add a custom connector with this address, then sign in with the Google account you sync with.</p>
     <div class="flex gap-2"><input class="input text-sm" readonly value="${esc(READER.url)}/mcp" aria-label="Claude connector address"><button type="button" class="btn btn-sm shrink-0" data-action="claudeCopyUrl">${icon('copy', 'w-3.5 h-3.5')} Copy</button></div>`;
+}
+function briefBox() {
+  const b = briefMeta(), setup = `${READER.url}/brief/setup`, add = 'shortcuts://import-shortcut?' + new URLSearchParams({ url: BRIEF_SHORTCUT, name: 'Morning brief' });
+  if (b.on) return `<p class="text-sm">${icon('sunrise', 'w-4 h-4 inline')} Morning brief is on</p>
+    <p class="text-xs muted">Your iPhone can read you today’s Big 3, what’s due, today’s reading, workout and dinner, even when your Mac is off. A small file for it is kept in the same private Drive folder${b.at ? `, last updated ${esc(fmtDateTime(b.at))}` : ''}. Anyone with your brief link can read just that, and nothing else.${b.error ? ` The last update stopped: ${esc(b.error)}` : ''}</p>
+    <div class="flex flex-wrap gap-2"><a class="btn btn-sm" href="${esc(setup)}" target="_blank" rel="noopener">${icon('link', 'w-3.5 h-3.5')} Make another link</a><a class="btn btn-sm" href="${esc(add)}">${icon('plus', 'w-3.5 h-3.5')} Add the shortcut</a><button type="button" class="btn btn-sm" data-action="briefStop">${icon('circle-stop', 'w-3.5 h-3.5')} Turn off</button></div>
+    <p class="text-xs muted">To have it every morning, open the Shortcuts app on your iPhone: Automation, then +, Time of Day, pick a time, Run Immediately, and choose <strong>Morning brief</strong>.</p>`;
+  return `<p class="text-sm">${icon('sunrise', 'w-4 h-4 inline')} Morning brief on your iPhone</p>
+    <p class="text-xs muted">Each morning your iPhone can read you today’s Big 3, what’s due, today’s reading, your workout and dinner, even when your Mac is off. You sign in with Google once to get a private link for a Shortcut. Come back here afterwards; it turns on at the next sync.</p>
+    <a class="btn btn-sm btn-primary" href="${esc(setup)}" target="_blank" rel="noopener">${icon('sunrise', 'w-3.5 h-3.5')} Set up Morning brief</a>`;
 }
 // The first sync on a device that finds an existing Drive copy has no shared base, so ask.
 function syncAskFirst() {
@@ -8393,6 +8459,12 @@ const A_SYNC = {
   claudeStop: async () => {
     if (!confirm('Stop sharing with Claude? This removes the copy Claude reads from your Drive folder. Remove the connector in Claude’s settings too, or using it will share again.')) return;
     try { for (const f of await driveList()) if (f.name === CLAUDE_MARK || CLAUDE_FILE.test(f.name || '')) await driveFetch(`/drive/v3/files/${encodeURIComponent(f.id)}`, { method: 'DELETE' }); setClaudeMeta({ on: false, files: {}, error: '' }); toast('Claude no longer has a copy to read'); }
+    catch (e) { toast(e.message, 'error'); }
+    Sync.draw();
+  },
+  briefStop: async () => {
+    if (!confirm('Turn off the Morning brief? Every brief link stops working. You can set it up again at any time.')) return;
+    try { for (const f of await driveList()) if (f.name === BRIEF_FILE) await driveFetch(`/drive/v3/files/${encodeURIComponent(f.id)}`, { method: 'DELETE' }); setBriefMeta({ on: false, mid: '', fileId: '', hash: '', at: '', error: '' }); toast('Morning brief turned off'); }
     catch (e) { toast(e.message, 'error'); }
     Sync.draw();
   },
