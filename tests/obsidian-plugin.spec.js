@@ -58,6 +58,7 @@ test('notes are sorted into shelves, projects gather their notes, and teaching d
   expect(hub.members.map(m => m.title)).toEqual(['Manuscript', 'Development', 'Outline']); // dated first
   expect([hub.done, hub.total, hub.note.count]).toEqual([1, 3, 3]);
   expect(lib.working.title).toBe('John 13 - October 28, 2026');
+  expect(lib.alsoWorking.map(n => n.title)).toEqual(['Connect Group']); // an Active project, after the dated sermon
   expect([lib.working.status, lib.working.statusLabel, lib.working.cover, lib.working.kind]).toEqual(['week', 'This week', 'John 13', 'Sermon']);
   expect(lib.byPath.get('Library/Sermons/Advent 2025.md').statusLabel).toBe('Preached');
   expect(lib.byPath.get('Projects/John 13 - October 28, 2026/Outline.md').statusLabel).toBe('Done'); // supporting notes are "Done"
@@ -93,16 +94,77 @@ test('the bridge only takes well-formed messages from the dashboard’s own addr
 test('New sermon makes a hub note and a manuscript that links to it, in the vault’s property names', () => {
   const s = core.sermonNotes({ passage: 'Luke 15:11-32', title: 'The Father Who Runs', date: '2026-11-08', series: 'Parables' }, TODAY);
   expect(s.folder).toBe('Luke 15 11-32 - 2026-11-08');
-  expect(s.hub.content).toContain('type: project\nproject_kind: sermon\nstatus: planned');
+  expect(s.hub.content).toContain('type: project\nproject_kind: sermon\nstatus: active');
   expect(s.hub.content).toContain('preaching_date: "2026-11-08"');
   expect(s.hub.content).toContain('scripture: "Luke 15:11-32"');
-  expect(s.manuscript.content).toContain('type: sermon\nstatus: draft');
+  expect(s.manuscript.content).toContain('type: sermon\nstatus: active');
   expect(s.manuscript.content).toContain(`project: "[[${s.hub.name}]]"`);
   expect(s.hub.content).not.toContain('area:');
   const linked = core.sermonNotes({ passage: 'Luke 15:11-32' }, TODAY, '[[Preaching]]');
   expect(linked.hub.content).toContain('domain: ministry\narea: "[[Preaching]]"\n');
   const fm = core.noteInfo({ path: 'x.md', basename: 'x' }, { type: 'project', project_kind: 'sermon', preaching_date: '2026-11-08' }, TODAY);
   expect(fm.family).toBe('sermon');
+});
+
+test('five statuses: every word a note already uses is read as Idea, Active, Ready, Waiting or Done', () => {
+  const read = (fm, family = 'sermon', date = '', today = TODAY) => core.noteInfo({ path: 'x.md', basename: 'x' }, { type: { sermon: 'sermon', series: 'project', book: 'book', article: 'article' }[family], status: fm, ...(date ? { date } : {}) }, today);
+  const keys = w => read(w).status;
+  expect(core.STATUS_CHOICES.map(c => c[1])).toEqual(['Idea', 'Active', 'Ready', 'Waiting', 'Done']);
+  expect(core.STATUS_CHOICES.map(c => c[2])).toEqual(['idea', 'active', 'ready', 'waiting', 'done']); // the words Set status writes
+  for (const w of ['idea', 'planned', 'proposed', 'someday', 'unprocessed', 'imported', 'captured']) expect(keys(w), w).toBe('idea');
+  for (const w of ['active', 'draft', 'in-progress', 'In Progress', 'writing', 'processing', 'review', 'open', 'live', 'reading']) expect(keys(w), w).toBe('active');
+  for (const w of ['ready', 'final', 'scheduled', 'prepared']) expect(keys(w), w).toBe('ready');
+  for (const w of ['waiting', 'on-hold', 'paused']) expect(keys(w), w).toBe('waiting');
+  for (const w of ['done', 'preached', 'taught', 'complete', 'processed', 'archived', 'read']) expect(keys(w), w).toBe('done');
+  expect(keys('percolating')).toBe('active'); // a word nobody planned for is read as Active
+  expect(keys('')).toBe('');
+  // Labels: one word per status, with Preached / Taught / Planned / To read / Reading / Read where the note itself is that kind of thing.
+  expect(read('done').statusLabel).toBe('Preached');
+  expect(read('active').statusLabel).toBe('Active');
+  expect(read('waiting').statusLabel).toBe('Waiting');
+  expect(read('planned', 'series').statusLabel).toBe('Planned');
+  expect(read('active', 'series').statusLabel).toBe('Active');
+  expect([read('saved', 'book').statusLabel, read('reading', 'book').statusLabel, read('read', 'article').statusLabel]).toEqual(['To read', 'Reading', 'Read']);
+  // Teaching that is paused stays Waiting even when its date is close; unfinished teaching close by is "This week".
+  expect(read('waiting', 'sermon', '2026-10-26').statusLabel).toBe('Waiting');
+  expect(read('active', 'sermon', '2026-10-26').statusLabel).toBe('This week');
+  // A CCLE-style session note keeps its date in session_date.
+  expect(core.noteInfo({ path: 'x.md', basename: 'x' }, { type: 'session-preparation', status: 'in-progress', session_date: '2026-10-18' }, '2026-10-18')).toMatchObject({ date: '2026-10-18', status: 'week', family: 'study' });
+});
+
+test('Working on now: dated teaching first, then other teaching and Active projects, five at most', () => {
+  const T = '2026-10-18', day = 864e5, base = Date.parse(T);
+  const files = [
+    ['P/John 13/John 13.md', { type: 'project', project_kind: 'sermon', status: 'active', preaching_date: '2026-10-28' }, base - 9 * day],
+    ['P/John 13/Manuscript.md', { type: 'sermon', status: 'active', project: '[[John 13]]' }, base - day], // inside a project: shown through the project
+    ['P/CCLE/CCLE.md', { type: 'project', status: 'active' }, base - 8 * day],
+    ['P/CCLE/Reality 5.md', { type: 'session-preparation', status: 'in-progress', session_date: '2026-10-18', project: '[[CCLE]]' }, base - 1 * day], // keeps CCLE recent
+    ['P/Connect/Connect.md', { type: 'project', status: 'active' }, base - 5 * day],
+    ['P/Freshman/Freshman.md', { type: 'project', status: 'ready' }, base - 20 * day],
+    ['P/Leaders/Leaders.md', { type: 'project', status: 'active' }, base - 30 * day],
+    ['P/Business/Business.md', { type: 'project', status: 'active' }, base - 40 * day],
+    ['P/Paused/Paused.md', { type: 'project', status: 'waiting' }, base],
+    ['P/Someday/Someday.md', { type: 'project', status: 'idea' }, base],
+    ['P/Finished/Finished.md', { type: 'project', status: 'done' }, base],
+    ['P/NoStatus/NoStatus.md', { type: 'project' }, base],
+    ['Sermons/Next Sunday.md', { type: 'sermon', status: 'ready', date: '2026-10-25' }, base - 3 * day],
+    ['Sermons/Old draft.md', { type: 'sermon', status: 'draft', date: '2026-09-01' }, base], // its date has passed
+    ['Sermons/Parked.md', { type: 'sermon', status: 'waiting', date: '2026-10-26' }, base],
+    ['Areas/Home.md', { type: 'area', status: 'active' }, base]
+  ];
+  const lib = core.buildLibrary(notesFor(core, files, T), { today: T, ignoreFolders: [] });
+  // Dated first, soonest first (the sermon on the 25th, then the one on the 28th); the rest by when each was last touched,
+  // counting the notes inside it (CCLE's Reality 5 was edited yesterday).
+  expect(lib.working.title).toBe('Next Sunday');
+  expect(lib.alsoWorking.map(n => n.title)).toEqual(['John 13', 'CCLE', 'Connect', 'Freshman']);
+  const none = core.buildLibrary(notesFor(core, [['P/Paused/Paused.md', { type: 'project', status: 'waiting' }, 1]], T), { today: T, ignoreFolders: [] });
+  expect([none.working, none.alsoWorking]).toEqual([null, []]);
+  // Undated Active projects only: the one touched most recently is the big card.
+  const only = core.buildLibrary(notesFor(core, files.filter(f => !f[0].startsWith('Sermons/') && !f[0].includes('John 13')), T), { today: T, ignoreFolders: [] });
+  expect(only.working.title).toBe('CCLE');
+  expect(only.alsoWorking.map(n => n.title)).toEqual(['Connect', 'Freshman', 'Leaders', 'Business']);
+  // The weekly review lists the same projects as under way.
+  expect(notesFor(core, files, T).filter(n => n.hub && core.underWay(n)).map(n => n.title).sort()).toEqual(['Business', 'CCLE', 'Connect', 'Freshman', 'John 13', 'Leaders']);
 });
 
 test('the Library draws on phone and desktop widths, light and dark, and its buttons open notes', async ({ page }) => {
@@ -126,10 +188,18 @@ test('the Library draws on phone and desktop widths, light and dark, and its but
     await expect(page.locator('.ldl-working')).toContainText('1 of 3 notes done');
     await expect(page.locator('.ldl-card')).toHaveCount(6);
     // Even under Obsidian's button rule: covers in a shelf start level, and long titles stay inside their cover.
-    const tops = await page.locator('.ldl-section').first().locator('.ldl-cover').evaluateAll(cs => cs.map(c => Math.round(c.getBoundingClientRect().top)));
+    const tops = await page.locator('.ldl-section:has(.ldl-shelf)').first().locator('.ldl-cover').evaluateAll(cs => cs.map(c => Math.round(c.getBoundingClientRect().top)));
     expect(new Set(tops).size).toBe(1);
     expect(await page.locator('.ldl-cover-title').evaluateAll(ts => ts.every(t => t.scrollWidth <= t.parentElement.clientWidth))).toBe(true);
     if (shots) await page.screenshot({ path: `${shots}/library-${w}-${theme}.png` });
+    const also = page.locator('.ldl-section', { hasText: 'Also in progress' });
+    await expect(also.locator('.ldl-row')).toHaveCount(1);
+    await expect(also).toContainText('Connect Group');
+    await expect(also).toContainText('2 notes');
+    await expect(also.locator('.ldl-chip')).toHaveText('Active');
+    await also.locator('.ldl-row').click(); // a project row opens its project page
+    await expect(page.locator('.ldl-band')).toContainText('Connect Group');
+    await page.locator('.ldl-back').first().click();
     await page.locator('.ldl-card', { hasText: 'The Practice of Prayer' }).click();
     expect(await page.evaluate(() => window.opened)).toEqual(['Library/Books/The Practice of Prayer.md']);
     await page.locator('.ldl-working .ldl-btn').click(); // opens the sermon's project page

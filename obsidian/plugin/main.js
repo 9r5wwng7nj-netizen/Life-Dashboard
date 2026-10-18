@@ -31,21 +31,24 @@ const core = (() => {
   // Deep cover colours with white text (all at least 7:1), picked per title so shelves look varied but stable.
   const PALETTE = ['#134e4a', '#1e3a5f', '#5b2a4a', '#2f4a2a', '#7c4a12', '#3b3355', '#7f1d1d', '#1f4e5f'];
 
-  // Status words people use, folded into a few that read the same everywhere.
+  // Five statuses: Idea, Active, Ready, Waiting, Done. Every status word a note already uses is read as one of them,
+  // so nothing needs rewriting; Set status and new notes write only these five words.
   const STATUS_WORDS = {
-    idea: ['idea', 'planned', 'proposed', 'someday', 'backlog', 'unprocessed', 'new', 'not started'],
-    draft: ['draft', 'active', 'in-progress', 'in progress', 'writing', 'outlining', 'started', 'processing', 'drafting', 'review'],
+    idea: ['idea', 'planned', 'proposed', 'someday', 'backlog', 'unprocessed', 'new', 'not started', 'captured', 'imported', 'unread', 'saved', 'to-read', 'to read', 'queued'],
+    active: ['active', 'draft', 'in-progress', 'in progress', 'writing', 'outlining', 'started', 'processing', 'drafting', 'review', 'open', 'live', 'reading'],
     ready: ['ready', 'final', 'scheduled', 'prepared'],
-    done: ['done', 'taught', 'preached', 'complete', 'completed', 'delivered', 'processed', 'archived', 'finished'],
-    toread: ['unread', 'saved', 'to-read', 'to read', 'queued'],
-    read: ['read']
+    waiting: ['waiting', 'on-hold', 'on hold', 'paused'],
+    done: ['done', 'taught', 'preached', 'complete', 'completed', 'delivered', 'processed', 'archived', 'finished', 'read']
   };
   const STATUS_OF = Object.fromEntries(Object.entries(STATUS_WORDS).flatMap(([k, ws]) => ws.map(w => [w, k])));
-  const STATUS_LABEL = { idea: 'Idea', draft: 'Draft', week: 'This week', ready: 'Ready', done: 'Done', toread: 'To read', read: 'Read' };
+  const STATUS_LABEL = { idea: 'Idea', active: 'Active', week: 'This week', ready: 'Ready', waiting: 'Waiting', done: 'Done' };
   const DONE_LABEL = { sermon: 'Preached', study: 'Taught' };
-  const SERIES_LABEL = { idea: 'Planned', draft: 'Active' }; // a series or project is under way, not drafted
+  const SERIES_LABEL = { idea: 'Planned' };
+  const SOURCE_LABEL = { idea: 'To read', active: 'Reading', done: 'Read' }; // a book, article or podcast
   // The order Set status offers, and the word it writes into the note.
-  const STATUS_CHOICES = [['idea', 'Idea', 'idea'], ['draft', 'Draft', 'draft'], ['ready', 'Ready', 'ready'], ['done', 'Done', 'done']];
+  const STATUS_CHOICES = [['idea', 'Idea', 'idea'], ['active', 'Active', 'active'], ['ready', 'Ready', 'ready'], ['waiting', 'Waiting', 'waiting'], ['done', 'Done', 'done']];
+  // Under way: not an idea, not paused and not finished (a note with no status isn't counted).
+  const underWay = n => ['active', 'ready', 'week'].includes(n.status);
 
   const pad = n => String(n).padStart(2, '0');
   const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -84,12 +87,13 @@ const core = (() => {
   }
   function statusOf(fm, family, date, today) {
     const raw = String(fm.status || '').trim().toLowerCase(), type = String(fm.type || '').toLowerCase();
-    let key = STATUS_OF[raw] || (raw ? 'draft' : '');
-    // Teaching that is not finished and falls in the next 7 days is "This week".
-    if (TEACHING.includes(family) && key !== 'done' && date && date >= today && date <= addDays(today, 6)) key = 'week';
+    let key = STATUS_OF[raw] || (raw ? 'active' : ''); // a word nobody planned for is read as Active
+    // Teaching that is not finished or paused and falls in the next 7 days is "This week".
+    if (TEACHING.includes(family) && key !== 'done' && key !== 'waiting' && date && date >= today && date <= addDays(today, 6)) key = 'week';
     // "Preached" / "Taught" belong to the sermon or lesson itself; an outline or development note is just "Done".
     const delivered = (family === 'sermon' && ['sermon', 'project'].includes(type)) || family === 'study';
-    const label = key === 'done' && delivered ? DONE_LABEL[family] : family === 'series' && SERIES_LABEL[key] ? SERIES_LABEL[key] : (STATUS_LABEL[key] || '');
+    const source = family === 'book' || family === 'article';
+    const label = key === 'done' && delivered ? DONE_LABEL[family] : source && SOURCE_LABEL[key] ? SOURCE_LABEL[key] : family === 'series' && SERIES_LABEL[key] ? SERIES_LABEL[key] : (STATUS_LABEL[key] || '');
     return { key, label };
   }
 
@@ -98,7 +102,7 @@ const core = (() => {
     fm = fm || {};
     if (!fm.type && fm.granola_id) fm = { ...fm, type: 'meeting-source' }; // Granola notes that arrived without a type
     const family = familyOf(fm);
-    const date = isoDate(fm.preaching_date || fm.date || fm.due || fm.published);
+    const date = isoDate(fm.preaching_date || fm.session_date || fm.date || fm.due || fm.published);
     const status = statusOf(fm, family, date, today);
     const title = String(fm.title || file.basename);
     return {
@@ -194,12 +198,16 @@ const core = (() => {
     const newest = (a, b) => (b.date || '').localeCompare(a.date || '') || b.mtime - a.mtime;
     const bookItems = books ? books.books.filter(b => !inFolder(b.path, ignore)) : [];
     const shelves = order.filter(f => FAMILIES[f]).map(f => ({ id: f, label: FAMILIES[f].label, items: [...seen.filter(n => onShelf(n) && n.family === f && !(books && books.byPath.has(n.path))).sort(newest), ...bookItems.filter(b => b.family === f).sort((a, b) => naturalCmp(a.group || '', b.group || '') || naturalCmp(a.title, b.title))] })).filter(s => s.items.length);
-    // Working on now: the next unfinished sermon or study with a date from today on, else the latest one touched.
-    const open = seen.filter(n => TEACHING.includes(n.family) && !n.hubPath && n.status !== 'done' && n.status !== 'idea');
-    const upcoming = open.filter(n => n.date && n.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-    const working = upcoming[0] || open.filter(n => !n.date || n.date >= today).sort((a, b) => b.mtime - a.mtime)[0] || null;
+    // Working on now: what is under way. A sermon or study that isn't finished, paused or only an idea (and isn't past its date),
+    // or a project marked Active or Ready. Dated teaching comes first, soonest first, then the rest by when each, or
+    // anything in its project, was last touched. The first is the big card; the next four are "Also in progress".
+    const current = n => !n.hubPath && (TEACHING.includes(n.family) ? !['done', 'idea', 'waiting'].includes(n.status) && (!n.date || n.date >= today) : n.hub && n.family === 'series' && underWay(n));
+    const upNext = n => !!n.date && n.date >= today;
+    const touched = n => Math.max(n.mtime || 0, ...(hubs.has(n.path) ? hubs.get(n.path).members.map(m => m.mtime || 0) : []));
+    const underway = seen.filter(current).sort((a, b) => (upNext(b) - upNext(a)) || (upNext(a) && upNext(b) ? a.date.localeCompare(b.date) : 0) || touched(b) - touched(a) || a.title.localeCompare(b.title));
+    const working = underway[0] || null, alsoWorking = underway.slice(1, 5);
     const recent = seen.filter(n => n.family || n.mtime).sort((a, b) => b.mtime - a.mtime).slice(0, 6);
-    return { today, shelves, working, workingHub: working && hubs.get(working.path) || null, recent, hubs, byPath };
+    return { today, shelves, working, alsoWorking, workingHub: working && hubs.get(working.path) || null, recent, hubs, byPath };
   }
   // Search: titles, passages and series; best matches first (title start, then title, then the rest).
   function search(notes, q, ignore) {
@@ -244,8 +252,8 @@ const core = (() => {
     const fm = obj => '---\n' + Object.entries(obj).map(([k, v]) => `${k}: ${v === '' ? '' : yamlValue(v)}`.trimEnd()).join('\n') + '\n---\n';
     return {
       folder: name,
-      hub: { name: hubName, content: fm({ type: 'project', project_kind: 'sermon', status: 'planned', created: today, domain: 'ministry', ...(plain(area) ? { area: `[[${plain(area)}]]` } : {}), preaching_date: date || '', scripture: passage || '', series: series || '', title: title || '' }) + `\n# ${title || passage || 'Sermon'}\n\n## Big idea\n\n## Prep\n- [ ] Read and pray through ${passage || 'the passage'}\n- [ ] Outline\n- [ ] Illustrations\n- [ ] Manuscript\n` },
-      manuscript: { name: msName, content: fm({ type: 'sermon', status: 'draft', created: today, date: date || '', project: `[[${hubName}]]`, scripture: passage || '', series: series || '' }) + `\n# ${title || passage || 'Sermon'}\n\n` }
+      hub: { name: hubName, content: fm({ type: 'project', project_kind: 'sermon', status: 'active', created: today, domain: 'ministry', ...(plain(area) ? { area: `[[${plain(area)}]]` } : {}), preaching_date: date || '', scripture: passage || '', series: series || '', title: title || '' }) + `\n# ${title || passage || 'Sermon'}\n\n## Big idea\n\n## Prep\n- [ ] Read and pray through ${passage || 'the passage'}\n- [ ] Outline\n- [ ] Illustrations\n- [ ] Manuscript\n` },
+      manuscript: { name: msName, content: fm({ type: 'sermon', status: 'active', created: today, date: date || '', project: `[[${hubName}]]`, scripture: passage || '', series: series || '' }) + `\n# ${title || passage || 'Sermon'}\n\n` }
     };
   }
 
@@ -421,8 +429,7 @@ const core = (() => {
 
   // --- Vault health: what is worth a look, from the notes plus lists the plugin gathers (links that go nowhere,
   // to-dos still in notes, Granola attendees with no profile). It only reports; nothing in a note changes.
-  const STATUS_EXTRA = ['waiting', 'on-hold', 'paused', 'live', 'imported', 'captured'];
-  const knownStatus = s => !s || !!STATUS_OF[s] || STATUS_EXTRA.includes(s);
+  const knownStatus = s => !s || !!STATUS_OF[s];
   // d: { today, skip (folders left out), inBook (paths of books and their chapters, which need no type), broken: [{ path, targets }],
   //      todos: [{ path, count }], attendees: [name], staleDays }
   function healthReport(notes, d) {
@@ -431,10 +438,10 @@ const core = (() => {
     const newest = (a, b) => (b.mtime || 0) - (a.mtime || 0);
     const touched = new Map(); kept.forEach(n => { const k = n.projectPath || n.partOfPath; if (k) touched.set(k, Math.max(touched.get(k) || 0, n.mtime || 0)); });
     const cutoff = Date.parse(d.today) - (d.staleDays || 30) * 864e5;
-    const stale = kept.filter(n => n.hub && ['draft', 'ready'].includes(STATUS_OF[n.rawStatus]) && Math.max(n.mtime || 0, touched.get(n.path) || 0) < cutoff);
+    const stale = kept.filter(n => n.hub && ['active', 'ready'].includes(STATUS_OF[n.rawStatus]) && Math.max(n.mtime || 0, touched.get(n.path) || 0) < cutoff);
     const sections = [
       { id: 'untyped', title: 'Notes with no type', why: 'Without a type a note stays off the shelves and the areas’ live lists.', items: kept.filter(n => !n.type && !inBook.has(n.path)).sort(newest).map(n => item(n, n.folder && n.folder !== '/' ? n.folder : 'Top of the vault')) },
-      { id: 'status', title: 'Status words outside the usual set', why: 'Shelves read these as Draft. Use Set status to pick a usual word.', items: kept.filter(n => !knownStatus(n.rawStatus)).sort(newest).map(n => item(n, `status: ${n.rawStatus}`)) },
+      { id: 'status', title: 'Status words outside the usual set', why: 'Shelves read these as Active. Use Set status to pick one of the five: Idea, Active, Ready, Waiting or Done.', items: kept.filter(n => !knownStatus(n.rawStatus)).sort(newest).map(n => item(n, `status: ${n.rawStatus}`)) },
       { id: 'broken', title: 'Links that go nowhere', why: 'The linked note doesn’t exist: fix the name, or leave it as a note to write.', items: (d.broken || []).filter(b => byPath.has(b.path)).map(b => item(byPath.get(b.path), `${b.targets.slice(0, 3).join(', ')}${b.targets.length > 3 ? ` and ${b.targets.length - 3} more` : ''}`)) },
       { id: 'todos', title: 'To-dos still in notes', why: 'The dashboard keeps the one task list.', action: 'moveTodos', actionLabel: 'Move to-dos to Tasks', items: (d.todos || []).filter(t => byPath.has(t.path)).map(t => item(byPath.get(t.path), `${t.count} to-do${t.count === 1 ? '' : 's'}`)) },
       { id: 'attendees', title: 'Meeting attendees with no profile', why: 'Match each one to a person once and their meetings link up.', action: 'matchAttendee', actionLabel: 'Match an attendee', items: (d.attendees || []).map(a => ({ path: '', title: a, detail: 'Granola attendee' })) },
@@ -519,7 +526,7 @@ const core = (() => {
   // What New sermon tells the dashboard, so it can add the prep tasks (see sermonPrep in the app).
   function sermonPrepMessage(v, s) { return { sermonPrep: { passage: v.passage || '', title: v.title || '', date: isoDate(v.date) || '', hub: s.hub.name, manuscript: s.manuscript.name } }; }
 
-  return { SEND_KINDS, phoneNote, phoneItem, teachingSoon, healthReport, knownStatus, CAPTURE_KINDS, captureNote, noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
+  return { SEND_KINDS, phoneNote, phoneItem, teachingSoon, healthReport, knownStatus, underWay, CAPTURE_KINDS, captureNote, noteTodos, todoText, movedLine, linkAttendees, chapterSubject, shortTitle, buildBooks, bookPlace, parseRules, fileTarget, FINISHED, contentsBlock, setContents, CONTENTS_START, weekOf, weeklyAuto, weeklyNote, replaceAuto, AUTO_START, BIBLE, findRefs, parseRefText, chapterVerses, versesFor, passageCallout, passageNoteText, parseTaught, taughtEntry, parseGroups, scriptureKey, teachable, teachingRecord, taughtBefore, personNote, personNames, actionItems, meetingTasksMessage, sermonPrepMessage, FAMILIES, PALETTE, STATUS_CHOICES, linkTarget, plain, isoDate, fmtDate, coverText, familyOf, statusOf, noteInfo, buildLibrary, search, metaLine, inFolder, readBridge, safeFolder, safeName, sermonNotes, addDays, ymd, BRIDGE_PREFIX };
 })();
 
 /* =============================== 2. render =============================== */
@@ -544,14 +551,15 @@ const render = (() => {
     b.addEventListener('click', () => (n.isBook && on.book ? on.book(n.path) : n.hub && n.count ? on.hub(n.path) : on.open(n.path)));
     return b;
   }
-  function row(doc, n, on, today, num) {
+  // `projects`: a project with notes opens its project page, and its row says how many notes it holds.
+  function row(doc, n, on, today, num, projects) {
     const b = el(doc, 'button', 'ldl-row'); b.type = 'button';
     if (num != null) b.append(el(doc, 'span', 'ldl-row-num', String(num)));
-    const mid = el(doc, 'span', 'ldl-row-text');
+    const mid = el(doc, 'span', 'ldl-row-text'), page = !!projects && n.hub && n.count > 0;
     mid.append(el(doc, 'span', 'ldl-row-title', n.title));
-    const meta = core.metaLine(n, today); if (meta) mid.append(el(doc, 'span', 'ldl-row-meta', meta));
+    const meta = [core.metaLine(n, today), page ? `${n.count} note${n.count === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '); if (meta) mid.append(el(doc, 'span', 'ldl-row-meta', meta));
     b.append(mid); const c = chip(doc, n); if (c) b.append(c);
-    b.addEventListener('click', () => on.open(n.path));
+    b.addEventListener('click', () => (page ? on.hub(n.path) : on.open(n.path)));
     return b;
   }
   function head(doc, kicker, title, q, on) {
@@ -596,6 +604,11 @@ const render = (() => {
       const go = el(doc, 'button', 'ldl-btn ldl-btn-primary', h && h.members.length ? 'Open the project' : 'Keep writing'); go.type = 'button';
       go.addEventListener('click', () => (h && h.members.length ? on.hub(w.path) : on.open(w.path)));
       txt.append(go); wc.append(cover(doc, w, true), txt); root.append(wc);
+    }
+    if (lib.alsoWorking && lib.alsoWorking.length) {
+      const sec = el(doc, 'section', 'ldl-section'); sec.append(el(doc, 'h2', 'ldl-h2', 'Also in progress'));
+      const list = el(doc, 'div', 'ldl-list'); lib.alsoWorking.forEach(n => list.append(row(doc, n, on, lib.today, null, true)));
+      sec.append(list); root.append(sec);
     }
     if (lib.reading && lib.reading.length) {
       const sec = el(doc, 'section', 'ldl-section'); sec.append(el(doc, 'h2', 'ldl-h2', 'Continue reading'));
@@ -1105,7 +1118,7 @@ class LifeDashboardPlugin extends Plugin {
       await this.app.fileManager.processFrontMatter(f, fm => {
         const list = [...new Set([...[].concat(fm.taught || []).map(String), core.taughtEntry(v.date, v.group)])];
         fm.taught = core.parseTaught(list).map(t => core.taughtEntry(t.date, t.group));
-        if (v.done) fm.status = n.family === 'sermon' ? 'preached' : 'taught';
+        if (v.done) fm.status = 'done';
       });
       new Notice(`Recorded: ${v.group}, ${v.date}`);
     }, 'Save').open();
@@ -1414,7 +1427,7 @@ class LifeDashboardPlugin extends Plugin {
     const inbox = this.inboxFolder(), inboxNotes = inbox ? notes.filter(n => n.folder === inbox).map(n => n.title).sort() : [];
     const teaching = notes.filter(n => core.teachable(n) && n.status !== 'done' && n.date && n.date >= monday && n.date <= end).map(n => lib.byPath.get(n.path) || n).sort((a, b) => a.date.localeCompare(b.date));
     const people = notes.filter(n => n.family === 'person' && n.nextContact && n.nextContact <= end).sort((a, b) => a.nextContact.localeCompare(b.nextContact)).slice(0, 15);
-    const projects = notes.filter(n => n.hub && ['active', 'in-progress', 'live'].includes(n.rawStatus)).map(n => lib.byPath.get(n.path) || n).sort((a, b) => a.title.localeCompare(b.title));
+    const projects = notes.filter(n => n.hub && core.underWay(n)).map(n => lib.byPath.get(n.path) || n).sort((a, b) => a.title.localeCompare(b.title));
     const aliases = this.aliasMap(), unknown = [...new Set(notes.filter(n => n.family === 'meeting').flatMap(n => n.people.map(core.linkTarget)).filter(t => t && !aliases.has(t.toLowerCase()) && !this.app.metadataCache.getFirstLinkpathDest(t, '')))].slice(0, 12);
     const stats = Platform.isDesktopApp ? await this.queryDashboard({ weekStats: { monday } }) : null;
     const updated = new Date().toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });

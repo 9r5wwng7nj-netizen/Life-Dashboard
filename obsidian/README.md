@@ -5,9 +5,9 @@ Two pieces that make an Obsidian vault feel like the Life Dashboard: a library y
 | Piece | Folder | What it does |
 |---|---|---|
 | **Life Dashboard** theme | `theme/Life Dashboard/` | The dashboard's look in light and dark: cool greys, teal accent, rounded cards, serif titles, notes shown as pages, bigger rows and text on phones. |
-| **Life Dashboard Library** plugin | `plugin/` | A Library home with a "Working on now" card, shelves of covers, project and series pages, title cards on notes, Set status, New sermon, and the dashboard docked in the sidebar on the Mac. |
+| **Life Dashboard Library** plugin | `plugin/` | A Library home with a "Working on now" card and an "Also in progress" list, shelves of covers, project and series pages, title cards on notes, Set status, New sermon, and the dashboard docked in the sidebar on the Mac. |
 
-The plugin reads the properties notes already have: `type`, `status`, `scripture` (or `passage`), `date` / `preaching_date`, `project`, `series`. It changes a note only when you ask it to (Set status, New sermon).
+The plugin reads the properties notes already have: `type`, `status`, `scripture` (or `passage`), `date` / `preaching_date` / `session_date`, `project`, `series`. It changes a note only when you ask it to (Set status, New sermon).
 
 ## How notes are sorted
 
@@ -25,7 +25,19 @@ The plugin reads the properties notes already have: `type`, `status`, `scripture
 
 A project note gathers the notes whose `project` links to it, plus the notes in its folder. Those notes appear on the project's page rather than on shelves, so a sermon shows as one cover, not four.
 
-Statuses are read loosely and shown the same way everywhere: Idea (idea, planned, proposed…), Draft (draft, active, in progress…), Ready, Done (done, complete…; shown as **Preached** or **Taught** on the sermon or lesson itself), To read and Read. Unfinished teaching dated within the next 7 days shows **This week**.
+There are five statuses, and Set status (and every note the plugin makes) writes only these words: **Idea**, **Active**, **Ready**, **Waiting** and **Done**. Notes can keep any word they already have; each is read as one of the five, so nothing needs rewriting:
+
+| Status | Also read from |
+|---|---|
+| Idea | planned, proposed, someday, backlog, unprocessed, imported, captured, unread, saved, to read |
+| Active | draft, in progress, writing, processing, review, open, live, reading (and any word not listed) |
+| Ready | final, scheduled, prepared |
+| Waiting | on hold, paused |
+| Done | complete, preached, taught, processed, archived, read |
+
+A finished sermon or lesson shows **Preached** or **Taught**, a series' idea shows **Planned**, and a book or article shows **To read**, **Reading** or **Read**. Unfinished teaching dated within the next 7 days shows **This week** (automatic; it isn't one you pick).
+
+**Working on now** is what is under way: a sermon or study that isn't an idea, waiting or done (and isn't past its date), or a project whose status is Active or Ready. The big card is the soonest dated teaching, else the thing touched most recently (counting the notes inside a project); the next four are listed under **Also in progress**. To put something there, set its status to Active; to take it off, set it to Waiting or Done.
 
 ## Installing (Mac; Obsidian Sync carries it to the phone)
 
