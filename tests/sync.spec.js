@@ -445,3 +445,52 @@ test('with Claude connected, each sync keeps Claude’s copy fresh and takes in 
   expect([...laptop.errors, ...phone.errors]).toEqual([]);
   await laptop.context.close(); await phone.context.close();
 });
+
+test('the Morning brief: while its file is in Drive each sync fills it in with only what the brief reads, and Turn off removes it for good', async ({ browser }) => {
+  const drive = fakeDrive(), laptop = await device(browser, drive), { page } = laptop;
+  const file = () => drive.copies.find(c => c.name === 'morning-brief.json');
+  await page.evaluate(() => { S.name = 'Sam'; Store.set('tasks', [{ id: 't1', title: 'Call the plumber', notes: 'SECRET-NOTES', status: 'todo', priority: 'med', due: ymd(), tags: [], created: new Date().toISOString(), completedAt: null }]); });
+  expect((await sync(page)).error).toBe('');
+  expect(file()).toBeUndefined(); // nothing is kept until a link has been set up
+  expect(await page.evaluate(() => briefBox())).toContain('Set up Morning brief');
+  expect(await page.evaluate(() => briefBox())).toContain('https://life-dashboard-reader.lifedashboard-9r5w.workers.dev/brief/setup');
+
+  // Setting a link up on the Worker makes the file, with an id. The next sync fills it in and keeps that id.
+  drive.copy('morning-brief.json', JSON.stringify({ v: 1, mid: 'm1', created: new Date().toISOString() }));
+  expect((await sync(page)).error).toBe('');
+  const first = JSON.parse(file().body);
+  expect([first.v, first.mid, first.name, typeof first.made, first.tasks.map(t => t.title)]).toEqual([1, 'm1', 'Sam', 'string', ['Call the plumber']]);
+  expect(file().body).not.toContain('SECRET-NOTES');
+  const box = await page.evaluate(() => briefBox());
+  expect(box).toContain('Morning brief is on');
+  expect(box).toContain('shortcuts://import-shortcut?url=https%3A%2F%2F9r5wwng7nj-netizen.github.io%2FLife-Dashboard%2Fassets%2Fshortcuts%2FMorning-brief.shortcut&amp;name=Morning+brief');
+  expect(box).toContain('Run Immediately');
+
+  // Nothing new inside the hour: not rewritten. A change is.
+  const updates = file().updates || 0;
+  expect((await sync(page)).error).toBe('');
+  expect(file().updates || 0).toBe(updates);
+  await page.evaluate(() => { Store.get('tasks').push({ id: 't2', title: 'Email the elders', notes: '', status: 'todo', priority: 'high', due: ymd(), time: '09:30', tags: [], created: new Date().toISOString(), completedAt: null }); Store.save('tasks'); });
+  expect((await sync(page)).error).toBe('');
+  expect(JSON.parse(file().body).tasks.map(t => [t.title, t.time, t.priority])).toEqual([['Email the elders', '09:30', 'high'], ['Call the plumber', undefined, undefined]]);
+  expect(file().updates || 0).toBe(updates + 1);
+
+  // Turned off and set up again: a new file with a new id is taken up with its own id.
+  await page.evaluate(() => A.briefStop());
+  expect(file()).toBeUndefined();
+  expect(await page.evaluate(() => briefBox())).toContain('Set up Morning brief');
+  expect((await sync(page)).error).toBe('');
+  expect(file()).toBeUndefined(); // syncing doesn't bring it back
+  drive.copy('morning-brief.json', JSON.stringify({ v: 1, mid: 'm2' }));
+  expect((await sync(page)).error).toBe('');
+  expect(JSON.parse(file().body).mid).toBe('m2');
+
+  // A file with no id yet is reported, not guessed, and the sync itself still succeeds.
+  drive.copies = drive.copies.filter(c => c.name !== 'morning-brief.json'); drive.copy('morning-brief.json', '{"v":1}');
+  await page.evaluate(() => setBriefMeta({ fileId: '' }));
+  expect((await sync(page)).error).toBe('');
+  expect(await page.evaluate(() => briefMeta().error)).toContain('no id yet');
+  expect(await page.evaluate(() => briefBox())).toContain('The last update stopped');
+  expect(laptop.errors).toEqual([]);
+  await laptop.context.close();
+});

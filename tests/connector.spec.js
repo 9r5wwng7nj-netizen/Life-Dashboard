@@ -1,9 +1,11 @@
 // The Claude connector on the reader Worker (reader/connector.js), run in Node with Google, Drive and Open Food
 // Facts faked: the sign-in Claude goes through, rotating tokens, each tool against a copy the dashboard would
-// write, the drop box for additions, and disconnecting.
+// write, the drop box for additions, and disconnecting. The Morning brief (a private link an iPhone Shortcut reads) is tested
+// at the end.
 import { test, expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import worker from '../reader/worker.js';
+import { composeBrief } from '../reader/connector.js';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -72,7 +74,7 @@ function setup() {
     if (url.href === 'https://oauth2.googleapis.com/revoke') { revoked.push(String(new URLSearchParams(String(opts.body)).get('token'))); return new Response('', { status: 200 }); }
     if (url.origin === 'https://www.googleapis.com') {
       if (driveRefuses || !/^Bearer gat[12]$/.test(opts.headers?.Authorization || '')) return reply({}, 401);
-      if (method === 'GET' && url.pathname === '/drive/v3/files') return reply({ files: [...drive.values()].filter(f => f.name.includes('claude')).map(({ id, name, modifiedTime }) => ({ id, name, modifiedTime })) });
+      if (method === 'GET' && url.pathname === '/drive/v3/files') { const exact = /name='([^']+)'/.exec(url.searchParams.get('q') || ''); return reply({ files: [...drive.values()].filter(f => exact ? f.name === exact[1] : f.name.includes('claude')).map(({ id, name, modifiedTime }) => ({ id, name, modifiedTime })) }); }
       const m = url.pathname.match(/^\/drive\/v3\/files\/([^/]+)$/);
       if (m && method === 'GET') { const f = drive.get(decodeURIComponent(m[1])); return f ? new Response(f.body) : new Response('', { status: 404 }); }
       if (m && method === 'DELETE') { drive.delete(decodeURIComponent(m[1])); return new Response(null, { status: 204 }); }
@@ -483,4 +485,231 @@ test('Claude’s task edits only touch open tasks, keep the old date when parkin
   expect([r.re.doingDay, r.afterRe.doing.due, r.afterRe.doing.status]).toEqual(['reschedule', day(8), 'doing']);
   expect(r.afterRe.finishedSame).toBe(true);
   expect(errors).toEqual([]);
+});
+
+// --- Morning brief: a private link an iPhone Shortcut opens to get today's brief as plain text.
+const BRIEF = {
+  v: 1, made: new Date().toISOString(), tz: 'UTC', name: 'Sam', mid: '',
+  big3: { monday: MONDAY, items: [{ title: 'Finish the lesson outline', done: false }, { title: 'Plan Friday’s meeting', done: false }, { title: 'Call the plumber', done: true }] },
+  tasks: [
+    { title: 'Order lunch', due: TODAY }, { title: 'Call the bank', due: TODAY, time: '15:30', priority: 'high' }, { title: 'Pick up the kids', due: TODAY, time: '08:00' },
+    { title: 'Send the invoice', due: plus(-2) }, { title: 'Book the dentist', due: plus(3) }
+  ],
+  blocks: { [TODAY]: [{ start: '09:00', mins: 60, title: 'Sermon prep' }, { start: '13:30', mins: 30, title: 'Staff meeting' }] },
+  reading: { plan: 'Bible in a year', days: { [TODAY]: 'Isaiah 40–42' }, streak: 12, memoryDue: 3 },
+  dinner: { [TODAY]: 'Chicken tacos' }, workout: 'Push B (Spring block, week 3)',
+  // Things the dashboard never puts here; the brief must ignore them even if they were.
+  prayers: [{ title: 'Pat’s new job' }], journal: [{ t: 'Slow morning' }], food: [{ d: TODAY, cal: 640 }], weight: { trend: 182.4 }
+};
+async function setUpBrief(s, verifier = 'v'.repeat(50)) {
+  const page = await s.call('/brief/setup'), html = await page.text();
+  const googleUrl = new URL(html.match(/href="(https:\/\/accounts\.google\.com[^"]+)"/)[1].replace(/&amp;/g, '&'));
+  const back = await s.call('/oauth/google?' + new URLSearchParams({ code: 'gcode', state: googleUrl.searchParams.get('state') })), body = await back.text();
+  const link = (body.match(/value="(https:\/\/reader\.example\/brief\/[A-Za-z0-9_-]{43})"/) || [])[1] || '';
+  return { page, html, googleUrl, back, body, link, path: link.replace(ORIGIN, '') };
+}
+const midOf = s => JSON.parse(s.file('morning-brief.json').body).mid;
+const dashboardWrites = (s, extra = {}) => { const f = s.file('morning-brief.json'); f.body = JSON.stringify({ ...BRIEF, mid: midOf(s), made: new Date().toISOString(), ...extra }); };
+
+test('the Morning brief: set up with Google, one private link, a plain-text brief from the dashboard’s small file', async () => {
+  const s = setup();
+  try {
+    const b = await setUpBrief(s);
+    expect(b.page.status).toBe(200);
+    expect(b.html).toContain('Anyone who has the link can read that brief, and nothing else');
+    expect(b.page.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+    expect(Object.fromEntries(b.googleUrl.searchParams)).toMatchObject({ client_id: 'cid', redirect_uri: ORIGIN + '/oauth/google', scope: SCOPE, access_type: 'offline', response_type: 'code', code_challenge_method: 'S256' });
+    expect(s.google[0]).toMatchObject({ grant_type: 'authorization_code', code: 'gcode', redirect_uri: ORIGIN + '/oauth/google' });
+    // The link is shown once, with a Copy button (its one script is nonce'd) and the Shortcut to add.
+    expect(b.back.status).toBe(200);
+    expect(b.link).toMatch(/^https:\/\/reader\.example\/brief\/[A-Za-z0-9_-]{43}$/);
+    const csp = b.back.headers.get('Content-Security-Policy'), nonce = (b.body.match(/<script nonce="([^"]+)"/) || [])[1];
+    expect([!!nonce, csp.includes(`script-src 'nonce-${nonce}'`), b.back.headers.get('Cache-Control')]).toEqual([true, true, 'no-store']);
+    expect(b.body).toContain('shortcuts://import-shortcut?url=https%3A%2F%2F9r5wwng7nj-netizen.github.io%2FLife-Dashboard%2Fassets%2Fshortcuts%2FMorning-brief.shortcut&amp;name=Morning+brief');
+    // The Drive folder gets one small file with an id; only the key's hash and a sealed Google token are kept here.
+    expect(s.file('morning-brief.json')).toBeTruthy();
+    expect(midOf(s)).toBeTruthy();
+    const keyName = [...s.kv.keys()].filter(k => k.startsWith('b:'));
+    expect(keyName).toHaveLength(1);
+    expect(keyName[0]).not.toContain(b.link.split('/').pop());
+    expect(s.kv.get(keyName[0])).not.toContain('grt');
+    // Before the dashboard has written anything, the link says so in plain words.
+    const first = await s.call(b.path);
+    expect([first.status, first.headers.get('Content-Type'), first.headers.get('Cache-Control')]).toEqual([200, 'text/plain; charset=utf-8', 'no-store']);
+    expect(await first.text()).toContain('Open Life Dashboard once so it can send its first update');
+    // Then the dashboard fills the file in.
+    dashboardWrites(s);
+    const brief = await s.call(b.path), text = await brief.text();
+    expect(brief.status).toBe(200);
+    expect(text).toMatch(/^Good (morning|afternoon|evening), Sam\. It’s /);
+    expect(text).toContain('Your Big 3 this week: Finish the lesson outline. Plan Friday’s meeting.'); // the done one is left out
+    expect(text).toContain('Due today, 3: Pick up the kids at 8 AM. Call the bank at 3:30 PM. Order lunch.');
+    expect(text).toContain('1 overdue: Send the invoice.');
+    expect(text).toContain('On your schedule: 9 AM Sermon prep. 1:30 PM Staff meeting.');
+    expect(text).toContain('Today’s reading: Isaiah 40–42. You’re on a 12 day streak.');
+    expect(text).toContain('3 memory verses are due.');
+    expect(text).toContain('Next workout: Push B.');
+    expect(text).toContain('Dinner: Chicken tacos.');
+    expect(text).not.toMatch(/Pat’s new job|Slow morning|640|182/); // prayer, journal, food and weight never appear
+    expect(text).not.toContain('Book the dentist'); // not due today
+    expect(text).not.toContain('Heads up');
+    expect(text.length).toBeLessThan(900);
+  } finally { s.restore(); }
+});
+
+test('Morning brief wording: no Big 3 yet, nothing due, a finished reading, a stale copy, and an odd file', () => {
+  const at = (d, now) => composeBrief({ tz: 'UTC', made: new Date(now).toISOString(), ...d }, now), noon = Date.parse(TODAY + 'T12:00:00Z');
+  const empty = at({}, noon);
+  expect(empty).toContain('You haven’t picked your Big 3 for this week yet.');
+  expect(empty).toContain('Nothing is due today.');
+  expect(empty).not.toMatch(/overdue|reading|workout|Dinner/i);
+  expect(at({ big3: { monday: plus(-14), items: [{ title: 'Old week', done: false }] } }, noon)).toContain('You haven’t picked your Big 3'); // last week's pick doesn't count
+  expect(at({ big3: { monday: MONDAY, items: [{ title: 'A', done: true }] } }, noon)).toContain('Your Big 3 are all done this week.');
+  expect(at({ reading: { days: { [TODAY]: 'Genesis 1–3 (done)' } } }, noon)).toContain('Today’s reading is done: Genesis 1–3.');
+  expect(at({ reading: { days: { [TODAY]: 'Genesis 1–3' }, behind: 2 } }, noon)).toContain('Today’s reading: Genesis 1–3. You’re 2 days behind.');
+  const many = Array.from({ length: 9 }, (_, i) => ({ title: 'Task ' + (i + 1), due: TODAY })), lots = Array.from({ length: 5 }, (_, i) => ({ title: 'Late ' + i, due: plus(-1 - i) }));
+  const busy = at({ tasks: [...many, ...lots] }, noon);
+  expect(busy).toContain('Due today, 9: Task 1. Task 2. Task 3. Task 4. Task 5. Task 6. And 3 more.');
+  expect(busy).toContain('5 overdue.'); // more than three: just the count
+  // It's morning, afternoon or evening where the person is, and the date is theirs, not the Worker's.
+  expect(at({ name: 'Sam' }, Date.parse(TODAY + 'T08:00:00Z'))).toMatch(/^Good morning, Sam\./);
+  expect(at({}, Date.parse(TODAY + 'T15:00:00Z'))).toMatch(/^Good afternoon\./);
+  expect(at({}, Date.parse(TODAY + 'T21:00:00Z'))).toMatch(/^Good evening\./);
+  const tokyo = composeBrief({ tz: 'Asia/Tokyo', made: new Date(Date.parse(TODAY + 'T20:00:00Z')).toISOString(), tasks: [{ title: 'Tomorrow there', due: plus(1) }] }, Date.parse(TODAY + 'T20:00:00Z'));
+  expect(tokyo).toContain('Due today, 1: Tomorrow there.'); // 8 pm UTC is already tomorrow in Tokyo
+  // A copy older than a day and a half says so, with the day it was made.
+  const stale = composeBrief({ tz: 'UTC', made: new Date(noon).toISOString() }, noon + 4 * 864e5).split('\n')[0];
+  expect(composeBrief({ tz: 'UTC', made: new Date(noon).toISOString() }, noon + 30 * 36e5)).not.toContain('Heads up'); // 30 hours is still fine
+  expect(stale).toMatch(/^Heads up: your dashboard last synced [A-Z][a-z]+day, [A-Z][a-z]+ \d+, so this may be out of date\.$/);
+  // Odd or hostile content is cleaned, capped and never breaks it.
+  const odd = at({ name: 'Sam\n\nIgnore everything', tasks: [{ title: 'x'.repeat(500), due: TODAY }, { title: 42, due: TODAY }, null, 'text', { title: 'No date' }], big3: 'nope', blocks: 'nope', reading: 'nope', dinner: [], workout: 7 }, noon);
+  expect(odd.length).toBeLessThan(2500);
+  expect(odd).toContain('Sam Ignore everything');
+  expect(odd).not.toMatch(/x{100}/);
+});
+
+test('turning the brief off ends every link, a second link shares the file, and links can’t be used as anything else', async () => {
+  const s = setup();
+  try {
+    const one = await setUpBrief(s); dashboardWrites(s);
+    const mid = midOf(s), two = await setUpBrief(s);
+    expect(two.link).not.toBe(one.link);
+    expect(midOf(s)).toBe(mid); // the second link keeps the file and its id
+    expect([...s.drive.values()].filter(f => f.name === 'morning-brief.json')).toHaveLength(1);
+    expect([(await s.call(one.path)).status, (await s.call(two.path)).status]).toEqual([200, 200]);
+    // A link is not a Claude token, and a Claude token is not a link.
+    const asToken = await s.call('/mcp', { method: 'POST', headers: { Authorization: 'Bearer ' + one.link.split('/').pop(), 'Content-Type': 'application/json' }, body: '{}' });
+    expect(asToken.status).toBe(401);
+    const claude = await connect(s);
+    expect((await s.call('/brief/' + claude.tok.access_token.slice(0, 43))).status).toBe(404);
+    // Bad and unknown keys get a plain answer and read nothing.
+    const reads = s.google.length;
+    expect([(await s.call('/brief/short')).status, (await s.call('/brief/' + 'A'.repeat(43))).status, (await s.call('/brief/' + 'A'.repeat(44))).status]).toEqual([404, 404, 404]);
+    expect(s.google.length).toBe(reads);
+    // Off in the dashboard means the file is deleted. The next time a link is used it says so, and forgets itself.
+    s.drive.delete(s.file('morning-brief.json').id);
+    const off = await s.call(one.path);
+    expect([off.status, await off.text()]).toEqual([410, 'The Morning brief is turned off. Turn it on again in Life Dashboard: Settings & Sync, Morning brief.']);
+    expect([...s.kv.keys()].filter(k => k.startsWith('b:'))).toHaveLength(1); // the other link is still stored until it's used
+    // Setting it up again starts a new id, so the old links stay dead even though the file is back.
+    const again = await setUpBrief(s); dashboardWrites(s);
+    expect(midOf(s)).not.toBe(mid);
+    expect((await s.call(again.path)).status).toBe(200);
+    const old = await s.call(two.path);
+    expect([old.status, await old.text()]).toEqual([410, 'This Morning brief link was turned off. Make a new one in Life Dashboard: Settings & Sync, Morning brief.']);
+    expect((await s.call(two.path)).status).toBe(404); // gone for good
+  } finally { s.restore(); }
+});
+
+test('Morning brief problems are said in plain words: Google access removed, Google or Drive unavailable, an unfinished or unreadable sign-in', async () => {
+  const s = setup();
+  try {
+    const b = await setUpBrief(s); dashboardWrites(s);
+    s.refuseRefresh(true);
+    const removed = await s.call(b.path);
+    expect([removed.status, await removed.text()]).toEqual([410, 'Google access for this link was removed. Make a new one in Life Dashboard: Settings & Sync, Morning brief.']);
+    expect((await s.call(b.path)).status).toBe(404);
+    s.refuseRefresh(false);
+    const c = await setUpBrief(s); dashboardWrites(s);
+    s.refuseDrive(true);
+    const down = await s.call(c.path);
+    expect([down.status, await down.text()]).toEqual([502, 'Couldn’t read the dashboard’s brief just now. Open Life Dashboard once, then try again.']);
+    s.refuseDrive(false);
+    s.file('morning-brief.json').body = '{not json';
+    expect((await s.call(c.path)).status).toBe(502);
+    // Cancelling on Google's page, or a sign-in that took too long, sets nothing up.
+    const before = s.kv.size, html = await (await s.call('/brief/setup')).text();
+    const state = new URL(html.match(/href="(https:\/\/accounts\.google\.com[^"]+)"/)[1].replace(/&amp;/g, '&')).searchParams.get('state');
+    const denied = await s.call('/oauth/google?' + new URLSearchParams({ error: 'access_denied', state }));
+    expect([denied.status, await denied.text()]).toEqual([400, expect.stringContaining('Nothing was set up')]);
+    const late = await s.call('/oauth/google?' + new URLSearchParams({ code: 'x', state: 'junk' }));
+    expect([late.status, await late.text()]).toEqual([400, expect.stringContaining('try again')]);
+    expect(s.kv.size).toBe(before);
+    // Without the Worker's secrets the brief says it isn't set up.
+    s.env.CONNECTOR_KEY = '';
+    expect((await s.call('/brief/setup')).status).toBe(503);
+    expect([(await s.call('/brief/' + 'A'.repeat(43))).status, await (await s.call('/brief/' + 'A'.repeat(43))).text()]).toEqual([503, 'The Morning brief isn’t set up on this server yet.']);
+  } finally { s.restore(); }
+});
+
+test('Morning brief end to end: the app’s own brief file holds only what the brief reads, and the Worker turns it into the spoken text', async ({ page }) => {
+  const errors = []; page.on('pageerror', e => errors.push(e.message)); page.on('dialog', d => d.accept());
+  await page.goto(pathToFileURL(path.resolve('index.html')).href);
+  await page.waitForFunction(() => typeof Store !== 'undefined' && Store.data && Array.isArray(Store.data.tasks));
+  const brief = await page.evaluate(() => {
+    A.helpDismiss({ dataset: { what: 'tour' } }); S.name = 'Sam';
+    const t = ymd(), at = (d, h) => { const x = parseYmd(d); x.setHours(h); return x.toISOString(); };
+    const task = (id, title, o = {}) => ({ id, title, notes: 'SECRET-NOTES', status: 'todo', priority: 'med', due: t, tags: [], created: at(t, 8), completedAt: null, ...o });
+    Store.set('tasks', [
+      task('t1', 'Call the plumber', { time: '15:00', priority: 'high' }), task('t2', 'Finish lesson outline', { due: addDays(t, -2) }), task('t3', 'Tidy the garage', { due: null, someday: true }),
+      task('t4', 'Wait for the bank', { waiting: true }), task('t5', 'Prep the slides', { due: addDays(t, 3) }), task('t6', 'Renew the passport', { due: addDays(t, 30) }),
+      task('t7', 'Pay the water bill', { status: 'done', completedAt: at(t, 9) })
+    ]);
+    tkit().weeks[weekKeyT()] = { big3: ['t1', 't2', 't7'] }; Store.save('tkit');
+    Store.set('tblocks', { [t]: [{ id: 'b1', start: '09:00', mins: 60, label: 'Sermon prep' }] });
+    Store.set('mealPlan', { [t]: [{ id: 'm1', text: 'Sandwiches', slot: 'lunch' }, { id: 'm2', text: 'Chicken tacos', slot: 'dinner' }] });
+    Store.set('readingPlans', [{ id: 'plan', name: 'Navigators', tpl: 'nav', start: t, done: {} }]);
+    Store.set('prayers', [{ id: 'pr1', title: 'SECRET-PRAYER', details: 'SECRET-PRAYER-DETAILS', cat: 'Friends', created: at(addDays(t, -20), 9), lastPrayed: null, count: 0, answered: null }]);
+    Store.set('journal', [{ id: 'j1', date: t, created: at(t, 7), type: 'journal', title: 'SECRET-JOURNAL', body: 'SECRET-JOURNAL-BODY', tags: [], mood: null, energy: null, photos: [], prayers: [] }]);
+    Store.set('nutrition', { [t]: { weight: 82.6, entries: [{ id: 'e1', name: 'SECRET-FOOD', qty: 1, unit: 'cup', cal: 300, p: 10, c: 54, f: 6, meal: 'breakfast', time: '7:30 AM' }] } });
+    return briefCopy();
+  });
+  // Only what the brief reads goes in the file: no notes, prayers, journal, food or weight, and no one's data beyond the due window.
+  expect(Object.keys(brief).sort()).toEqual(['big3', 'blocks', 'dinner', 'name', 'reading', 'tasks', 'tz']);
+  expect(JSON.stringify(brief)).not.toMatch(/SECRET|82\.6|Tidy the garage|Wait for the bank|Renew the passport|Sandwiches/); // (a finished Big 3 item stays, so the Worker can skip it)
+  expect(brief.tasks.map(t => t.title).sort()).toEqual(['Call the plumber', 'Finish lesson outline', 'Prep the slides']);
+  expect(brief.tasks.find(t => t.title === 'Call the plumber')).toEqual({ title: 'Call the plumber', due: TODAY, time: '15:00', priority: 'high' });
+  expect(brief.big3.items).toEqual([{ title: 'Call the plumber', done: false }, { title: 'Finish lesson outline', done: false }, { title: 'Pay the water bill', done: true }]);
+  expect(brief.reading.days[TODAY]).toBeTruthy();
+  expect(brief.reading.days[plus(1)]).toBe(brief.reading.days[TODAY]); // a plan with no dates reads the same tomorrow morning
+
+  const s = setup();
+  try {
+    const b = await setUpBrief(s);
+    s.file('morning-brief.json').body = JSON.stringify({ v: 1, mid: midOf(s), made: new Date().toISOString(), ...brief });
+    const text = await (await s.call(b.path)).text();
+    expect(text).toMatch(/^Good (morning|afternoon|evening), Sam\./);
+    expect(text).toContain('Your Big 3 this week: Call the plumber. Finish lesson outline.');
+    expect(text).toContain('Due today, 1: Call the plumber at 3 PM.');
+    expect(text).toContain('1 overdue: Finish lesson outline.');
+    expect(text).toContain('On your schedule: 9 AM Sermon prep.');
+    expect(text).toMatch(/^Today’s reading: .+\.$/m);
+    expect(text).toContain('Dinner: Chicken tacos.');
+    expect(text).not.toMatch(/SECRET|Sandwiches|workout/i);
+  } finally { s.restore(); }
+  expect(errors).toEqual([]);
+});
+
+test('disconnecting Claude leaves the Morning brief alone', async () => {
+  const s = setup();
+  try {
+    withCopy(s);
+    const b = await setUpBrief(s); dashboardWrites(s);
+    const c = await connect(s);
+    const gone = await s.call('/oauth/revoke', form({ token: c.tok.refresh_token }));
+    expect(gone.status).toBe(200);
+    expect(s.file('claude-now.json')).toBeUndefined(); // Claude's copy is removed…
+    expect(s.file('morning-brief.json')).toBeTruthy(); // …the brief's file stays
+    expect((await s.call(b.path)).status).toBe(200);
+  } finally { s.restore(); }
 });

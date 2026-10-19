@@ -69,3 +69,12 @@ If you use Claude, you can connect it to your dashboard (Settings & Sync shows t
 - Claude can add tasks, food, weigh-ins, prayer requests, journal entries and grocery items, tick off tasks, and move a task to Someday or to a new date. These wait in the same folder until the next sync, which adds or applies them like anything you type. When Claude moves a task to Someday, its old due date is first written in the task's notes ("Was due 2026-10-24"). Claude can't delete anything or change anything else.
 - What Claude reads becomes part of your conversation in Claude, so Claude's own privacy settings apply to it.
 - **Settings & Sync → Stop sharing with Claude** removes Claude's copy. Remove the connector in Claude's settings too, or using it shares again. Disconnecting in Claude also removes the copy.
+
+
+### Morning brief
+
+If you use an iPhone, the dashboard can have it read you a short brief each morning, even when your Mac is off (Settings & Sync → Set up Morning brief).
+
+- You sign in with Google once, on a page served by the same Cloudflare Worker, and get a private link for a Shortcut. The Worker keeps only a scrambled copy of the link and a sealed Google sign-in for your Drive folder's app data (nothing else in Drive); it can't see anything outside it.
+- While it is on, each sync keeps one small file in the same private Drive folder with just what the brief reads aloud: this week's Big 3, tasks due soon, today's schedule, Bible reading, workout and dinner. It leaves out task notes, prayer requests, the journal, food and weight.
+- **Anyone who has your link can hear that brief and nothing else.** Keep it to yourself. **Settings & Sync → Turn off** deletes the file and every link stops at once. Disconnecting Claude doesn't change it.
